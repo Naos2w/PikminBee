@@ -9,6 +9,7 @@ import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -30,6 +31,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
@@ -61,16 +63,23 @@ import com.naos.pikminbee.data.AppPreferences
 import com.naos.pikminbee.data.MapAppearance
 import com.naos.pikminbee.data.MapProvider
 import com.naos.pikminbee.data.RouteDraftState
+import com.naos.pikminbee.data.SavedRouteState
+import com.naos.pikminbee.data.SavedRoute
+import com.naos.pikminbee.gpx.GpxCodec
+import com.naos.pikminbee.gpx.GpxImport
 import com.naos.pikminbee.domain.Coordinate
 import com.naos.pikminbee.domain.WalkMode
 import com.naos.pikminbee.domain.WalkPhase
 import com.naos.pikminbee.domain.WalkingGeometry
 import com.naos.pikminbee.route.ValhallaPlanner
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.naos.pikminbee.location.LocationStatus
 import com.naos.pikminbee.location.MockLocationService
 import com.naos.pikminbee.ui.LocationMap
 import com.naos.pikminbee.ui.JourneyControls
+import com.naos.pikminbee.ui.RouteLibraryPanel
 import com.naos.pikminbee.ui.WifiControlPanel
 
 private val navy = Color(0xFF18263A)
@@ -124,6 +133,7 @@ private fun PikminBeeScreen() {
     var message by remember { mutableStateOf("地圖點一下就能選擇位置") }
     val roadStops by RouteDraftState.routeStops.collectAsState()
     val flowerStops by RouteDraftState.flowerStops.collectAsState()
+    val savedRoutes by SavedRouteState.routes.collectAsState()
     var planning by remember { mutableStateOf(false) }
     var speed by remember { mutableStateOf(1.4) }
     var flowerLoop by remember { mutableStateOf(true) }
@@ -135,10 +145,89 @@ private fun PikminBeeScreen() {
     val roadLine by LocationStatus.geometry.collectAsState()
     val overlayVisible by LocationStatus.overlayVisible.collectAsState()
 
-    val requestLocation = androidx.activity.compose.rememberLauncherForActivityResult(
+    val requestLocation = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         message = if (granted) "已取得定位權限，可以再次點選瞬移" else "請先授予精確定位權限"
+    }
+
+    var importMode by remember { mutableStateOf(WalkMode.ROUTE) }
+    var exportRouteId by remember { mutableStateOf<String?>(null) }
+    var pendingSimplifiedGpx by remember { mutableStateOf<GpxImport?>(null) }
+
+    fun acceptImportedGpx(imported: GpxImport) {
+        runCatching {
+            val route = prefs.addSavedRoute(imported.name, imported.mode, imported.stops)
+            prefs.loadSavedRouteIntoDraft(route)
+            tab = if (route.mode == WalkMode.FLOWERS) ToolTab.FLOWERS else ToolTab.ROUTE
+            message = "已匯入並收藏「" + route.name + "」，共 " + route.stops.size + " 個路點"
+        }.onFailure {
+            message = "GPX 匯入失敗：" + (it.message ?: "無法儲存收藏")
+        }
+    }
+
+    // Both pickers use Android's Storage Access Framework. No broad storage permission.
+    val importGpx = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) work.launch {
+            try {
+                val imported = withContext(Dispatchers.IO) {
+                    val stream = context.contentResolver.openInputStream(uri)
+                        ?: throw IllegalArgumentException("無法讀取選擇的 GPX 檔案")
+                    stream.use { GpxCodec.decode(it, importMode) }
+                }
+                if (imported.simplified) {
+                    pendingSimplifiedGpx = imported
+                    message = "此 GPX 軌跡需要簡化路點，請確認是否匯入"
+                } else acceptImportedGpx(imported)
+            } catch (e: Exception) {
+                message = "GPX 匯入失敗：" + (e.message ?: "檔案格式無效")
+            }
+        }
+    }
+
+    val exportGpx = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/gpx+xml")
+    ) { uri ->
+        if (uri != null) {
+            val route = savedRoutes.firstOrNull { it.id == exportRouteId }
+            if (route == null) message = "找不到要匯出的收藏路線"
+            else work.launch {
+                try {
+                    withContext(Dispatchers.IO) {
+                        val stream = context.contentResolver.openOutputStream(uri, "wt")
+                            ?: throw IllegalArgumentException("無法寫入選取的位置")
+                        stream.use { it.write(GpxCodec.encode(route)) }
+                    }
+                    message = "已匯出「" + route.name + "」為 GPX"
+                } catch (e: Exception) {
+                    message = "GPX 匯出失敗：" + (e.message ?: "儲存失敗")
+                }
+            }
+            exportRouteId = null
+        }
+    }
+
+    fun saveRoute(name: String, mode: WalkMode, stops: List<Coordinate>): Boolean =
+        runCatching {
+            val item = prefs.addSavedRoute(name, mode, stops)
+            message = "已收藏「" + item.name + "」，共 " + item.stops.size + " 個路點"
+        }.onFailure { message = "無法收藏路線：" + (it.message ?: "儲存錯誤") }.isSuccess
+
+    fun renameRoute(route: SavedRoute, name: String): Boolean =
+        runCatching {
+            check(prefs.renameSavedRoute(route.id, name)) { "路線已不存在" }
+            message = "已修改路線名稱"
+        }.onFailure { message = "無法改名：" + (it.message ?: "儲存錯誤") }.isSuccess
+
+    fun loadRoute(route: SavedRoute) {
+        prefs.loadSavedRouteIntoDraft(route)
+        tab = if (route.mode == WalkMode.FLOWERS) ToolTab.FLOWERS else ToolTab.ROUTE
+        message = "已載入「" + route.name + "」的路點，沒有啟動行走"
+    }
+
+    fun deleteRoute(route: SavedRoute) {
+        message = if (prefs.deleteSavedRoute(route.id)) "已刪除「" + route.name + "」"
+            else "找不到要刪除的路線"
     }
 
     LaunchedEffect(selected) {
@@ -350,38 +439,70 @@ private fun PikminBeeScreen() {
                                     }
                                 }
                             }
-                            ToolTab.ROUTE -> JourneyControls(
-                                mode = WalkMode.ROUTE,
-                                stops = roadStops,
-                                origin = mockPosition ?: roadStops.firstOrNull() ?: selected,
-                                activeMode = walkMode,
-                                phase = walkPhase,
-                                foreground = foreground, muted = muted,
-                                onUndo = {
-                                    prefs.saveRouteDraft(roadStops.dropLast(1))
-                                },
-                                onClear = {
-                                    prefs.saveRouteDraft(emptyList())
-                                },
-                                onMessage = { message = it },
-                                onAskLocation = { requestLocation.launch(Manifest.permission.ACCESS_FINE_LOCATION) },
-                            )
-                            ToolTab.FLOWERS -> JourneyControls(
-                                mode = WalkMode.FLOWERS,
-                                stops = flowerStops,
-                                origin = mockPosition ?: flowerStops.firstOrNull() ?: selected,
-                                activeMode = walkMode,
-                                phase = walkPhase,
-                                foreground = foreground, muted = muted,
-                                onUndo = {
-                                    prefs.saveFlowerDraft(flowerStops.dropLast(1))
-                                },
-                                onClear = {
-                                    prefs.saveFlowerDraft(emptyList())
-                                },
-                                onMessage = { message = it },
-                                onAskLocation = { requestLocation.launch(Manifest.permission.ACCESS_FINE_LOCATION) },
-                            )
+                            ToolTab.ROUTE -> {
+                                JourneyControls(
+                                    mode = WalkMode.ROUTE,
+                                    stops = roadStops,
+                                    origin = mockPosition ?: roadStops.firstOrNull() ?: selected,
+                                    activeMode = walkMode,
+                                    phase = walkPhase,
+                                    foreground = foreground, muted = muted,
+                                    onUndo = { prefs.saveRouteDraft(roadStops.dropLast(1)) },
+                                    onClear = { prefs.saveRouteDraft(emptyList()) },
+                                    onMessage = { message = it },
+                                    onAskLocation = { requestLocation.launch(Manifest.permission.ACCESS_FINE_LOCATION) },
+                                )
+                                RouteLibraryPanel(
+                                    mode = WalkMode.ROUTE, draft = roadStops,
+                                    routes = savedRoutes.filter { it.mode == WalkMode.ROUTE },
+                                    foreground = foreground, muted = muted,
+                                    onSave = { name -> saveRoute(name, WalkMode.ROUTE, roadStops) },
+                                    onRename = ::renameRoute,
+                                    onLoad = ::loadRoute,
+                                    onExport = { route ->
+                                        exportRouteId = route.id
+                                        exportGpx.launch(route.fileName())
+                                    },
+                                    onDelete = ::deleteRoute,
+                                    onImport = {
+                                        importMode = WalkMode.ROUTE
+                                        importGpx.launch(arrayOf("application/gpx+xml", "application/xml",
+                                            "text/xml", "*/*"))
+                                    },
+                                )
+                            }
+                            ToolTab.FLOWERS -> {
+                                JourneyControls(
+                                    mode = WalkMode.FLOWERS,
+                                    stops = flowerStops,
+                                    origin = mockPosition ?: flowerStops.firstOrNull() ?: selected,
+                                    activeMode = walkMode,
+                                    phase = walkPhase,
+                                    foreground = foreground, muted = muted,
+                                    onUndo = { prefs.saveFlowerDraft(flowerStops.dropLast(1)) },
+                                    onClear = { prefs.saveFlowerDraft(emptyList()) },
+                                    onMessage = { message = it },
+                                    onAskLocation = { requestLocation.launch(Manifest.permission.ACCESS_FINE_LOCATION) },
+                                )
+                                RouteLibraryPanel(
+                                    mode = WalkMode.FLOWERS, draft = flowerStops,
+                                    routes = savedRoutes.filter { it.mode == WalkMode.FLOWERS },
+                                    foreground = foreground, muted = muted,
+                                    onSave = { name -> saveRoute(name, WalkMode.FLOWERS, flowerStops) },
+                                    onRename = ::renameRoute,
+                                    onLoad = ::loadRoute,
+                                    onExport = { route ->
+                                        exportRouteId = route.id
+                                        exportGpx.launch(route.fileName())
+                                    },
+                                    onDelete = ::deleteRoute,
+                                    onImport = {
+                                        importMode = WalkMode.FLOWERS
+                                        importGpx.launch(arrayOf("application/gpx+xml", "application/xml",
+                                            "text/xml", "*/*"))
+                                    },
+                                )
+                            }
                         }
                         TextButton(onClick = {
                             when {
@@ -415,6 +536,31 @@ private fun PikminBeeScreen() {
                     }
                 }
             }
+        }
+        pendingSimplifiedGpx?.let { candidate ->
+            AlertDialog(
+                onDismissRequest = { pendingSimplifiedGpx = null },
+                title = { Text("簡化 GPX 軌跡再匯入？") },
+                text = {
+                    Text(
+                        "原始軌跡有 " + candidate.originalPoints + " 個點，將保留 " +
+                            candidate.stops.size + " 個主要路點。這不會原樣重播 GPX 軌跡；" +
+                            "之後開始行走時仍需重新規劃行人道路。"
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        acceptImportedGpx(candidate)
+                        pendingSimplifiedGpx = null
+                    }) { Text("確認匯入") }
+                },
+                dismissButton = {
+                    TextButton(onClick = {
+                        pendingSimplifiedGpx = null
+                        message = "已取消匯入，原有收藏與路點不變"
+                    }) { Text("取消") }
+                },
+            )
         }
     }
 }
