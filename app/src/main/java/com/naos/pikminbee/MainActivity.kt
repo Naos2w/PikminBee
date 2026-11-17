@@ -60,6 +60,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.naos.pikminbee.data.AppPreferences
+import com.naos.pikminbee.flower.FlowerCatalogStore
+import com.naos.pikminbee.flower.FlowerCatalogState
+import com.naos.pikminbee.flower.FlowerFinder
+import com.naos.pikminbee.flower.FlowerJsonCodec
+import com.naos.pikminbee.flower.FlowerImport
 import com.naos.pikminbee.data.MapAppearance
 import com.naos.pikminbee.data.MapProvider
 import com.naos.pikminbee.data.RouteDraftState
@@ -82,6 +87,7 @@ import com.naos.pikminbee.location.MockLocationService
 import com.naos.pikminbee.ui.LocationMap
 import com.naos.pikminbee.ui.JourneyControls
 import com.naos.pikminbee.ui.RouteLibraryPanel
+import com.naos.pikminbee.ui.FlowerCatalogPanel
 import com.naos.pikminbee.ui.WifiControlPanel
 import com.naos.pikminbee.ui.BackgroundSessionPanel
 
@@ -116,6 +122,8 @@ private fun FrostedCard(dark: Boolean, modifier: Modifier = Modifier, content: @
 private fun PikminBeeScreen() {
     val context = LocalContext.current
     val prefs = remember(context) { AppPreferences(context) }
+    val flowerCatalog = remember(context) { FlowerCatalogStore(context) }
+    val allFlowers by FlowerCatalogState.spots.collectAsState()
     remember(context) { SessionJournal(context).also { it.read() } }
     val checkpoint by CheckpointStatus.last.collectAsState()
     val systemDark = androidx.compose.foundation.isSystemInDarkTheme()
@@ -159,6 +167,7 @@ private fun PikminBeeScreen() {
     var importMode by remember { mutableStateOf(WalkMode.ROUTE) }
     var exportRouteId by remember { mutableStateOf<String?>(null) }
     var pendingSimplifiedGpx by remember { mutableStateOf<GpxImport?>(null) }
+    var pendingFlowerImport by remember { mutableStateOf<FlowerImport?>(null) }
 
     fun acceptImportedGpx(imported: GpxImport) {
         runCatching {
@@ -212,6 +221,43 @@ private fun PikminBeeScreen() {
         }
     }
 
+    val importFlowers = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) work.launch {
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    val source = context.contentResolver.openInputStream(uri)
+                        ?: throw IllegalArgumentException("無法讀取選擇的花點檔案")
+                    source.use { FlowerJsonCodec.decode(it) }
+                }
+                pendingFlowerImport = result
+                message = "檢查匯入來源與花點數量，再選擇是否加入"
+            } catch (e: Exception) {
+                message = "花點匯入失敗：" + (e.message ?: "檔案無效")
+            }
+        }
+    }
+
+    val exportFlowers = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/geo+json")
+    ) { uri ->
+        if (uri != null) work.launch {
+            try {
+                val snapshot = flowerCatalog.all()
+                val contents = withContext(Dispatchers.Default) {
+                    FlowerJsonCodec.encodeGeoJson(snapshot)
+                }
+                withContext(Dispatchers.IO) {
+                    val stream = context.contentResolver.openOutputStream(uri, "wt")
+                        ?: throw IllegalArgumentException("無法寫入選取的位置")
+                    stream.use { it.write(contents) }
+                }
+                message = "已匯出 " + snapshot.size + " 個使用者記錄的候選花點"
+            } catch (e: Exception) {
+                message = "花點匯出失敗：" + (e.message ?: "檔案無法寫入")
+            }
+        }
+    }
+
     fun saveRoute(name: String, mode: WalkMode, stops: List<Coordinate>): Boolean =
         runCatching {
             val item = prefs.addSavedRoute(name, mode, stops)
@@ -246,7 +292,7 @@ private fun PikminBeeScreen() {
                 provider = provider, dark = dark,
                 selected = mockPosition ?: when (tab) {
                     ToolTab.ROUTE -> roadStops.firstOrNull() ?: selected
-                    ToolTab.FLOWERS -> flowerStops.firstOrNull() ?: selected
+                    ToolTab.FLOWERS -> selected
                     else -> selected
                 },
                 stops = when (tab) {
@@ -255,6 +301,9 @@ private fun PikminBeeScreen() {
                     else -> emptyList()
                 },
                 road = roadLine,
+                flowerSpots = if (tab == ToolTab.FLOWERS) FlowerFinder.nearby(
+                    selected, allFlowers, 5000.0, maxCount = 100
+                ) else emptyList(),
                 onPick = { point ->
                     when (tab) {
                         ToolTab.ROUTE -> {
@@ -264,6 +313,7 @@ private fun PikminBeeScreen() {
                             } else message = "最多只能加入 15 個路點"
                         }
                         ToolTab.FLOWERS -> {
+                            selected = point
                             if (flowerStops.size < 15) {
                                 prefs.saveFlowerDraft(flowerStops + point)
                                 message = "已標記第 ${flowerStops.size + 1} 個花點"
@@ -489,6 +539,57 @@ private fun PikminBeeScreen() {
                                     onMessage = { message = it },
                                     onAskLocation = { requestLocation.launch(Manifest.permission.ACCESS_FINE_LOCATION) },
                                 )
+                                FlowerCatalogPanel(
+                                    spots = allFlowers,
+                                    origin = mockPosition ?: selected,
+                                    selected = selected,
+                                    draft = flowerStops,
+                                    foreground = foreground, muted = muted,
+                                    onRecord = { name, point ->
+                                        runCatching { flowerCatalog.addManual(name, point) }
+                                            .onSuccess { message = "已記錄／本人確認「" + it.name + "」" }
+                                            .onFailure { message = "無法記錄花點：" + it.message }
+                                    },
+                                    onMarkChecked = { flower ->
+                                        if (flowerCatalog.markChecked(flower.id)) {
+                                            message = "已將「" + flower.name + "」標為本人確認"
+                                        }
+                                    },
+                                    onRemove = { flower ->
+                                        if (flowerCatalog.remove(flower.id)) {
+                                            message = "已移除花點「" + flower.name + "」"
+                                        }
+                                    },
+                                    onAddStop = { flower ->
+                                        val candidate = FlowerFinder.appendToDraft(
+                                            mockPosition ?: selected, flowerStops, listOf(flower), 14
+                                        )
+                                        if (candidate.size == flowerStops.size) {
+                                            message = "此花點已在路線內，或已達花點數量上限"
+                                        } else {
+                                            prefs.saveFlowerDraft(candidate)
+                                            message = "已將「" + flower.name + "」加入尋花路線"
+                                        }
+                                    },
+                                    onAppendNearby = { candidates ->
+                                        val added = FlowerFinder.appendToDraft(
+                                            mockPosition ?: selected, flowerStops, candidates, 14
+                                        )
+                                        if (added.size == flowerStops.size) {
+                                            message = "附近沒有可加入的新花點"
+                                        } else {
+                                            prefs.saveFlowerDraft(added)
+                                            message = "已新增 " + (added.size - flowerStops.size) +
+                                                " 個候選花點；開始行走前會重新規劃道路"
+                                        }
+                                    },
+                                    onImport = {
+                                        importFlowers.launch(arrayOf("application/json", "application/geo+json", "*/*"))
+                                    },
+                                    onExport = {
+                                        exportFlowers.launch("PikminBee-flowers.geojson")
+                                    },
+                                )
                                 RouteLibraryPanel(
                                     mode = WalkMode.FLOWERS, draft = flowerStops,
                                     routes = savedRoutes.filter { it.mode == WalkMode.FLOWERS },
@@ -573,6 +674,38 @@ private fun PikminBeeScreen() {
                     TextButton(onClick = {
                         pendingSimplifiedGpx = null
                         message = "已取消匯入，原有收藏與路點不變"
+                    }) { Text("取消") }
+                },
+            )
+        }
+        pendingFlowerImport?.let { candidate ->
+            AlertDialog(
+                onDismissRequest = { pendingFlowerImport = null },
+                title = { Text("匯入使用者提供的花點？") },
+                text = {
+                    Text(
+                        "檔案格式：" + candidate.source +
+                            "。標記花點 " + candidate.spots.size + " 筆，略過非花點 " +
+                            candidate.ignored + " 筆。匯入資料全部標示「待確認」，" +
+                            "不會當成 Pikmin Bloom 官方即時大花，也不會自動開始行走。"
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        runCatching { flowerCatalog.importCandidates(candidate) }
+                            .onSuccess { result ->
+                                message = "花點匯入完成：新增 " + result.added +
+                                    " 筆，略過近距離重複 " + result.duplicates + " 筆"
+                            }.onFailure {
+                                message = "花點匯入失敗：" + (it.message ?: "無法保存")
+                            }
+                        pendingFlowerImport = null
+                    }) { Text("確認匯入") }
+                },
+                dismissButton = {
+                    TextButton(onClick = {
+                        pendingFlowerImport = null
+                        message = "已取消花點匯入，原有資料不變"
                     }) { Text("取消") }
                 },
             )

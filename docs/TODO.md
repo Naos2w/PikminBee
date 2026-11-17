@@ -14,7 +14,7 @@
 ## v0.2 — Walking and flower-search
 - [x] Multi-point route builder with map tap ordering and Valhalla pedestrian routing; fails visibly instead of walking straight (code + unit tests, device UAT pending).
 - [x] Shared GPS service with start / pause / resume / stop / clear; stop keeps last virtual position, restoring real GPS remains separate (code tested, device UAT pending).
-- [x] Manual flower-point selection with pedestrian road loop; [ ] verified automatic Big Flower discovery, upstream licensing and service limits.
+- [x] Manual flower-point selection and pedestrian road loop. [x] Offline user-maintained flower catalogue: 500 m / 2 km / 5 km search, near-stop selection, 25 m deduplication, 1,000-record storage, explicit personally-checked vs unverified labels, JSON/GeoJSON file import/export. [ ] Automatic official Big Flower discovery: no verified authorised public source found. [ ] POCO map/UI/SAF UAT. See [FLOWER-CATALOG.md](FLOWER-CATALOG.md).
 - [x] Route/flower drafts saved locally, flower loop playback and speed presets; named route library (save/rename/load/delete) and GPX 1.1 route/track import/export are implemented with unit tests. [ ] POCO file picker/UI UAT.
 
 ## v0.3 — Overlay and persistence
