@@ -133,6 +133,12 @@ class LanController(private val context: Context) {
         if (req.method == "GET" && req.path == "/controller.js") {
             return asset("lan/controller.js", "application/javascript; charset=utf-8")
         }
+        if (req.method == "GET" && req.path == "/vendor/maplibre-gl.mjs") {
+            return asset("lan/vendor/maplibre-gl/maplibre-gl.mjs", "application/javascript; charset=utf-8")
+        }
+        if (req.method == "GET" && req.path == "/vendor/maplibre-gl.css") {
+            return asset("lan/vendor/maplibre-gl/maplibre-gl.css", "text/css; charset=utf-8")
+        }
         if (req.method == "POST" && req.path == "/api/pair") {
             val json = parse(req.body) ?: return error(400, "JSON 無效")
             val pin = json.optString("pin")

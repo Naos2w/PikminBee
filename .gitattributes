@@ -5,3 +5,5 @@
 *.yml text eol=lf
 gradlew text eol=lf
 gradlew.bat text eol=crlf
+# Preserve byte-for-byte vendor assets so SHA-256 tests pass on Windows and Linux.
+app/src/main/assets/lan/vendor/maplibre-gl/* -text

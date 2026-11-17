@@ -154,7 +154,7 @@ darkQuery.addEventListener?.("change", () => {
 async function initialiseMap() {
   if (map) return;
   try {
-    maplibre = await import("https://unpkg.com/maplibre-gl@6.18.0/dist/maplibre-gl.mjs");
+    maplibre = await import("/vendor/maplibre-gl.mjs");
     map = new maplibre.Map({
       container:"map",
       style: isDark() ? "https://tiles.openfreemap.org/styles/dark" :
@@ -168,7 +168,7 @@ async function initialiseMap() {
     map.on("load", renderMap);
   } catch (err) {
     $("map").textContent = "地圖資源無法載入，仍可使用經緯度欄位遠端控制。";
-    setMessage("地圖需要網際網路載入 MapLibre：" + err.message);
+    setMessage("地圖無法啟動（可能是瀏覽器不支援或圖磚網路中斷）：" + err.message);
   }
 }
 
