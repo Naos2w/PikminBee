@@ -21,6 +21,31 @@ object FlowerMapDraft {
         }
     }
 
+    enum class ReplaceResult { REPLACED, UNCHANGED, DUPLICATE, AT_START, OUT_OF_RANGE }
+
+    data class Replaced(val stops: List<Coordinate>, val result: ReplaceResult)
+
+    /** Replace only the chosen waypoint; preserve the remaining order and start. */
+    fun replace(
+        stops: List<Coordinate>, origin: Coordinate, index: Int, selected: Coordinate,
+    ): Replaced {
+        require(stops.size <= MAX_STOPS) { "既有花點超過允許數量" }
+        return when {
+            index !in stops.indices -> Replaced(stops, ReplaceResult.OUT_OF_RANGE)
+            WalkingGeometry.distanceMeters(stops[index], selected) < 1.0 ->
+                Replaced(stops, ReplaceResult.UNCHANGED)
+            WalkingGeometry.distanceMeters(origin, selected) < 2.0 ->
+                Replaced(stops, ReplaceResult.AT_START)
+            stops.indices.any { it != index &&
+                WalkingGeometry.distanceMeters(stops[it], selected) <= NEARBY_METRES } ->
+                Replaced(stops, ReplaceResult.DUPLICATE)
+            else -> Replaced(
+                stops.mapIndexed { i, coordinate -> if (i == index) selected else coordinate },
+                ReplaceResult.REPLACED,
+            )
+        }
+    }
+
     fun remove(stops: List<Coordinate>, index: Int): List<Coordinate> =
         if (index in stops.indices) stops.filterIndexed { i, _ -> i != index } else stops
 

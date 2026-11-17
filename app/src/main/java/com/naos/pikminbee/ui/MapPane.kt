@@ -54,12 +54,13 @@ fun LocationMap(
     flowerSpots: List<FlowerSpot>,
     onPick: (Coordinate) -> Unit,
     onFlowerPick: (FlowerSpot) -> Unit,
+    onStopPick: ((Int) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     when (provider) {
-        MapProvider.OPEN_FREE_MAP -> OpenFreeMapPane(dark, selected, start, stops, road, previewRoad, flowerSpots, onPick, onFlowerPick, modifier)
+        MapProvider.OPEN_FREE_MAP -> OpenFreeMapPane(dark, selected, start, stops, road, previewRoad, flowerSpots, onPick, onFlowerPick, onStopPick, modifier)
         MapProvider.GOOGLE_MAPS -> if (BuildConfig.HAS_GOOGLE_MAPS_KEY) {
-            GoogleMapsPane(dark, selected, start, stops, road, previewRoad, flowerSpots, onPick, onFlowerPick, modifier)
+            GoogleMapsPane(dark, selected, start, stops, road, previewRoad, flowerSpots, onPick, onFlowerPick, onStopPick, modifier)
         } else {
             Box(modifier) { Text("Google Maps 尚未設定 API Key，請先在 secrets.properties 填寫設定。") }
         }
@@ -70,12 +71,14 @@ fun LocationMap(
 private fun OpenFreeMapPane(
     dark: Boolean, selected: Coordinate, start: Coordinate?, stops: List<Coordinate>,
     road: List<Coordinate>, previewRoad: Boolean, flowerSpots: List<FlowerSpot>,
-    onPick: (Coordinate) -> Unit, onFlowerPick: (FlowerSpot) -> Unit, modifier: Modifier,
+    onPick: (Coordinate) -> Unit, onFlowerPick: (FlowerSpot) -> Unit,
+    onStopPick: ((Int) -> Unit)?, modifier: Modifier,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val latestOnPick by rememberUpdatedState(onPick)
     val latestOnFlowerPick by rememberUpdatedState(onFlowerPick)
+    val latestOnStopPick by rememberUpdatedState(onStopPick)
     val view = remember(context) {
         MapLibre.getInstance(context)
         LibreMapView(context).apply { onCreate(null) }
@@ -110,12 +113,19 @@ private fun OpenFreeMapPane(
                 true
             }
             ready.setOnMarkerClickListener { tapped ->
-                val index = flowerMarkers.indexOfFirst { it.id == tapped.id }
-                val flower = shownFlowers.getOrNull(index)
-                if (flower != null) {
-                    latestOnFlowerPick(flower)
+                val stopIndex = stopMarkers.indexOfFirst { it.id == tapped.id }
+                val stopCallback = latestOnStopPick
+                if (stopIndex >= 0 && stopCallback != null) {
+                    stopCallback(stopIndex)
                     true
-                } else false
+                } else {
+                    val index = flowerMarkers.indexOfFirst { it.id == tapped.id }
+                    val flower = shownFlowers.getOrNull(index)
+                    if (flower != null) {
+                        latestOnFlowerPick(flower)
+                        true
+                    } else false
+                }
             }
             ready.moveCamera(org.maplibre.android.camera.CameraUpdateFactory.newCameraPosition(
                 LibreCameraPosition.Builder()
@@ -197,12 +207,14 @@ private fun OpenFreeMapPane(
 private fun GoogleMapsPane(
     dark: Boolean, selected: Coordinate, start: Coordinate?, stops: List<Coordinate>,
     road: List<Coordinate>, previewRoad: Boolean, flowerSpots: List<FlowerSpot>,
-    onPick: (Coordinate) -> Unit, onFlowerPick: (FlowerSpot) -> Unit, modifier: Modifier,
+    onPick: (Coordinate) -> Unit, onFlowerPick: (FlowerSpot) -> Unit,
+    onStopPick: ((Int) -> Unit)?, modifier: Modifier,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val latestOnPick by rememberUpdatedState(onPick)
     val latestOnFlowerPick by rememberUpdatedState(onFlowerPick)
+    val latestOnStopPick by rememberUpdatedState(onStopPick)
     val view = remember(context) { GoogleMapView(context).apply { onCreate(null) } }
     var map by remember { mutableStateOf<GoogleMap?>(null) }
     var currentMarker by remember { mutableStateOf<com.google.android.gms.maps.model.Marker?>(null) }
@@ -229,12 +241,19 @@ private fun GoogleMapsPane(
                 latestOnPick(Coordinate(point.latitude, point.longitude))
             }
             ready.setOnMarkerClickListener { tapped ->
-                val index = flowerMarkers.indexOfFirst { it.id == tapped.id }
-                val flower = shownFlowers.getOrNull(index)
-                if (flower != null) {
-                    latestOnFlowerPick(flower)
+                val stopIndex = stopMarkers.indexOfFirst { it.id == tapped.id }
+                val stopCallback = latestOnStopPick
+                if (stopIndex >= 0 && stopCallback != null) {
+                    stopCallback(stopIndex)
                     true
-                } else false
+                } else {
+                    val index = flowerMarkers.indexOfFirst { it.id == tapped.id }
+                    val flower = shownFlowers.getOrNull(index)
+                    if (flower != null) {
+                        latestOnFlowerPick(flower)
+                        true
+                    } else false
+                }
             }
             ready.moveCamera(CameraUpdateFactory.newLatLngZoom(
                 GoogleLatLng(selected.latitude, selected.longitude), 14.5f))

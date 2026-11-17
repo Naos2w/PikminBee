@@ -41,6 +41,52 @@ class FlowerMapDraftTest {
         assertEquals(stops, FlowerMapDraft.remove(stops, 5))
     }
 
+    @Test fun replacesOnlySelectedStopAndKeepsRouteOrder() {
+        val newPlace = Coordinate(25.0348, 121.5680)
+        val replaced = FlowerMapDraft.replace(listOf(one, two), origin, 0, newPlace)
+        assertEquals(FlowerMapDraft.ReplaceResult.REPLACED, replaced.result)
+        assertEquals(listOf(newPlace, two), replaced.stops)
+        assertEquals(listOf(origin, newPlace, two), FlowerMapDraft.routePoints(
+            origin, replaced.stops, false,
+        ))
+    }
+
+    @Test fun rejectsDuplicateOrStartWhenEditingWithoutMutatingDraft() {
+        val original = listOf(one, two)
+        val duplicate = FlowerMapDraft.replace(original, origin, 0, two)
+        assertEquals(FlowerMapDraft.ReplaceResult.DUPLICATE, duplicate.result)
+        assertEquals(original, duplicate.stops)
+        val atStart = FlowerMapDraft.replace(original, origin, 1, origin)
+        assertEquals(FlowerMapDraft.ReplaceResult.AT_START, atStart.result)
+        assertEquals(original, atStart.stops)
+    }
+
+    @Test fun editingOldPointOrOutOfRangeIsNonDestructive() {
+        val original = listOf(one, two)
+        assertEquals(FlowerMapDraft.ReplaceResult.UNCHANGED,
+            FlowerMapDraft.replace(original, origin, 0, one).result)
+        val invalid = FlowerMapDraft.replace(original, origin, 4, Coordinate(25.036, 121.567))
+        assertEquals(FlowerMapDraft.ReplaceResult.OUT_OF_RANGE, invalid.result)
+        assertEquals(original, invalid.stops)
+    }
+
+    @Test fun movingExistingStopWithinDuplicateRadiusIsAllowed() {
+        val original = listOf(one, two)
+        val moved = Coordinate(25.03351, 121.56542)
+        val result = FlowerMapDraft.replace(original, origin, 0, moved)
+        assertEquals(FlowerMapDraft.ReplaceResult.REPLACED, result.result)
+        assertEquals(listOf(moved, two), result.stops)
+    }
+
+    @Test fun replacementAtMaximumCapacityDoesNotAppendStops() {
+        val stops = (1..14).map { i -> Coordinate(25.034 + i * .001, 121.5654) }
+        val replacement = Coordinate(25.0342, 121.5670)
+        val result = FlowerMapDraft.replace(stops, origin, 13, replacement)
+        assertEquals(FlowerMapDraft.ReplaceResult.REPLACED, result.result)
+        assertEquals(14, result.stops.size)
+        assertEquals(stops.take(13) + replacement, result.stops)
+    }
+
     @Test fun zeroDistanceDoesNotCreateWalkOrFalseLoop() {
         assertThrows(IllegalArgumentException::class.java) {
             FlowerMapDraft.routePoints(origin, listOf(origin), true)
