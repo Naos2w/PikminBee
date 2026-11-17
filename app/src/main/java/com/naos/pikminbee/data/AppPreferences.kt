@@ -2,6 +2,7 @@ package com.naos.pikminbee.data
 
 import android.content.Context
 import com.naos.pikminbee.domain.Coordinate
+import com.naos.pikminbee.domain.WalkMode
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -25,11 +26,24 @@ object RouteDraftState {
     }
 }
 
+/** Saved routes are a distinct library from the currently edited map draft. */
+object SavedRouteState {
+    val routes = MutableStateFlow<List<SavedRoute>>(emptyList())
+    private var initialized = false
+
+    @Synchronized fun initialize(items: List<SavedRoute>) {
+        if (initialized) return
+        routes.value = items
+        initialized = true
+    }
+}
+
 class AppPreferences(private val context: Context) {
     private val prefs = context.getSharedPreferences("pikminbee_preferences", Context.MODE_PRIVATE)
 
     init {
         RouteDraftState.initialize(loadPoints("route_draft"), loadPoints("flower_draft"))
+        SavedRouteState.initialize(readSavedRoutes())
     }
 
     fun provider(): MapProvider =
@@ -93,6 +107,88 @@ class AppPreferences(private val context: Context) {
         val json = JSONArray()
         points.forEach { json.put(JSONObject().put("lat", it.latitude).put("lon", it.longitude)) }
         prefs.edit().putString(key, json.toString()).apply()
+    }
+
+    fun savedRoutes(): List<SavedRoute> = SavedRouteState.routes.value
+
+    fun addSavedRoute(name: String, mode: WalkMode, stops: List<Coordinate>): SavedRoute =
+        synchronized(SavedRouteState) {
+            val current = SavedRouteState.routes.value
+            require(current.size < 100) { "最多可收藏 100 條路線，請先刪除不需要的路線" }
+            val route = SavedRoute.create(name, mode, stops)
+            val next = listOf(route) + current
+            persistSavedRoutes(next)
+            SavedRouteState.routes.value = next
+            route
+        }
+
+    fun deleteSavedRoute(id: String): Boolean = synchronized(SavedRouteState) {
+        val current = SavedRouteState.routes.value
+        val next = current.filterNot { it.id == id }
+        if (next.size == current.size) return@synchronized false
+        persistSavedRoutes(next)
+        SavedRouteState.routes.value = next
+        true
+    }
+
+    fun renameSavedRoute(id: String, newName: String): Boolean = synchronized(SavedRouteState) {
+        val current = SavedRouteState.routes.value
+        val old = current.firstOrNull { it.id == id } ?: return@synchronized false
+        val name = newName.trim()
+        require(name.isNotEmpty() && name.length <= 60) { "路線名稱需為 1 至 60 字" }
+        val next = current.map { if (it.id == old.id) it.copy(name = name) else it }
+        persistSavedRoutes(next)
+        SavedRouteState.routes.value = next
+        true
+    }
+
+    fun loadSavedRouteIntoDraft(route: SavedRoute) {
+        if (route.mode == WalkMode.FLOWERS) saveFlowerDraft(route.stops)
+        else saveRouteDraft(route.stops)
+    }
+
+    private fun readSavedRoutes(): List<SavedRoute> = runCatching {
+        val json = JSONArray(prefs.getString("saved_routes", "[]") ?: "[]")
+        if (json.length() > 100) return@runCatching emptyList<SavedRoute>()
+        (0 until json.length()).mapNotNull { index ->
+            runCatching {
+                val entry = json.getJSONObject(index)
+                val points = entry.getJSONArray("points")
+                require(points.length() in 1..15)
+                val stops = (0 until points.length()).map { i ->
+                    val item = points.getJSONObject(i)
+                    Coordinate(item.getDouble("lat"), item.getDouble("lon"))
+                }
+                SavedRoute(
+                    id = entry.getString("id"),
+                    name = entry.getString("name"),
+                    mode = WalkMode.valueOf(entry.getString("mode")),
+                    stops = stops,
+                    createdAtMillis = entry.optLong("createdAt", 0L),
+                )
+            }.getOrNull()
+        }
+    }.getOrDefault(emptyList())
+
+    private fun persistSavedRoutes(routes: List<SavedRoute>) {
+        val records = JSONArray().apply {
+            routes.forEach { route ->
+                val points = JSONArray().apply {
+                    route.stops.forEach { point ->
+                        put(JSONObject().put("lat", point.latitude).put("lon", point.longitude))
+                    }
+                }
+                put(JSONObject()
+                    .put("id", route.id)
+                    .put("name", route.name)
+                    .put("mode", route.mode.name)
+                    .put("createdAt", route.createdAtMillis)
+                    .put("points", points))
+            }
+        }
+        check(prefs.edit().putString("saved_routes", records.toString()).commit()) {
+            "無法寫入收藏路線，資料未儲存"
+        }
     }
 
     private fun savePlaces(places: List<SavedPlace>) {

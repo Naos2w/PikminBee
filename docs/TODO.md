@@ -15,7 +15,7 @@
 - [x] Multi-point route builder with map tap ordering and Valhalla pedestrian routing; fails visibly instead of walking straight (code + unit tests, device UAT pending).
 - [x] Shared GPS service with start / pause / resume / stop / clear; stop keeps last virtual position, restoring real GPS remains separate (code tested, device UAT pending).
 - [x] Manual flower-point selection with pedestrian road loop; [ ] verified automatic Big Flower discovery, upstream licensing and service limits.
-- [x] Route/flower drafts saved locally, flower loop playback and speed presets; [ ] named route library and GPX import/export.
+- [x] Route/flower drafts saved locally, flower loop playback and speed presets; named route library (save/rename/load/delete) and GPX 1.1 route/track import/export are implemented with unit tests. [ ] POCO file picker/UI UAT.
 
 ## v0.3 — Overlay and persistence
 - [x] Basic draggable bee overlay sharing the existing GPS foreground service, with Pause/Resume/Stop/Map/Hide/Restore actions; [ ] device-level interaction and permission UAT.
@@ -32,7 +32,7 @@
 - [ ] Verify private Wi-Fi phone-to-MSI pairing, Origin/Host rejection, disconnect and phone approval in real Android/Chrome.
 - [ ] Evaluate local HTTPS or other encrypted transport before public or untrusted-network use; LAN HTTP is not encrypted.
 - [ ] When targetSdk reaches 37, declare and request Android 17 `ACCESS_LOCAL_NETWORK` runtime permission.
-- [ ] Persist named route library and GPX; verify source licensing for game-specific flower discovery.
+- [x] Persist named routes and GPX using Android SAF (no storage permission); [ ] verify on real device and source licensing for game-specific flower discovery.
 
 ## Release gates
 - [x] No automatic production release or installation.
