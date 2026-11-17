@@ -88,6 +88,7 @@ import com.naos.pikminbee.ui.LocationMap
 import com.naos.pikminbee.ui.JourneyControls
 import com.naos.pikminbee.ui.RouteLibraryPanel
 import com.naos.pikminbee.ui.FlowerCatalogPanel
+import com.naos.pikminbee.ui.FlowerVisionPanel
 import com.naos.pikminbee.ui.WifiControlPanel
 import com.naos.pikminbee.ui.BackgroundSessionPanel
 
@@ -527,6 +528,11 @@ private fun PikminBeeScreen() {
                                 )
                             }
                             ToolTab.FLOWERS -> {
+                                FlowerVisionPanel(
+                                    foreground = foreground,
+                                    muted = muted,
+                                    onMessage = { message = it },
+                                )
                                 JourneyControls(
                                     mode = WalkMode.FLOWERS,
                                     stops = flowerStops,
