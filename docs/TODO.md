@@ -14,7 +14,7 @@
 ## v0.2 — Walking and flower-search
 - [x] Multi-point route builder with map tap ordering and Valhalla pedestrian routing; fails visibly instead of walking straight (code + unit tests, device UAT pending).
 - [x] Shared GPS service with start / pause / resume / stop / clear; stop keeps last virtual position, restoring real GPS remains separate (code tested, device UAT pending).
-- [x] Manual flower-point selection and pedestrian road loop. [x] Offline user-maintained flower catalogue: 500 m / 2 km / 5 km search, near-stop selection, 25 m deduplication, 1,000-record storage, explicit personally-checked vs unverified labels, JSON/GeoJSON file import/export. [ ] Automatic official Big Flower discovery: no verified authorised public source found. [ ] POCO map/UI/SAF UAT. See [FLOWER-CATALOG.md](FLOWER-CATALOG.md).
+- [x] Manual flower-point selection and pedestrian road loop. [x] Offline user-maintained flower catalogue (local records, nearby user-defined spots, JSON/GeoJSON); **no Overpass/OSM candidate service will be integrated** per current requirement. [x] Original read-only screen flower-shape recognition prototype (user-selected image or per-session MediaProjection consent, no automatic GPS conversion). [ ] Real screenshot precision/recall, reliable pixel-to-coordinate calibration and POCO projection/permissions UAT. See [FLOWER-VISION.md](FLOWER-VISION.md) and [FLOWER-CATALOG.md](FLOWER-CATALOG.md).
 - [x] Route/flower drafts saved locally, flower loop playback and speed presets; named route library (save/rename/load/delete) and GPX 1.1 route/track import/export are implemented with unit tests. [ ] POCO file picker/UI UAT.
 
 ## v0.3 — Overlay and persistence
@@ -39,6 +39,12 @@
 - [x] MSI local `:app:testDebugUnitTest :app:lintDebug --offline` passed (48/48 tests, 0 failed); node syntax and vendored asset SHA-256 verified. [ ] Real POCO UAT still pending. See [PRE-UAT-QUALITY.md](PRE-UAT-QUALITY.md).
 - [ ] Perform one grouped POCO UAT: maps, permissions, GPS, routes, GPX, overlay, LAN pairing and UI.
 - [ ] Check Google Maps API key restriction, map attribution, source licence notices and third-party dependencies before PROD.
+
+## Flower vision backlog (separate PRs, not part of the initial recognition prototype)
+- [ ] Test with user-authorised real-world frames; tune colour, lighting and pale-flower false positives.
+- [ ] Implement explicit map pixel-to-GPS calibration with measured error before suggesting route waypoints.
+- [ ] Verify Android 14+/HyperOS MediaProjection consent, app-window capture, orientation and cancellation on POCO during UAT.
+- [x] Do not integrate Overpass/OSM POI candidate search; favour image-based recognition as requested.
 
 ## Release gates
 - [x] No automatic production release or installation.
