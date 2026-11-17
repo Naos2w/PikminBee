@@ -4,14 +4,33 @@ import android.content.Context
 import com.naos.pikminbee.domain.Coordinate
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlinx.coroutines.flow.MutableStateFlow
 
 enum class MapProvider { OPEN_FREE_MAP, GOOGLE_MAPS }
 enum class MapAppearance { SYSTEM, LIGHT, DARK }
 
 data class SavedPlace(val id: Long, val name: String, val coordinate: Coordinate)
 
+/** One in-process draft state, observed by the phone UI, web API and GPS planner. */
+object RouteDraftState {
+    val routeStops = MutableStateFlow<List<Coordinate>>(emptyList())
+    val flowerStops = MutableStateFlow<List<Coordinate>>(emptyList())
+    private var initialized = false
+
+    @Synchronized fun initialize(route: List<Coordinate>, flowers: List<Coordinate>) {
+        if (initialized) return
+        routeStops.value = route
+        flowerStops.value = flowers
+        initialized = true
+    }
+}
+
 class AppPreferences(private val context: Context) {
     private val prefs = context.getSharedPreferences("pikminbee_preferences", Context.MODE_PRIVATE)
+
+    init {
+        RouteDraftState.initialize(loadPoints("route_draft"), loadPoints("flower_draft"))
+    }
 
     fun provider(): MapProvider =
         enumValues<MapProvider>().firstOrNull { it.name == prefs.getString("provider", "") }
@@ -45,10 +64,20 @@ class AppPreferences(private val context: Context) {
     fun removePlace(id: Long) { savePlaces(places().filterNot { it.id == id }) }
 
     /** Route and flower waypoint drafts are separate from saved places. */
-    fun routeDraft(): List<Coordinate> = loadPoints("route_draft")
-    fun flowerDraft(): List<Coordinate> = loadPoints("flower_draft")
-    fun saveRouteDraft(points: List<Coordinate>) = savePoints("route_draft", points)
-    fun saveFlowerDraft(points: List<Coordinate>) = savePoints("flower_draft", points)
+    fun routeDraft(): List<Coordinate> = RouteDraftState.routeStops.value
+    fun flowerDraft(): List<Coordinate> = RouteDraftState.flowerStops.value
+    fun saveRouteDraft(points: List<Coordinate>) {
+        synchronized(RouteDraftState) {
+            savePoints("route_draft", points)
+            RouteDraftState.routeStops.value = points
+        }
+    }
+    fun saveFlowerDraft(points: List<Coordinate>) {
+        synchronized(RouteDraftState) {
+            savePoints("flower_draft", points)
+            RouteDraftState.flowerStops.value = points
+        }
+    }
 
     private fun loadPoints(key: String): List<Coordinate> = runCatching {
         val json = JSONArray(prefs.getString(key, "[]") ?: "[]")
