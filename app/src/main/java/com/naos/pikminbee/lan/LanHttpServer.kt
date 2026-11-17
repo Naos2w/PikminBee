@@ -109,23 +109,12 @@ class LanHttpServer(
                     headers[key] = line.substring(colon + 1).trim()
                 }
                 val authority = "${localIp.hostAddress}:$port"
-                if (headers["host"] != authority) {
-                    return@runCatching write(peer, LanReply(403, "{\"error\":\"invalid host\"}"))
-                }
-                if (headers["transfer-encoding"] != null) {
-                    return@runCatching write(peer, LanReply(400, "{\"error\":\"chunked requests not accepted\"}"))
-                }
-                if (parts[0] == "POST" && headers["origin"] != "http://$authority") {
-                    return@runCatching write(peer, LanReply(403, "{\"error\":\"origin mismatch\"}"))
+                val rejection = LanHttpPolicy.rejectRequest(parts[0], authority, headers)
+                if (rejection != null) {
+                    return@runCatching write(peer,
+                        LanReply(rejection, "{\"error\":\"invalid request headers\"}"))
                 }
                 val length = headers["content-length"]?.toIntOrNull() ?: 0
-                if (length !in 0..8_192 || (parts[0] == "POST" && length == 0)) {
-                    return@runCatching write(peer, LanReply(413, "{\"error\":\"invalid body length\"}"))
-                }
-                if (parts[0] == "POST" &&
-                    headers["content-type"]?.substringBefore(';')?.trim() != "application/json") {
-                    return@runCatching write(peer, LanReply(415, "{\"error\":\"JSON required\"}"))
-                }
                 val bytes = ByteArray(length)
                 var read = 0
                 while (read < length) {
@@ -186,7 +175,9 @@ class LanHttpServer(
             append("Referrer-Policy: no-referrer\r\n")
             append("X-Content-Type-Options: nosniff\r\n")
             append("X-Frame-Options: DENY\r\n")
-            append("Content-Security-Policy: default-src 'none'; script-src 'self' https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com; img-src data: https://tiles.openfreemap.org; connect-src 'self' https://tiles.openfreemap.org; font-src data: https://tiles.openfreemap.org; worker-src blob:; object-src 'none'; frame-ancestors 'none'\r\n")
+            append("Content-Security-Policy: ")
+            append(LanHttpPolicy.CONTENT_SECURITY_POLICY)
+            append("\r\n")
             append("Connection: close\r\n\r\n")
         }.toByteArray(StandardCharsets.US_ASCII)
         peer.getOutputStream().apply { write(headers); write(payload); flush() }

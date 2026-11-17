@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="referrer" content="no-referrer">
 <title>PikminBee · Wi-Fi 控制</title>
-<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@6.18.0/dist/maplibre-gl.css">
+<link rel="stylesheet" href="/vendor/maplibre-gl.css">
 <style>
 :root{color-scheme:dark;--bg:#111a27;--card:rgba(30,45,65,.90);--line:rgba(255,255,255,.13);--text:#eef4fb;--sub:#a9b8c9;--gold:#edbb5b;--button:#bb811e}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,BlinkMacSystemFont,"Noto Sans TC",sans-serif}
@@ -50,7 +50,7 @@ button:disabled{opacity:.42;cursor:not-allowed}button:focus-visible,input:focus-
  </div>
  <div id="map" aria-label="點選地圖以選取座標"></div>
  <div id="selected" class="muted" style="margin:10px 0">點一下地圖以選擇位置</div>
- <div class="muted">底圖：OpenFreeMap／OpenStreetMap，開啟網頁需要網路載入地圖資源。</div>
+ <div class="muted">底圖：OpenFreeMap／OpenStreetMap。網頁程式已內建，地圖圖磚仍需要連線。</div>
 </section>
 <section class="glass">
  <h2>遠端 GPS 控制</h2>
