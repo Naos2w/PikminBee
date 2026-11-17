@@ -18,8 +18,8 @@ android {
         applicationId 'com.naos.pikminbee'
         minSdk 28
         targetSdk 36
-        versionCode 1
-        versionName '0.1.0-dev'
+        versionCode 2
+        versionName '0.2.0-dev'
         manifestPlaceholders = [googleMapsKey: mapsKey]
         buildConfigField 'boolean', 'HAS_GOOGLE_MAPS_KEY', mapsKey.isBlank() ? 'false' : 'true'
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'

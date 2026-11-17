@@ -12,10 +12,10 @@
 - [ ] On-device build, screenshot and permission flow UAT.
 
 ## v0.2 — Walking and flower-search
-- [ ] Multi-point route builder; pedestrian roads through Valhalla (do not silently fall back to straight line).
-- [ ] Start / pause / resume / stop / clear; stop stays at last virtual position, restore real GPS is separate.
-- [ ] Flower Search integration after reviewing upstream source licensing.
-- [ ] Saved walking routes, loop mode and GPX import/export.
+- [x] Multi-point route builder with map tap ordering and Valhalla pedestrian routing; fails visibly instead of walking straight (code + unit tests, device UAT pending).
+- [x] Shared GPS service with start / pause / resume / stop / clear; stop keeps last virtual position, restoring real GPS remains separate (code tested, device UAT pending).
+- [x] Manual flower-point selection with pedestrian road loop; [ ] verified automatic Big Flower discovery, upstream licensing and service limits.
+- [x] Route/flower drafts saved locally, flower loop playback and speed presets; [ ] named route library and GPX import/export.
 
 ## v0.3 — Overlay and persistence
 - [ ] Floating overlay controls sharing exactly one GPS state machine.
@@ -30,7 +30,7 @@
 
 ## Release gates
 - [x] No automatic production release or installation.
-- [x] One local Gradle build + lint + 3 unit tests passed; one PR workflow authored (GitHub validation pending).
+- [x] One low-cost PR workflow: Draft skips Android jobs, superseded runs cancelled, lint/tests for ready PRs, APK packaged only by explicit workflow_dispatch option. Local tests added for walking geometry and polyline6; device UAT still pending.
 - [x] Ignore local secret/keystore files in Git; production signing not configured.
 - [ ] UAT on POCO before `staging → main` merge.
 - [ ] Preserve dependency licences and attribution when reusing compatible upstream code.
