@@ -4,6 +4,8 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.net.Uri
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -128,6 +130,7 @@ private fun PikminBeeScreen() {
     val walkPhase by LocationStatus.phase.collectAsState()
     val walkMode by LocationStatus.mode.collectAsState()
     val roadLine by LocationStatus.geometry.collectAsState()
+    val overlayVisible by LocationStatus.overlayVisible.collectAsState()
 
     val requestLocation = androidx.activity.compose.rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -381,6 +384,24 @@ private fun PikminBeeScreen() {
                                 onMessage = { message = it },
                                 onAskLocation = { requestLocation.launch(Manifest.permission.ACCESS_FINE_LOCATION) },
                             )
+                        }
+                        TextButton(onClick = {
+                            when {
+                                mockPosition == null -> message = "請先啟動模擬定位，再開啟懸浮控制"
+                                !Settings.canDrawOverlays(context) -> {
+                                    context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                        Uri.parse("package:" + context.packageName)))
+                                    message = "請授予懸浮顯示權限，返回後再點一次"
+                                }
+                                else -> {
+                                    val action = if (overlayVisible) MockLocationService.ACTION_HIDE_OVERLAY
+                                    else MockLocationService.ACTION_SHOW_OVERLAY
+                                    context.startService(MockLocationService.command(context, action))
+                                }
+                            }
+                        }) {
+                            Text(if (overlayVisible) "🐝 隱藏懸浮控制" else "🐝 開啟懸浮控制",
+                                fontSize = 13.sp)
                         }
                         Text(message, fontSize = 12.sp, color = muted, maxLines = 2)
                     }

@@ -8,7 +8,8 @@ PikminBee is a free, ad-free Android GPS testing app: a bee exploring the world,
 - Interface: iOS-27-inspired frosted controls with accessible contrasts and a clear light/dark theme.
 - Location: explicit mock-location test mode on the owner's device (not a bypass for application integrity or location checks).
 - v0.2 development: map-picked walking stops, rate-limited Valhalla pedestrian routing, walking / pause / stop / clear, manually marked flower loops (not automatic game flower discovery). All require device UAT.
-- Floating controls and Wi-Fi browser control: later milestones. See [TODO](docs/TODO.md).
+- v0.3 development: opt-in, draggable bee floating controls connected to the same foreground GPS service (Android overlay permission and POCO UAT required).
+- Wi-Fi browser control: later milestone. See [TODO](docs/TODO.md).
 - No root or accessibility service needed for the basic map/teleport workflow.
 
 ## Setup
