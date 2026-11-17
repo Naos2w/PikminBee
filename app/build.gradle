@@ -57,5 +57,6 @@ dependencies {
     implementation 'org.maplibre.gl:android-sdk:13.7.1'
     implementation 'com.google.android.gms:play-services-maps:20.0.0'
     testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20250517'
     debugImplementation 'androidx.compose.ui:ui-tooling'
 }

@@ -27,6 +27,8 @@ import com.google.android.gms.maps.model.PolylineOptions as GooglePolylineOption
 import com.naos.pikminbee.BuildConfig
 import com.naos.pikminbee.data.MapProvider
 import com.naos.pikminbee.domain.Coordinate
+import com.naos.pikminbee.flower.FlowerSpot
+import com.naos.pikminbee.flower.FlowerEvidence
 import org.maplibre.android.MapLibre
 import org.maplibre.android.maps.MapView as LibreMapView
 import org.maplibre.android.maps.MapLibreMap
@@ -47,13 +49,14 @@ fun LocationMap(
     selected: Coordinate,
     stops: List<Coordinate>,
     road: List<Coordinate>,
+    flowerSpots: List<FlowerSpot>,
     onPick: (Coordinate) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     when (provider) {
-        MapProvider.OPEN_FREE_MAP -> OpenFreeMapPane(dark, selected, stops, road, onPick, modifier)
+        MapProvider.OPEN_FREE_MAP -> OpenFreeMapPane(dark, selected, stops, road, flowerSpots, onPick, modifier)
         MapProvider.GOOGLE_MAPS -> if (BuildConfig.HAS_GOOGLE_MAPS_KEY) {
-            GoogleMapsPane(dark, selected, stops, road, onPick, modifier)
+            GoogleMapsPane(dark, selected, stops, road, flowerSpots, onPick, modifier)
         } else {
             Box(modifier) { Text("Google Maps 尚未設定 API Key，請先在 secrets.properties 填寫設定。") }
         }
@@ -63,7 +66,8 @@ fun LocationMap(
 @Composable
 private fun OpenFreeMapPane(
     dark: Boolean, selected: Coordinate, stops: List<Coordinate>,
-    road: List<Coordinate>, onPick: (Coordinate) -> Unit, modifier: Modifier,
+    road: List<Coordinate>, flowerSpots: List<FlowerSpot>,
+    onPick: (Coordinate) -> Unit, modifier: Modifier,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -77,6 +81,7 @@ private fun OpenFreeMapPane(
     var currentMarker by remember { mutableStateOf<org.maplibre.android.annotations.Marker?>(null) }
     var currentStyleVersion by remember { mutableIntStateOf(-1) }
     var stopMarkers by remember { mutableStateOf(emptyList<org.maplibre.android.annotations.Marker>()) }
+    var flowerMarkers by remember { mutableStateOf(emptyList<org.maplibre.android.annotations.Marker>()) }
     var line by remember { mutableStateOf<org.maplibre.android.annotations.Polyline?>(null) }
     DisposableEffect(view, lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -141,13 +146,25 @@ private fun OpenFreeMapPane(
             .addAll(road.map { LibreLatLng(it.latitude, it.longitude) })
             .color(android.graphics.Color.rgb(232, 151, 39)).width(5f)) else null
     }
+    LaunchedEffect(map, styleVersion, flowerSpots) {
+        val m = map ?: return@LaunchedEffect
+        if (styleVersion == 0) return@LaunchedEffect
+        flowerMarkers.forEach { m.removeMarker(it) }
+        flowerMarkers = flowerSpots.take(100).map { flower ->
+            m.addMarker(LibreMarkerOptions()
+                .position(LibreLatLng(flower.coordinate.latitude, flower.coordinate.longitude))
+                .title("🌸 " + flower.name +
+                    if (flower.evidence == FlowerEvidence.PERSONALLY_CHECKED) " · 本人確認" else " · 待確認"))
+        }
+    }
     AndroidView(factory = { view }, modifier = modifier)
 }
 
 @Composable
 private fun GoogleMapsPane(
     dark: Boolean, selected: Coordinate, stops: List<Coordinate>,
-    road: List<Coordinate>, onPick: (Coordinate) -> Unit, modifier: Modifier,
+    road: List<Coordinate>, flowerSpots: List<FlowerSpot>,
+    onPick: (Coordinate) -> Unit, modifier: Modifier,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -156,6 +173,7 @@ private fun GoogleMapsPane(
     var map by remember { mutableStateOf<GoogleMap?>(null) }
     var currentMarker by remember { mutableStateOf<com.google.android.gms.maps.model.Marker?>(null) }
     var stopMarkers by remember { mutableStateOf(emptyList<com.google.android.gms.maps.model.Marker>()) }
+    var flowerMarkers by remember { mutableStateOf(emptyList<com.google.android.gms.maps.model.Marker>()) }
     var line by remember { mutableStateOf<com.google.android.gms.maps.model.Polyline?>(null) }
     DisposableEffect(view, lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -207,6 +225,21 @@ private fun GoogleMapsPane(
         line = if (road.size >= 2) m.addPolyline(GooglePolylineOptions()
             .addAll(road.map { GoogleLatLng(it.latitude, it.longitude) })
             .color(android.graphics.Color.rgb(232, 151, 39)).width(6f)) else null
+    }
+    LaunchedEffect(map, flowerSpots) {
+        val m = map ?: return@LaunchedEffect
+        flowerMarkers.forEach { it.remove() }
+        flowerMarkers = flowerSpots.take(100).mapNotNull { flower ->
+            m.addMarker(GoogleMarkerOptions()
+                .position(GoogleLatLng(flower.coordinate.latitude, flower.coordinate.longitude))
+                .title("🌸 " + flower.name)
+                .snippet(if (flower.evidence == FlowerEvidence.PERSONALLY_CHECKED)
+                    "本人確認 · 非官方即時狀態" else "匯入候選 · 未確認")
+                .icon(com.google.android.gms.maps.model.BitmapDescriptorFactory.defaultMarker(
+                    if (flower.evidence == FlowerEvidence.PERSONALLY_CHECKED)
+                        com.google.android.gms.maps.model.BitmapDescriptorFactory.HUE_ROSE
+                    else com.google.android.gms.maps.model.BitmapDescriptorFactory.HUE_VIOLET)))
+        }
     }
     AndroidView(factory = { view }, modifier = modifier)
 }
