@@ -43,6 +43,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -58,9 +59,15 @@ import com.naos.pikminbee.data.AppPreferences
 import com.naos.pikminbee.data.MapAppearance
 import com.naos.pikminbee.data.MapProvider
 import com.naos.pikminbee.domain.Coordinate
+import com.naos.pikminbee.domain.WalkMode
+import com.naos.pikminbee.domain.WalkPhase
+import com.naos.pikminbee.domain.WalkingGeometry
+import com.naos.pikminbee.route.ValhallaPlanner
+import kotlinx.coroutines.launch
 import com.naos.pikminbee.location.LocationStatus
 import com.naos.pikminbee.location.MockLocationService
 import com.naos.pikminbee.ui.LocationMap
+import com.naos.pikminbee.ui.JourneyControls
 
 private val navy = Color(0xFF18263A)
 private val honey = Color(0xFF9F5E0C)
@@ -110,8 +117,17 @@ private fun PikminBeeScreen() {
     var tab by remember { mutableStateOf(ToolTab.TELEPORT) }
     var places by remember { mutableStateOf(prefs.places()) }
     var message by remember { mutableStateOf("地圖點一下就能選擇位置") }
+    var roadStops by remember { mutableStateOf(prefs.routeDraft()) }
+    var flowerStops by remember { mutableStateOf(prefs.flowerDraft()) }
+    var planning by remember { mutableStateOf(false) }
+    var speed by remember { mutableStateOf(1.4) }
+    var flowerLoop by remember { mutableStateOf(true) }
+    val work = rememberCoroutineScope()
     val mockStatus by LocationStatus.display.collectAsState()
     val mockPosition by LocationStatus.selected.collectAsState()
+    val walkPhase by LocationStatus.phase.collectAsState()
+    val walkMode by LocationStatus.mode.collectAsState()
+    val roadLine by LocationStatus.geometry.collectAsState()
 
     val requestLocation = androidx.activity.compose.rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -127,10 +143,39 @@ private fun PikminBeeScreen() {
     MaterialTheme {
         Box(Modifier.fillMaxSize().background(if (dark) Color(0xFF091321) else Color(0xFFF4F7FC))) {
             LocationMap(
-                provider = provider, dark = dark, selected = selected,
-                onPick = {
-                    selected = it
-                    message = "已選位置：${it.label()}"
+                provider = provider, dark = dark,
+                selected = mockPosition ?: when (tab) {
+                    ToolTab.ROUTE -> roadStops.firstOrNull() ?: selected
+                    ToolTab.FLOWERS -> flowerStops.firstOrNull() ?: selected
+                    else -> selected
+                },
+                stops = when (tab) {
+                    ToolTab.ROUTE -> roadStops
+                    ToolTab.FLOWERS -> flowerStops
+                    else -> emptyList()
+                },
+                road = roadLine,
+                onPick = { point ->
+                    when (tab) {
+                        ToolTab.ROUTE -> {
+                            if (roadStops.size < 15) {
+                                roadStops = roadStops + point
+                                prefs.saveRouteDraft(roadStops)
+                                message = "已新增路點 ${roadStops.size} · 請繼續點選地圖"
+                            } else message = "最多只能加入 15 個路點"
+                        }
+                        ToolTab.FLOWERS -> {
+                            if (flowerStops.size < 15) {
+                                flowerStops = flowerStops + point
+                                prefs.saveFlowerDraft(flowerStops)
+                                message = "已標記第 ${flowerStops.size} 個花點"
+                            } else message = "最多只能加入 15 個花點"
+                        }
+                        else -> {
+                            selected = point
+                            message = "已選位置：${point.label()}"
+                        }
+                    }
                 },
                 modifier = Modifier.fillMaxSize()
             )
@@ -150,7 +195,7 @@ private fun PikminBeeScreen() {
                                 Text("PikminBee", fontSize = 23.sp, fontWeight = FontWeight.Bold, color = foreground)
                                 Text("尋花採蜜 · $mockStatus", fontSize = 12.sp, color = muted)
                             }
-                            Text("v0.1 DEV", fontSize = 11.sp, color = honey, fontWeight = FontWeight.SemiBold)
+                            Text("v0.2 DEV", fontSize = 11.sp, color = honey, fontWeight = FontWeight.SemiBold)
                         }
 
                         Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
@@ -300,16 +345,42 @@ private fun PikminBeeScreen() {
                                     }
                                 }
                             }
-                            ToolTab.ROUTE -> {
-                                Text("多點道路路線", fontWeight = FontWeight.Bold, color = foreground)
-                                Text("下一階段：地圖依序選點、道路規劃、開始／暫停／停止／清除。",
-                                    color = muted, fontSize = 13.sp)
-                            }
-                            ToolTab.FLOWERS -> {
-                                Text("尋花模式", fontWeight = FontWeight.Bold, color = foreground)
-                                Text("下一階段：大花清單、路線巡迴與自動尋花。",
-                                    color = muted, fontSize = 13.sp)
-                            }
+                            ToolTab.ROUTE -> JourneyControls(
+                                mode = WalkMode.ROUTE,
+                                stops = roadStops,
+                                origin = mockPosition ?: roadStops.firstOrNull() ?: selected,
+                                activeMode = walkMode,
+                                phase = walkPhase,
+                                foreground = foreground, muted = muted,
+                                onUndo = {
+                                    roadStops = roadStops.dropLast(1)
+                                    prefs.saveRouteDraft(roadStops)
+                                },
+                                onClear = {
+                                    roadStops = emptyList()
+                                    prefs.saveRouteDraft(roadStops)
+                                },
+                                onMessage = { message = it },
+                                onAskLocation = { requestLocation.launch(Manifest.permission.ACCESS_FINE_LOCATION) },
+                            )
+                            ToolTab.FLOWERS -> JourneyControls(
+                                mode = WalkMode.FLOWERS,
+                                stops = flowerStops,
+                                origin = mockPosition ?: flowerStops.firstOrNull() ?: selected,
+                                activeMode = walkMode,
+                                phase = walkPhase,
+                                foreground = foreground, muted = muted,
+                                onUndo = {
+                                    flowerStops = flowerStops.dropLast(1)
+                                    prefs.saveFlowerDraft(flowerStops)
+                                },
+                                onClear = {
+                                    flowerStops = emptyList()
+                                    prefs.saveFlowerDraft(flowerStops)
+                                },
+                                onMessage = { message = it },
+                                onAskLocation = { requestLocation.launch(Manifest.permission.ACCESS_FINE_LOCATION) },
+                            )
                         }
                         Text(message, fontSize = 12.sp, color = muted, maxLines = 2)
                     }

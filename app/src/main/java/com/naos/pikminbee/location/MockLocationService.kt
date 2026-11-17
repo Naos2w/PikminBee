@@ -18,131 +18,266 @@ import android.os.Looper
 import android.os.SystemClock
 import androidx.core.content.ContextCompat
 import com.naos.pikminbee.domain.Coordinate
+import com.naos.pikminbee.domain.WalkMode
+import com.naos.pikminbee.domain.WalkPhase
+import com.naos.pikminbee.domain.WalkingGeometry
 import kotlinx.coroutines.flow.MutableStateFlow
 
-/** Single opt-in mock-location source for the user's own Android test device. */
+/** UI, future overlay and LAN controller must all observe this single GPS state. */
 object LocationStatus {
     val display = MutableStateFlow("真實定位")
     val selected = MutableStateFlow<Coordinate?>(null)
+    val phase = MutableStateFlow(WalkPhase.IDLE)
+    val mode = MutableStateFlow<WalkMode?>(null)
+    val geometry = MutableStateFlow<List<Coordinate>>(emptyList())
 }
 
 class MockLocationService : Service() {
     companion object {
         const val ACTION_TELEPORT = "com.naos.pikminbee.action.TELEPORT"
         const val ACTION_STOP = "com.naos.pikminbee.action.STOP_MOCK"
+        const val ACTION_START_ROUTE = "com.naos.pikminbee.action.START_ROUTE"
+        const val ACTION_PAUSE_ROUTE = "com.naos.pikminbee.action.PAUSE_ROUTE"
+        const val ACTION_RESUME_ROUTE = "com.naos.pikminbee.action.RESUME_ROUTE"
+        const val ACTION_STOP_ROUTE = "com.naos.pikminbee.action.STOP_ROUTE"
+        const val ACTION_CLEAR_ROUTE = "com.naos.pikminbee.action.CLEAR_ROUTE"
         const val EXTRA_LAT = "lat"
         const val EXTRA_LON = "lon"
+        const val EXTRA_GEOMETRY = "route_geometry"
+        const val EXTRA_SPEED = "speed_mps"
+        const val EXTRA_MODE = "walk_mode"
+        const val EXTRA_LOOP = "route_loop"
         private const val CHANNEL = "pikminbee_active"
         private const val NOTIFICATION_ID = 301
 
-        fun teleportIntent(context: android.content.Context, coordinate: Coordinate): Intent =
+        fun teleportIntent(context: android.content.Context, point: Coordinate): Intent =
             Intent(context, MockLocationService::class.java).setAction(ACTION_TELEPORT)
-                .putExtra(EXTRA_LAT, coordinate.latitude)
-                .putExtra(EXTRA_LON, coordinate.longitude)
+                .putExtra(EXTRA_LAT, point.latitude).putExtra(EXTRA_LON, point.longitude)
 
         fun stopIntent(context: android.content.Context): Intent =
             Intent(context, MockLocationService::class.java).setAction(ACTION_STOP)
+
+        fun command(context: android.content.Context, action: String): Intent =
+            Intent(context, MockLocationService::class.java).setAction(action)
+
+        fun routeIntent(context: android.content.Context, track: List<Coordinate>, speed: Double,
+                        mode: WalkMode = WalkMode.ROUTE, loop: Boolean = false): Intent {
+            require(track.size in 2..10_000) { "Invalid walking route" }
+            val packed = DoubleArray(track.size * 2) { index ->
+                val point = track[index / 2]
+                if (index % 2 == 0) point.latitude else point.longitude
+            }
+            return Intent(context, MockLocationService::class.java).setAction(ACTION_START_ROUTE)
+                .putExtra(EXTRA_GEOMETRY, packed)
+                .putExtra(EXTRA_SPEED, speed.coerceIn(0.5, 3.0))
+                .putExtra(EXTRA_MODE, mode.name)
+                .putExtra(EXTRA_LOOP, loop)
+        }
     }
 
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var manager: LocationManager
-    private var active = false
+    private var providerActive = false
     private var target: Coordinate? = null
+    private var track = emptyList<Coordinate>()
+    private var trackLengthMeters = 0.0
+    private var walkingDistanceMeters = 0.0
+    private var speedMetersPerSecond = 1.4
+    private var loopRoute = false
+    private var previousTickMillis = 0L
+    private var phase = WalkPhase.IDLE
+    private var mode: WalkMode? = null
+
     private val tick = object : Runnable {
         override fun run() {
-            target?.let { pushFix(it) }
-            if (active) handler.postDelayed(this, 2_000L)
+            if (!providerActive) return
+            val now = SystemClock.elapsedRealtime()
+            val deltaSeconds = ((now - previousTickMillis) / 1000.0).coerceIn(0.0, 2.0)
+            previousTickMillis = now
+            if (phase == WalkPhase.MOVING && track.size > 1) {
+                walkingDistanceMeters += speedMetersPerSecond * deltaSeconds
+                if (loopRoute && trackLengthMeters > 0.1 && walkingDistanceMeters >= trackLengthMeters) {
+                    walkingDistanceMeters %= trackLengthMeters
+                }
+                target = WalkingGeometry.sampleAt(track, walkingDistanceMeters)
+                if (!loopRoute && walkingDistanceMeters >= trackLengthMeters - 0.1) {
+                    phase = WalkPhase.PARKED
+                    LocationStatus.phase.value = phase
+                    LocationStatus.display.value = "已抵達終點 · 原地停留"
+                }
+            }
+            target?.let { point ->
+                pushFix(point)
+                LocationStatus.selected.value = point
+            }
+            if (providerActive) handler.postDelayed(this, 1_000L)
         }
     }
 
     override fun onCreate() {
         super.onCreate()
         manager = getSystemService(LocationManager::class.java)
-        val nm = getSystemService(NotificationManager::class.java)
-        nm.createNotificationChannel(NotificationChannel(
-            CHANNEL, "PikminBee 模擬位置", NotificationManager.IMPORTANCE_LOW
-        ))
+        getSystemService(NotificationManager::class.java).createNotificationChannel(
+            NotificationChannel(CHANNEL, "PikminBee 模擬位置", NotificationManager.IMPORTANCE_LOW)
+        )
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP) {
-            releaseMock()
-            stopSelf()
-            return START_NOT_STICKY
+        when (intent?.action) {
+            ACTION_STOP -> {
+                releaseMock()
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            ACTION_PAUSE_ROUTE -> {
+                if (phase == WalkPhase.MOVING) {
+                    phase = WalkPhase.PAUSED
+                    LocationStatus.phase.value = phase
+                    LocationStatus.display.value = "步行已暫停"
+                }
+                return START_STICKY
+            }
+            ACTION_RESUME_ROUTE -> {
+                if (phase == WalkPhase.PAUSED) {
+                    previousTickMillis = SystemClock.elapsedRealtime()
+                    phase = WalkPhase.MOVING
+                    LocationStatus.phase.value = phase
+                    LocationStatus.display.value = "沿道路步行中"
+                }
+                return START_STICKY
+            }
+            ACTION_STOP_ROUTE -> {
+                if (phase == WalkPhase.MOVING || phase == WalkPhase.PAUSED) {
+                    phase = WalkPhase.PARKED
+                    LocationStatus.phase.value = phase
+                    LocationStatus.display.value = "步行已停止 · 保留目前位置"
+                }
+                return START_STICKY
+            }
+            ACTION_CLEAR_ROUTE -> {
+                track = emptyList()
+                trackLengthMeters = 0.0
+                walkingDistanceMeters = 0.0
+                loopRoute = false
+                mode = null
+                phase = WalkPhase.IDLE
+                LocationStatus.phase.value = phase
+                LocationStatus.mode.value = null
+                LocationStatus.geometry.value = emptyList()
+                LocationStatus.display.value =
+                    if (providerActive) "模擬位置停留中" else "真實定位"
+                return START_STICKY
+            }
+            ACTION_TELEPORT -> {
+                val point = runCatching {
+                    Coordinate(intent.getDoubleExtra(EXTRA_LAT, Double.NaN),
+                        intent.getDoubleExtra(EXTRA_LON, Double.NaN))
+                }.getOrNull() ?: return START_NOT_STICKY
+                if (!ensureProvider()) return START_NOT_STICKY
+                phase = WalkPhase.IDLE
+                mode = null
+                track = emptyList()
+                trackLengthMeters = 0.0
+                LocationStatus.phase.value = phase
+                LocationStatus.mode.value = null
+                LocationStatus.geometry.value = emptyList()
+                target = point
+                LocationStatus.display.value = "瞬移後原地停留"
+                scheduleTicks()
+                return START_STICKY
+            }
+            ACTION_START_ROUTE -> {
+                val raw = intent.getDoubleArrayExtra(EXTRA_GEOMETRY) ?: return START_NOT_STICKY
+                if (raw.size !in 4..20_000 || raw.size % 2 != 0) return START_NOT_STICKY
+                val planned = runCatching {
+                    raw.toList().chunked(2).map { Coordinate(it[0], it[1]) }
+                }.getOrNull() ?: return START_NOT_STICKY
+                if (WalkingGeometry.lengthMeters(planned) !in 0.1..80_000.0) {
+                    LocationStatus.display.value = "步行路線無效"
+                    return START_NOT_STICKY
+                }
+                if (!ensureProvider()) return START_NOT_STICKY
+                track = planned
+                trackLengthMeters = WalkingGeometry.lengthMeters(track)
+                target = planned.first()
+                speedMetersPerSecond = intent.getDoubleExtra(EXTRA_SPEED, 1.4).coerceIn(0.5, 3.0)
+                walkingDistanceMeters = 0.0
+                loopRoute = intent.getBooleanExtra(EXTRA_LOOP, false)
+                mode = runCatching {
+                    WalkMode.valueOf(intent.getStringExtra(EXTRA_MODE) ?: "")
+                }.getOrDefault(WalkMode.ROUTE)
+                phase = WalkPhase.MOVING
+                LocationStatus.phase.value = phase
+                LocationStatus.mode.value = mode
+                LocationStatus.geometry.value = track
+                LocationStatus.display.value = if (mode == WalkMode.FLOWERS) "尋花步行中" else "沿道路步行中"
+                scheduleTicks()
+                return START_STICKY
+            }
+            else -> return START_NOT_STICKY
         }
-        if (intent?.action != ACTION_TELEPORT) return START_NOT_STICKY
+    }
 
-        val coordinate = runCatching {
-            Coordinate(intent.getDoubleExtra(EXTRA_LAT, Double.NaN),
-                intent.getDoubleExtra(EXTRA_LON, Double.NaN))
-        }.getOrNull() ?: return START_NOT_STICKY
-
+    private fun ensureProvider(): Boolean {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
             != PackageManager.PERMISSION_GRANTED) {
-            LocationStatus.display.value = "缺少精確定位權限"
-            stopSelf()
-            return START_NOT_STICKY
+            LocationStatus.display.value = "請先授予精確定位權限"
+            return false
         }
-
         return try {
             startForeground(NOTIFICATION_ID, notification())
-            if (!active) {
+            if (!providerActive) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    val properties = android.location.provider.ProviderProperties.Builder()
+                    val props = android.location.provider.ProviderProperties.Builder()
                         .setAccuracy(android.location.provider.ProviderProperties.ACCURACY_FINE)
                         .setPowerUsage(android.location.provider.ProviderProperties.POWER_USAGE_LOW)
-                        .setHasAltitudeSupport(true)
-                        .setHasSpeedSupport(true)
-                        .setHasBearingSupport(true)
-                        .build()
-                    manager.addTestProvider(LocationManager.GPS_PROVIDER, properties)
+                        .setHasAltitudeSupport(true).setHasSpeedSupport(true)
+                        .setHasBearingSupport(true).build()
+                    manager.addTestProvider(LocationManager.GPS_PROVIDER, props)
                 } else {
                     registerLegacyProvider()
                 }
                 manager.setTestProviderEnabled(LocationManager.GPS_PROVIDER, true)
+                providerActive = true
             }
-            active = true
-            target = coordinate
-            handler.removeCallbacks(tick)
-            tick.run()
-            LocationStatus.selected.value = coordinate
-            LocationStatus.display.value = "模擬位置執行中"
-            START_STICKY
-        } catch (ex: Exception) {
-            LocationStatus.display.value = "無法啟動：請在開發者選項選取 PikminBee"
+            true
+        } catch (e: Exception) {
+            LocationStatus.display.value = "請在 Android 開發者選項中選取 PikminBee 作為模擬位置 App"
             releaseMock()
             stopSelf()
-            START_NOT_STICKY
+            false
         }
+    }
+
+    private fun scheduleTicks() {
+        handler.removeCallbacks(tick)
+        previousTickMillis = SystemClock.elapsedRealtime()
+        tick.run()
     }
 
     @Suppress("DEPRECATION")
     @android.annotation.SuppressLint("WrongConstant")
     private fun registerLegacyProvider() {
-        manager.addTestProvider(
-            LocationManager.GPS_PROVIDER,
-            false, false, false, false,
-            true, true, true, Criteria.POWER_LOW, Criteria.ACCURACY_FINE
-        )
+        manager.addTestProvider(LocationManager.GPS_PROVIDER,
+            false, false, false, false, true, true, true,
+            Criteria.POWER_LOW, Criteria.ACCURACY_FINE)
     }
 
-    private fun pushFix(coordinate: Coordinate) {
+    private fun pushFix(point: Coordinate) {
         try {
-            val fix = Location(LocationManager.GPS_PROVIDER).apply {
-                latitude = coordinate.latitude
-                longitude = coordinate.longitude
+            manager.setTestProviderLocation(LocationManager.GPS_PROVIDER, Location(LocationManager.GPS_PROVIDER).apply {
+                latitude = point.latitude
+                longitude = point.longitude
                 accuracy = 5f
                 time = System.currentTimeMillis()
                 elapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos()
                 altitude = 0.0
-                speed = 0f
-                bearing = 0f
-            }
-            manager.setTestProviderLocation(LocationManager.GPS_PROVIDER, fix)
-        } catch (ex: Exception) {
-            LocationStatus.display.value = "模擬位置已中斷"
+                speed = if (phase == WalkPhase.MOVING) speedMetersPerSecond.toFloat() else 0f
+            })
+        } catch (e: Exception) {
+            LocationStatus.display.value = "模擬定位中斷，已停止"
             releaseMock()
             stopSelf()
         }
@@ -150,26 +285,35 @@ class MockLocationService : Service() {
 
     private fun notification(): Notification {
         val stop = PendingIntent.getService(
-            this, 0, stopIntent(this), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            this, 0, stopIntent(this),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         return Notification.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setContentTitle("PikminBee · 測試定位")
-            .setContentText("模擬位置運作中 · 點擊通知的停止以恢復真實 GPS")
+            .setContentText("模擬位置運作中 · 點擊停止可恢復真實定位")
             .setOngoing(true)
             .addAction(Notification.Action.Builder(
                 android.graphics.drawable.Icon.createWithResource(this, android.R.drawable.ic_media_pause),
-                "停止模擬", stop
+                "恢復真實 GPS", stop
             ).build())
             .build()
     }
 
     private fun releaseMock() {
-        active = false
+        providerActive = false
         handler.removeCallbacks(tick)
         target = null
+        track = emptyList()
+        trackLengthMeters = 0.0
+        mode = null
+        loopRoute = false
+        phase = WalkPhase.IDLE
         runCatching { manager.removeTestProvider(LocationManager.GPS_PROVIDER) }
         LocationStatus.selected.value = null
+        LocationStatus.geometry.value = emptyList()
+        LocationStatus.phase.value = WalkPhase.IDLE
+        LocationStatus.mode.value = null
         LocationStatus.display.value = "真實定位"
     }
 

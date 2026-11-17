@@ -44,6 +44,28 @@ class AppPreferences(private val context: Context) {
 
     fun removePlace(id: Long) { savePlaces(places().filterNot { it.id == id }) }
 
+    /** Route and flower waypoint drafts are separate from saved places. */
+    fun routeDraft(): List<Coordinate> = loadPoints("route_draft")
+    fun flowerDraft(): List<Coordinate> = loadPoints("flower_draft")
+    fun saveRouteDraft(points: List<Coordinate>) = savePoints("route_draft", points)
+    fun saveFlowerDraft(points: List<Coordinate>) = savePoints("flower_draft", points)
+
+    private fun loadPoints(key: String): List<Coordinate> = runCatching {
+        val json = JSONArray(prefs.getString(key, "[]") ?: "[]")
+        if (json.length() > 15) return@runCatching emptyList()
+        (0 until json.length()).mapNotNull { index ->
+            val item = json.optJSONObject(index) ?: return@mapNotNull null
+            runCatching { Coordinate(item.getDouble("lat"), item.getDouble("lon")) }.getOrNull()
+        }
+    }.getOrDefault(emptyList())
+
+    private fun savePoints(key: String, points: List<Coordinate>) {
+        require(points.size <= 15)
+        val json = JSONArray()
+        points.forEach { json.put(JSONObject().put("lat", it.latitude).put("lon", it.longitude)) }
+        prefs.edit().putString(key, json.toString()).apply()
+    }
+
     private fun savePlaces(places: List<SavedPlace>) {
         val values = JSONArray().apply {
             places.forEach { place ->
