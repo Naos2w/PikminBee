@@ -2,14 +2,14 @@
 
 PikminBee is a free, ad-free Android GPS testing app: a bee exploring the world, visiting flowers and collecting nectar. Built with Kotlin and Jetpack Compose.
 
-**Project status:** v0.2 development branch. POCO device UAT is still pending; not a production-ready release.
+**Project status:** v0.4 source development branch. All new LAN/browser controls are unverified on POCO; not a production-ready release.
 
 - Maps: OpenFreeMap Liberty/Dark via MapLibre; optional official Google Maps SDK (requires your own API key).
 - Interface: iOS-27-inspired frosted controls with accessible contrasts and a clear light/dark theme.
 - Location: explicit mock-location test mode on the owner's device (not a bypass for application integrity or location checks).
 - v0.2 development: map-picked walking stops, rate-limited Valhalla pedestrian routing, walking / pause / stop / clear, manually marked flower loops (not automatic game flower discovery). All require device UAT.
 - v0.3 development: opt-in, draggable bee floating controls connected to the same foreground GPS service (Android overlay permission and POCO UAT required).
-- Wi-Fi browser control: later milestone. See [TODO](docs/TODO.md).
+- v0.4 source prototype: manual private-Wi-Fi browser controller with six-digit PIN, explicit on-phone device approval, 30-minute sessions, OpenFreeMap web map, teleport/route controls and 2-second state sync. **LAN HTTP is unencrypted: trusted private networks only; device UAT pending.** See [LAN control instructions](docs/LAN-CONTROL.md) and [TODO](docs/TODO.md).
 - No root or accessibility service needed for the basic map/teleport workflow.
 
 ## Setup

@@ -60,6 +60,7 @@ import androidx.core.content.ContextCompat
 import com.naos.pikminbee.data.AppPreferences
 import com.naos.pikminbee.data.MapAppearance
 import com.naos.pikminbee.data.MapProvider
+import com.naos.pikminbee.data.RouteDraftState
 import com.naos.pikminbee.domain.Coordinate
 import com.naos.pikminbee.domain.WalkMode
 import com.naos.pikminbee.domain.WalkPhase
@@ -70,6 +71,7 @@ import com.naos.pikminbee.location.LocationStatus
 import com.naos.pikminbee.location.MockLocationService
 import com.naos.pikminbee.ui.LocationMap
 import com.naos.pikminbee.ui.JourneyControls
+import com.naos.pikminbee.ui.WifiControlPanel
 
 private val navy = Color(0xFF18263A)
 private val honey = Color(0xFF9F5E0C)
@@ -117,10 +119,11 @@ private fun PikminBeeScreen() {
     var latitudeText by remember { mutableStateOf(selected.latitude.toString()) }
     var longitudeText by remember { mutableStateOf(selected.longitude.toString()) }
     var tab by remember { mutableStateOf(ToolTab.TELEPORT) }
+    var showWifiPanel by remember { mutableStateOf(false) }
     var places by remember { mutableStateOf(prefs.places()) }
     var message by remember { mutableStateOf("地圖點一下就能選擇位置") }
-    var roadStops by remember { mutableStateOf(prefs.routeDraft()) }
-    var flowerStops by remember { mutableStateOf(prefs.flowerDraft()) }
+    val roadStops by RouteDraftState.routeStops.collectAsState()
+    val flowerStops by RouteDraftState.flowerStops.collectAsState()
     var planning by remember { mutableStateOf(false) }
     var speed by remember { mutableStateOf(1.4) }
     var flowerLoop by remember { mutableStateOf(true) }
@@ -162,16 +165,14 @@ private fun PikminBeeScreen() {
                     when (tab) {
                         ToolTab.ROUTE -> {
                             if (roadStops.size < 15) {
-                                roadStops = roadStops + point
-                                prefs.saveRouteDraft(roadStops)
-                                message = "已新增路點 ${roadStops.size} · 請繼續點選地圖"
+                                prefs.saveRouteDraft(roadStops + point)
+                                message = "已新增路點 ${roadStops.size + 1} · 請繼續點選地圖"
                             } else message = "最多只能加入 15 個路點"
                         }
                         ToolTab.FLOWERS -> {
                             if (flowerStops.size < 15) {
-                                flowerStops = flowerStops + point
-                                prefs.saveFlowerDraft(flowerStops)
-                                message = "已標記第 ${flowerStops.size} 個花點"
+                                prefs.saveFlowerDraft(flowerStops + point)
+                                message = "已標記第 ${flowerStops.size + 1} 個花點"
                             } else message = "最多只能加入 15 個花點"
                         }
                         else -> {
@@ -239,7 +240,8 @@ private fun PikminBeeScreen() {
 
                 FrostedCard(dark, Modifier.fillMaxWidth()) {
                     Column(
-                        Modifier.fillMaxWidth().padding(14.dp),
+                        Modifier.fillMaxWidth().heightIn(max = 520.dp)
+                            .verticalScroll(rememberScrollState()).padding(14.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
@@ -356,12 +358,10 @@ private fun PikminBeeScreen() {
                                 phase = walkPhase,
                                 foreground = foreground, muted = muted,
                                 onUndo = {
-                                    roadStops = roadStops.dropLast(1)
-                                    prefs.saveRouteDraft(roadStops)
+                                    prefs.saveRouteDraft(roadStops.dropLast(1))
                                 },
                                 onClear = {
-                                    roadStops = emptyList()
-                                    prefs.saveRouteDraft(roadStops)
+                                    prefs.saveRouteDraft(emptyList())
                                 },
                                 onMessage = { message = it },
                                 onAskLocation = { requestLocation.launch(Manifest.permission.ACCESS_FINE_LOCATION) },
@@ -374,12 +374,10 @@ private fun PikminBeeScreen() {
                                 phase = walkPhase,
                                 foreground = foreground, muted = muted,
                                 onUndo = {
-                                    flowerStops = flowerStops.dropLast(1)
-                                    prefs.saveFlowerDraft(flowerStops)
+                                    prefs.saveFlowerDraft(flowerStops.dropLast(1))
                                 },
                                 onClear = {
-                                    flowerStops = emptyList()
-                                    prefs.saveFlowerDraft(flowerStops)
+                                    prefs.saveFlowerDraft(emptyList())
                                 },
                                 onMessage = { message = it },
                                 onAskLocation = { requestLocation.launch(Manifest.permission.ACCESS_FINE_LOCATION) },
@@ -403,6 +401,16 @@ private fun PikminBeeScreen() {
                             Text(if (overlayVisible) "🐝 隱藏懸浮控制" else "🐝 開啟懸浮控制",
                                 fontSize = 13.sp)
                         }
+                        TextButton(onClick = { showWifiPanel = !showWifiPanel }) {
+                            Text(if (showWifiPanel) "收起 Wi-Fi 遠端控制" else "Wi-Fi 遠端控制",
+                                fontSize = 13.sp)
+                        }
+                        if (showWifiPanel) WifiControlPanel(
+                            isMockActive = mockPosition != null,
+                            foreground = foreground,
+                            muted = muted,
+                            onMessage = { message = it },
+                        )
                         Text(message, fontSize = 12.sp, color = muted, maxLines = 2)
                     }
                 }

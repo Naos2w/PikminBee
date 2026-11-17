@@ -23,10 +23,16 @@
 - [ ] HyperOS lock-in-recents guidance and realistic force-stop limitations.
 
 ## v0.4 — LAN browser controller
-- [ ] Opt-in Wi-Fi/LAN endpoint; off by default.
-- [ ] PIN pairing, rotating session tokens, device approval, request authentication, rate limits.
-- [ ] Live position/status and route editing through a mobile-friendly local web UI.
-- [ ] Google Maps on the browser only with separate authorised web key / billing; OpenFreeMap by default.
+- [x] Opt-in private-Wi-Fi IPv4 HTTP endpoint (off by default, bound only to Wi-Fi IP); [ ] POCO network UAT.
+- [x] Six-digit PIN + on-phone device approval, memory-only expiring sessions, IP binding, Origin/Host checks, rate limits and Wi-Fi-loss shutdown; [ ] security and cross-device UAT.
+- [x] Responsive OpenFreeMap Liberty/Dark web page, map-pick teleport, route/flower stops, controls and 2-second state polling, with shared phone/web route state; [ ] browser/device UAT and optional WebSocket if needed.
+- [ ] Optional Google Maps on browser with separate authorised web key/billing; OpenFreeMap is the only browser map initially. Browser loads pinned MapLibre JS from CDN (internet required).
+
+## v0.4 follow-ups
+- [ ] Verify private Wi-Fi phone-to-MSI pairing, Origin/Host rejection, disconnect and phone approval in real Android/Chrome.
+- [ ] Evaluate local HTTPS or other encrypted transport before public or untrusted-network use; LAN HTTP is not encrypted.
+- [ ] When targetSdk reaches 37, declare and request Android 17 `ACCESS_LOCAL_NETWORK` runtime permission.
+- [ ] Persist named route library and GPX; verify source licensing for game-specific flower discovery.
 
 ## Release gates
 - [x] No automatic production release or installation.

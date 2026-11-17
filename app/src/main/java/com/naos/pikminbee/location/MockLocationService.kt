@@ -19,6 +19,8 @@ import android.os.SystemClock
 import android.provider.Settings
 import com.naos.pikminbee.MainActivity
 import com.naos.pikminbee.ui.FloatingControls
+import com.naos.pikminbee.lan.LanController
+import com.naos.pikminbee.lan.LanStatus
 import androidx.core.content.ContextCompat
 import com.naos.pikminbee.domain.Coordinate
 import com.naos.pikminbee.domain.WalkMode
@@ -47,6 +49,10 @@ class MockLocationService : Service() {
         const val ACTION_CLEAR_ROUTE = "com.naos.pikminbee.action.CLEAR_ROUTE"
         const val ACTION_SHOW_OVERLAY = "com.naos.pikminbee.action.SHOW_OVERLAY"
         const val ACTION_HIDE_OVERLAY = "com.naos.pikminbee.action.HIDE_OVERLAY"
+        const val ACTION_ENABLE_LAN = "com.naos.pikminbee.action.ENABLE_LAN"
+        const val ACTION_DISABLE_LAN = "com.naos.pikminbee.action.DISABLE_LAN"
+        const val ACTION_APPROVE_LAN = "com.naos.pikminbee.action.APPROVE_LAN"
+        const val ACTION_DENY_LAN = "com.naos.pikminbee.action.DENY_LAN"
         const val EXTRA_LAT = "lat"
         const val EXTRA_LON = "lon"
         const val EXTRA_GEOMETRY = "route_geometry"
@@ -94,6 +100,7 @@ class MockLocationService : Service() {
     private var phase = WalkPhase.IDLE
     private var mode: WalkMode? = null
     private var floatingControls: FloatingControls? = null
+    private var lanController: LanController? = null
 
     private val tick = object : Runnable {
         override fun run() {
@@ -118,6 +125,7 @@ class MockLocationService : Service() {
                 LocationStatus.selected.value = point
             }
             floatingControls?.update(phase, mode)
+            lanController?.checkNetwork()
             if (providerActive) handler.postDelayed(this, 1_000L)
         }
     }
@@ -134,6 +142,30 @@ class MockLocationService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
+            ACTION_ENABLE_LAN -> {
+                if (!providerActive) {
+                    LanStatus.display.value = LanStatus.display.value.copy(
+                        active = false, note = "請先在手機啟用測試定位，才能開啟 Wi-Fi 控制")
+                    stopSelf()
+                    return START_NOT_STICKY
+                }
+                val current = lanController ?: LanController(this).also { lanController = it }
+                current.start()
+                return START_STICKY
+            }
+            ACTION_DISABLE_LAN -> {
+                lanController?.close()
+                lanController = null
+                return START_STICKY
+            }
+            ACTION_APPROVE_LAN -> {
+                lanController?.approvePending()
+                return START_STICKY
+            }
+            ACTION_DENY_LAN -> {
+                lanController?.denyPending()
+                return START_STICKY
+            }
             ACTION_SHOW_OVERLAY -> {
                 if (!providerActive) {
                     LocationStatus.display.value = "請先啟動模擬位置，再開啟懸浮控制"
@@ -351,6 +383,8 @@ class MockLocationService : Service() {
     }
 
     private fun releaseMock() {
+        lanController?.close()
+        lanController = null
         floatingControls?.dismiss()
         floatingControls = null
         LocationStatus.overlayVisible.value = false
