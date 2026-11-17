@@ -18,7 +18,7 @@
 - [x] Route/flower drafts saved locally, flower loop playback and speed presets; [ ] named route library and GPX import/export.
 
 ## v0.3 — Overlay and persistence
-- [ ] Floating overlay controls sharing exactly one GPS state machine.
+- [x] Basic draggable bee overlay sharing the existing GPS foreground service, with Pause/Resume/Stop/Map/Hide/Restore actions; [ ] device-level interaction and permission UAT.
 - [x] Basic location foreground service and explicit stop notification action; [ ] lifecycle/restart and HyperOS UAT.
 - [ ] HyperOS lock-in-recents guidance and realistic force-stop limitations.
 

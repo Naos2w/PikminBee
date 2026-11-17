@@ -16,6 +16,9 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
+import android.provider.Settings
+import com.naos.pikminbee.MainActivity
+import com.naos.pikminbee.ui.FloatingControls
 import androidx.core.content.ContextCompat
 import com.naos.pikminbee.domain.Coordinate
 import com.naos.pikminbee.domain.WalkMode
@@ -30,6 +33,7 @@ object LocationStatus {
     val phase = MutableStateFlow(WalkPhase.IDLE)
     val mode = MutableStateFlow<WalkMode?>(null)
     val geometry = MutableStateFlow<List<Coordinate>>(emptyList())
+    val overlayVisible = MutableStateFlow(false)
 }
 
 class MockLocationService : Service() {
@@ -41,6 +45,8 @@ class MockLocationService : Service() {
         const val ACTION_RESUME_ROUTE = "com.naos.pikminbee.action.RESUME_ROUTE"
         const val ACTION_STOP_ROUTE = "com.naos.pikminbee.action.STOP_ROUTE"
         const val ACTION_CLEAR_ROUTE = "com.naos.pikminbee.action.CLEAR_ROUTE"
+        const val ACTION_SHOW_OVERLAY = "com.naos.pikminbee.action.SHOW_OVERLAY"
+        const val ACTION_HIDE_OVERLAY = "com.naos.pikminbee.action.HIDE_OVERLAY"
         const val EXTRA_LAT = "lat"
         const val EXTRA_LON = "lon"
         const val EXTRA_GEOMETRY = "route_geometry"
@@ -87,6 +93,7 @@ class MockLocationService : Service() {
     private var previousTickMillis = 0L
     private var phase = WalkPhase.IDLE
     private var mode: WalkMode? = null
+    private var floatingControls: FloatingControls? = null
 
     private val tick = object : Runnable {
         override fun run() {
@@ -110,6 +117,7 @@ class MockLocationService : Service() {
                 pushFix(point)
                 LocationStatus.selected.value = point
             }
+            floatingControls?.update(phase, mode)
             if (providerActive) handler.postDelayed(this, 1_000L)
         }
     }
@@ -126,6 +134,48 @@ class MockLocationService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
+            ACTION_SHOW_OVERLAY -> {
+                if (!providerActive) {
+                    LocationStatus.display.value = "請先啟動模擬位置，再開啟懸浮控制"
+                    return START_NOT_STICKY
+                }
+                if (!Settings.canDrawOverlays(this)) {
+                    LocationStatus.display.value = "請先授予 PikminBee 懸浮視窗權限"
+                    return START_STICKY
+                }
+                runCatching {
+                    if (floatingControls == null) {
+                        floatingControls = FloatingControls(this,
+                            sendAction = { action ->
+                                val actionName = when (action) {
+                                    FloatingControls.PAUSE -> ACTION_PAUSE_ROUTE
+                                    FloatingControls.RESUME -> ACTION_RESUME_ROUTE
+                                    FloatingControls.STOP_WALK -> ACTION_STOP_ROUTE
+                                    FloatingControls.RESTORE_REAL -> ACTION_STOP
+                                    else -> ACTION_HIDE_OVERLAY
+                                }
+                                startService(command(this, actionName))
+                            },
+                            openMap = {
+                                startActivity(Intent(this, MainActivity::class.java)
+                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+                            })
+                    }
+                    floatingControls?.show()
+                    floatingControls?.update(phase, mode)
+                    LocationStatus.overlayVisible.value = true
+                }.onFailure {
+                    LocationStatus.overlayVisible.value = false
+                    LocationStatus.display.value = "無法顯示懸浮視窗：" + (it.message ?: "權限問題")
+                }
+                return START_STICKY
+            }
+            ACTION_HIDE_OVERLAY -> {
+                floatingControls?.dismiss()
+                floatingControls = null
+                LocationStatus.overlayVisible.value = false
+                return START_STICKY
+            }
             ACTION_STOP -> {
                 releaseMock()
                 stopSelf()
@@ -301,6 +351,9 @@ class MockLocationService : Service() {
     }
 
     private fun releaseMock() {
+        floatingControls?.dismiss()
+        floatingControls = null
+        LocationStatus.overlayVisible.value = false
         providerActive = false
         handler.removeCallbacks(tick)
         target = null
