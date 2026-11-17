@@ -76,11 +76,14 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import com.naos.pikminbee.location.LocationStatus
+import com.naos.pikminbee.location.CheckpointStatus
+import com.naos.pikminbee.location.SessionJournal
 import com.naos.pikminbee.location.MockLocationService
 import com.naos.pikminbee.ui.LocationMap
 import com.naos.pikminbee.ui.JourneyControls
 import com.naos.pikminbee.ui.RouteLibraryPanel
 import com.naos.pikminbee.ui.WifiControlPanel
+import com.naos.pikminbee.ui.BackgroundSessionPanel
 
 private val navy = Color(0xFF18263A)
 private val honey = Color(0xFF9F5E0C)
@@ -113,6 +116,8 @@ private fun FrostedCard(dark: Boolean, modifier: Modifier = Modifier, content: @
 private fun PikminBeeScreen() {
     val context = LocalContext.current
     val prefs = remember(context) { AppPreferences(context) }
+    remember(context) { SessionJournal(context).also { it.read() } }
+    val checkpoint by CheckpointStatus.last.collectAsState()
     val systemDark = androidx.compose.foundation.isSystemInDarkTheme()
     var provider by remember { mutableStateOf(prefs.provider()) }
     var appearance by remember { mutableStateOf(prefs.appearance()) }
@@ -531,6 +536,16 @@ private fun PikminBeeScreen() {
                             foreground = foreground,
                             muted = muted,
                             onMessage = { message = it },
+                        )
+                        BackgroundSessionPanel(
+                            isMockActive = mockPosition != null,
+                            checkpoint = checkpoint,
+                            foreground = foreground,
+                            muted = muted,
+                            onMessage = { message = it },
+                            onAskLocationPermission = {
+                                requestLocation.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+                            },
                         )
                         Text(message, fontSize = 12.sp, color = muted, maxLines = 2)
                     }
