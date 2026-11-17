@@ -92,6 +92,7 @@ fun FlowerVisionPanel(
                         "測試圖片找到 " + result.hits.size + " 個候選形狀；需實機圖片驗證",
                     result = result,
                     origin = "使用者自行選取的圖片",
+                    documentRevision = BloomVisionState.newDocumentRevision(),
                 )
             } catch (e: Exception) {
                 onMessage("圖片辨識失敗：" + (e.message ?: "不支援此檔案"))
@@ -170,10 +171,19 @@ fun FlowerVisionPanel(
                     color = muted, fontSize = 11.sp,
                 )
             }
+            if (vision.origin == "使用者自行選取的圖片" &&
+                vision.phase == BloomVisionState.Phase.IDLE) {
+                FlowerCalibrationPanel(
+                    image = result,
+                    documentRevision = vision.documentRevision,
+                    foreground = foreground,
+                    muted = muted,
+                )
+            }
         }
         Text(
-            "目前尚未建立遊戲地圖像素→GPS 的可信校正，也沒有真實圖片的準確率報告；" +
-                "因此不能把辨識結果自動加入尋花路線。這部分留待整合 UAT。",
+            "目前僅支援使用者自行選取圖片的手動校正預覽，沒有真實圖片的準確率報告；" +
+                "因此不能把估計座標自動加入尋花路線。實際準確度留待整合 UAT。",
             color = muted, fontSize = 11.sp,
         )
     }
