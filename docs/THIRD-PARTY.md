@@ -16,7 +16,7 @@ PikminBee's private Wi-Fi browser controller serves a **fixed, reviewed local co
 | JS SHA-256 | `1e0a68844041aec6621a10d4725c9970c3b19cf7e1605d98b01dbc993e1058b2` |
 | CSS SHA-256 | `a90798a1953017790e590f7e1bd35ff103a8a4263972cb47290b78adf86f8c20` |
 
-The original license notice is retained without changes. Unit tests verify the exact vendored JS/CSS hashes; updating MapLibre requires updating the bundled assets, licence, tests, and review.
+The original license notice is retained without changes. Unit tests verify the exact vendored JS/CSS hashes. The repository's `.gitattributes` marks these vendor assets `-text` to prevent Windows/Unix newline conversion from changing their bytes. Updating MapLibre requires updating the bundled assets, licence, tests, and review.
 
 MapLibre JS is code only. The map still uses **OpenFreeMap** network map resources with **OpenStreetMap** attribution. Map data licensing and third-party map style hosting policies remain separate from the MapLibre GL JS licence.
 
