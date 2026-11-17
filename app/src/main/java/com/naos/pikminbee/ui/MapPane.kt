@@ -47,16 +47,19 @@ fun LocationMap(
     provider: MapProvider,
     dark: Boolean,
     selected: Coordinate,
+    start: Coordinate?,
     stops: List<Coordinate>,
     road: List<Coordinate>,
+    previewRoad: Boolean,
     flowerSpots: List<FlowerSpot>,
     onPick: (Coordinate) -> Unit,
+    onFlowerPick: (FlowerSpot) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     when (provider) {
-        MapProvider.OPEN_FREE_MAP -> OpenFreeMapPane(dark, selected, stops, road, flowerSpots, onPick, modifier)
+        MapProvider.OPEN_FREE_MAP -> OpenFreeMapPane(dark, selected, start, stops, road, previewRoad, flowerSpots, onPick, onFlowerPick, modifier)
         MapProvider.GOOGLE_MAPS -> if (BuildConfig.HAS_GOOGLE_MAPS_KEY) {
-            GoogleMapsPane(dark, selected, stops, road, flowerSpots, onPick, modifier)
+            GoogleMapsPane(dark, selected, start, stops, road, previewRoad, flowerSpots, onPick, onFlowerPick, modifier)
         } else {
             Box(modifier) { Text("Google Maps 尚未設定 API Key，請先在 secrets.properties 填寫設定。") }
         }
@@ -65,13 +68,14 @@ fun LocationMap(
 
 @Composable
 private fun OpenFreeMapPane(
-    dark: Boolean, selected: Coordinate, stops: List<Coordinate>,
-    road: List<Coordinate>, flowerSpots: List<FlowerSpot>,
-    onPick: (Coordinate) -> Unit, modifier: Modifier,
+    dark: Boolean, selected: Coordinate, start: Coordinate?, stops: List<Coordinate>,
+    road: List<Coordinate>, previewRoad: Boolean, flowerSpots: List<FlowerSpot>,
+    onPick: (Coordinate) -> Unit, onFlowerPick: (FlowerSpot) -> Unit, modifier: Modifier,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val latestOnPick by rememberUpdatedState(onPick)
+    val latestOnFlowerPick by rememberUpdatedState(onFlowerPick)
     val view = remember(context) {
         MapLibre.getInstance(context)
         LibreMapView(context).apply { onCreate(null) }
@@ -80,8 +84,11 @@ private fun OpenFreeMapPane(
     var styleVersion by remember { mutableIntStateOf(0) }
     var currentMarker by remember { mutableStateOf<org.maplibre.android.annotations.Marker?>(null) }
     var currentStyleVersion by remember { mutableIntStateOf(-1) }
+    var startMarker by remember { mutableStateOf<org.maplibre.android.annotations.Marker?>(null) }
+    var startStyleVersion by remember { mutableIntStateOf(-1) }
     var stopMarkers by remember { mutableStateOf(emptyList<org.maplibre.android.annotations.Marker>()) }
     var flowerMarkers by remember { mutableStateOf(emptyList<org.maplibre.android.annotations.Marker>()) }
+    var shownFlowers by remember { mutableStateOf(emptyList<FlowerSpot>()) }
     var line by remember { mutableStateOf<org.maplibre.android.annotations.Polyline?>(null) }
     DisposableEffect(view, lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -101,6 +108,14 @@ private fun OpenFreeMapPane(
             ready.addOnMapClickListener { point ->
                 latestOnPick(Coordinate(point.latitude, point.longitude))
                 true
+            }
+            ready.setOnMarkerClickListener { tapped ->
+                val index = flowerMarkers.indexOfFirst { it.id == tapped.id }
+                val flower = shownFlowers.getOrNull(index)
+                if (flower != null) {
+                    latestOnFlowerPick(flower)
+                    true
+                } else false
             }
             ready.moveCamera(org.maplibre.android.camera.CameraUpdateFactory.newCameraPosition(
                 LibreCameraPosition.Builder()
@@ -132,7 +147,23 @@ private fun OpenFreeMapPane(
             currentStyleVersion = styleVersion
         } else currentMarker?.position = position
     }
-    LaunchedEffect(map, styleVersion, stops, road) {
+    LaunchedEffect(map, styleVersion, start) {
+        val m = map ?: return@LaunchedEffect
+        if (styleVersion == 0) return@LaunchedEffect
+        if (start == null) {
+            startMarker?.let { m.removeMarker(it) }
+            startMarker = null
+        } else {
+            val position = LibreLatLng(start.latitude, start.longitude)
+            if (startMarker == null || startStyleVersion != styleVersion) {
+                startMarker?.let { m.removeMarker(it) }
+                startMarker = m.addMarker(LibreMarkerOptions()
+                    .position(position).title("📍 尋花起點"))
+                startStyleVersion = styleVersion
+            } else startMarker?.position = position
+        }
+    }
+    LaunchedEffect(map, styleVersion, stops, road, previewRoad) {
         val m = map ?: return@LaunchedEffect
         if (styleVersion == 0) return@LaunchedEffect
         stopMarkers.forEach { m.removeMarker(it) }
@@ -144,13 +175,15 @@ private fun OpenFreeMapPane(
         }
         line = if (road.size >= 2) m.addPolyline(LibrePolylineOptions()
             .addAll(road.map { LibreLatLng(it.latitude, it.longitude) })
-            .color(android.graphics.Color.rgb(232, 151, 39)).width(5f)) else null
+            .color(if (previewRoad) android.graphics.Color.rgb(42, 175, 211)
+                else android.graphics.Color.rgb(232, 151, 39)).width(5f)) else null
     }
     LaunchedEffect(map, styleVersion, flowerSpots) {
         val m = map ?: return@LaunchedEffect
         if (styleVersion == 0) return@LaunchedEffect
         flowerMarkers.forEach { m.removeMarker(it) }
-        flowerMarkers = flowerSpots.take(100).map { flower ->
+        shownFlowers = flowerSpots.take(100)
+        flowerMarkers = shownFlowers.map { flower ->
             m.addMarker(LibreMarkerOptions()
                 .position(LibreLatLng(flower.coordinate.latitude, flower.coordinate.longitude))
                 .title("🌸 " + flower.name +
@@ -162,18 +195,21 @@ private fun OpenFreeMapPane(
 
 @Composable
 private fun GoogleMapsPane(
-    dark: Boolean, selected: Coordinate, stops: List<Coordinate>,
-    road: List<Coordinate>, flowerSpots: List<FlowerSpot>,
-    onPick: (Coordinate) -> Unit, modifier: Modifier,
+    dark: Boolean, selected: Coordinate, start: Coordinate?, stops: List<Coordinate>,
+    road: List<Coordinate>, previewRoad: Boolean, flowerSpots: List<FlowerSpot>,
+    onPick: (Coordinate) -> Unit, onFlowerPick: (FlowerSpot) -> Unit, modifier: Modifier,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val latestOnPick by rememberUpdatedState(onPick)
+    val latestOnFlowerPick by rememberUpdatedState(onFlowerPick)
     val view = remember(context) { GoogleMapView(context).apply { onCreate(null) } }
     var map by remember { mutableStateOf<GoogleMap?>(null) }
     var currentMarker by remember { mutableStateOf<com.google.android.gms.maps.model.Marker?>(null) }
+    var startMarker by remember { mutableStateOf<com.google.android.gms.maps.model.Marker?>(null) }
     var stopMarkers by remember { mutableStateOf(emptyList<com.google.android.gms.maps.model.Marker>()) }
     var flowerMarkers by remember { mutableStateOf(emptyList<com.google.android.gms.maps.model.Marker>()) }
+    var shownFlowers by remember { mutableStateOf(emptyList<FlowerSpot>()) }
     var line by remember { mutableStateOf<com.google.android.gms.maps.model.Polyline?>(null) }
     DisposableEffect(view, lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -191,6 +227,14 @@ private fun GoogleMapsPane(
             ready.uiSettings.isMapToolbarEnabled = false
             ready.setOnMapClickListener { point ->
                 latestOnPick(Coordinate(point.latitude, point.longitude))
+            }
+            ready.setOnMarkerClickListener { tapped ->
+                val index = flowerMarkers.indexOfFirst { it.id == tapped.id }
+                val flower = shownFlowers.getOrNull(index)
+                if (flower != null) {
+                    latestOnFlowerPick(flower)
+                    true
+                } else false
             }
             ready.moveCamera(CameraUpdateFactory.newLatLngZoom(
                 GoogleLatLng(selected.latitude, selected.longitude), 14.5f))
@@ -213,7 +257,22 @@ private fun GoogleMapsPane(
             currentMarker = m.addMarker(GoogleMarkerOptions().position(position).title("選取位置"))
         } else currentMarker?.position = position
     }
-    LaunchedEffect(map, stops, road) {
+    LaunchedEffect(map, start) {
+        val m = map ?: return@LaunchedEffect
+        if (start == null) {
+            startMarker?.remove()
+            startMarker = null
+        } else {
+            val position = GoogleLatLng(start.latitude, start.longitude)
+            if (startMarker == null) {
+                startMarker = m.addMarker(GoogleMarkerOptions()
+                    .position(position).title("📍 尋花起點")
+                    .icon(com.google.android.gms.maps.model.BitmapDescriptorFactory.defaultMarker(
+                        com.google.android.gms.maps.model.BitmapDescriptorFactory.HUE_AZURE)))
+            } else startMarker?.position = position
+        }
+    }
+    LaunchedEffect(map, stops, road, previewRoad) {
         val m = map ?: return@LaunchedEffect
         stopMarkers.forEach { it.remove() }
         line?.remove()
@@ -224,12 +283,15 @@ private fun GoogleMapsPane(
         }
         line = if (road.size >= 2) m.addPolyline(GooglePolylineOptions()
             .addAll(road.map { GoogleLatLng(it.latitude, it.longitude) })
-            .color(android.graphics.Color.rgb(232, 151, 39)).width(6f)) else null
+            .color(if (previewRoad) android.graphics.Color.rgb(42, 175, 211)
+                else android.graphics.Color.rgb(232, 151, 39)).width(6f)) else null
     }
     LaunchedEffect(map, flowerSpots) {
         val m = map ?: return@LaunchedEffect
         flowerMarkers.forEach { it.remove() }
-        flowerMarkers = flowerSpots.take(100).mapNotNull { flower ->
+        // Google Maps may return null for a marker; keep the displayed spot paired
+        // with its actual marker rather than indexing the original input list.
+        val created = flowerSpots.take(100).mapNotNull { flower ->
             m.addMarker(GoogleMarkerOptions()
                 .position(GoogleLatLng(flower.coordinate.latitude, flower.coordinate.longitude))
                 .title("🌸 " + flower.name)
@@ -238,8 +300,12 @@ private fun GoogleMapsPane(
                 .icon(com.google.android.gms.maps.model.BitmapDescriptorFactory.defaultMarker(
                     if (flower.evidence == FlowerEvidence.PERSONALLY_CHECKED)
                         com.google.android.gms.maps.model.BitmapDescriptorFactory.HUE_ROSE
-                    else com.google.android.gms.maps.model.BitmapDescriptorFactory.HUE_VIOLET)))
+                    else com.google.android.gms.maps.model.BitmapDescriptorFactory.HUE_VIOLET)))?.let {
+                    it to flower
+                }
         }
+        flowerMarkers = created.map { it.first }
+        shownFlowers = created.map { it.second }
     }
     AndroidView(factory = { view }, modifier = modifier)
 }

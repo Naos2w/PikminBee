@@ -37,6 +37,7 @@ fun FlowerCatalogPanel(
     origin: Coordinate,
     selected: Coordinate,
     draft: List<Coordinate>,
+    canAddToRoute: Boolean,
     foreground: Color,
     muted: Color,
     onRecord: (String, Coordinate) -> Unit,
@@ -88,6 +89,8 @@ fun FlowerCatalogPanel(
             }
         }
         Text("附近搜尋以直線距離排序；實際行走距離仍由道路規劃決定。", color = muted, fontSize = 11.sp)
+        if (!canAddToRoute) Text("請先在地圖設定起點，才能將花點加入路線。",
+            color = muted, fontSize = 11.sp)
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             listOf(500.0, 2000.0, 5000.0).forEach { value ->
                 FilterChip(selected = radius == value, onClick = { radius = value },
@@ -99,7 +102,7 @@ fun FlowerCatalogPanel(
         Text("附近候選 ${nearby.size} 個", color = foreground, fontSize = 13.sp,
             fontWeight = FontWeight.SemiBold)
         OutlinedButton(
-            enabled = nearby.isNotEmpty() && draft.size < 14,
+            enabled = canAddToRoute && nearby.isNotEmpty() && draft.size < 14,
             onClick = { onAppendNearby(nearby.take(14)) },
             modifier = Modifier.fillMaxWidth(),
         ) { Text("把附近花點加入尋花路線（最多 14 點）", fontSize = 12.sp) }
@@ -122,7 +125,8 @@ fun FlowerCatalogPanel(
                             FlowerEvidence.UNVERIFIED_IMPORT -> "匯入候選 · 未確認"
                         }, color = muted, fontSize = 11.sp)
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                            TextButton(onClick = { onAddStop(spot) }, enabled = draft.size < 14) {
+                            TextButton(onClick = { onAddStop(spot) },
+                                enabled = canAddToRoute && draft.size < 14) {
                                 Text("加入路線", fontSize = 11.sp)
                             }
                             if (spot.evidence == FlowerEvidence.UNVERIFIED_IMPORT) {
