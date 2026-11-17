@@ -19,8 +19,8 @@
 
 ## v0.3 — Overlay and persistence
 - [x] Basic draggable bee overlay sharing the existing GPS foreground service, with Pause/Resume/Stop/Map/Hide/Restore actions; [ ] device-level interaction and permission UAT.
-- [x] Basic location foreground service and explicit stop notification action; [ ] lifecycle/restart and HyperOS UAT.
-- [ ] HyperOS lock-in-recents guidance and realistic force-stop limitations.
+- [x] Foreground GPS service + notification actions (pause/resume/stop/restore), 5-second last-coordinate journal and safe START_STICKY null-Intent recovery as PARKED; [ ] on-device lifecycle/restart UAT.
+- [x] In-app HyperOS/POCO background guidance, standard Android app settings link and user-triggered permission flow; force-stop/reboot limitations documented in [BACKGROUND-LIFECYCLE.md](BACKGROUND-LIFECYCLE.md). [ ] POCO/UAT verification.
 
 ## v0.4 — LAN browser controller
 - [x] Opt-in private-Wi-Fi IPv4 HTTP endpoint (off by default, bound only to Wi-Fi IP); [ ] POCO network UAT.

@@ -101,6 +101,7 @@ class MockLocationService : Service() {
     private var mode: WalkMode? = null
     private var floatingControls: FloatingControls? = null
     private var lanController: LanController? = null
+    private lateinit var journal: SessionJournal
 
     private val tick = object : Runnable {
         override fun run() {
@@ -118,11 +119,15 @@ class MockLocationService : Service() {
                     phase = WalkPhase.PARKED
                     LocationStatus.phase.value = phase
                     LocationStatus.display.value = "已抵達終點 · 原地停留"
+                    refreshNotification()
                 }
             }
             target?.let { point ->
                 pushFix(point)
-                LocationStatus.selected.value = point
+                if (providerActive) {
+                    journal.record(point)
+                    LocationStatus.selected.value = point
+                }
             }
             floatingControls?.update(phase, mode)
             lanController?.checkNetwork()
@@ -133,6 +138,8 @@ class MockLocationService : Service() {
     override fun onCreate() {
         super.onCreate()
         manager = getSystemService(LocationManager::class.java)
+        journal = SessionJournal(this)
+        journal.read()
         getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel(CHANNEL, "PikminBee 模擬位置", NotificationManager.IMPORTANCE_LOW)
         )
@@ -142,6 +149,29 @@ class MockLocationService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
+            null -> {
+                // START_STICKY may redeliver a null Intent after the OS reclaims our process.
+                // Only restore the last virtual position as PARKED. Never replay a route
+                // or reopen overlay/LAN control without the user's explicit interaction.
+                val previous = journal.read()
+                if (previous == null || !ensureProvider()) {
+                    stopSelf(startId)
+                    return START_NOT_STICKY
+                }
+                track = emptyList()
+                trackLengthMeters = 0.0
+                loopRoute = false
+                mode = null
+                phase = WalkPhase.PARKED
+                target = previous.coordinate
+                LocationStatus.phase.value = phase
+                LocationStatus.mode.value = null
+                LocationStatus.geometry.value = emptyList()
+                LocationStatus.display.value = "系統已恢復定位 · 原地暫停"
+                scheduleTicks()
+                refreshNotification()
+                return START_STICKY
+            }
             ACTION_ENABLE_LAN -> {
                 if (!providerActive) {
                     LanStatus.display.value = LanStatus.display.value.copy(
@@ -218,6 +248,8 @@ class MockLocationService : Service() {
                     phase = WalkPhase.PAUSED
                     LocationStatus.phase.value = phase
                     LocationStatus.display.value = "步行已暫停"
+                    target?.let { journal.record(it, force = true) }
+                    refreshNotification()
                 }
                 return START_STICKY
             }
@@ -227,6 +259,7 @@ class MockLocationService : Service() {
                     phase = WalkPhase.MOVING
                     LocationStatus.phase.value = phase
                     LocationStatus.display.value = "沿道路步行中"
+                    refreshNotification()
                 }
                 return START_STICKY
             }
@@ -235,6 +268,8 @@ class MockLocationService : Service() {
                     phase = WalkPhase.PARKED
                     LocationStatus.phase.value = phase
                     LocationStatus.display.value = "步行已停止 · 保留目前位置"
+                    target?.let { journal.record(it, force = true) }
+                    refreshNotification()
                 }
                 return START_STICKY
             }
@@ -250,6 +285,8 @@ class MockLocationService : Service() {
                 LocationStatus.geometry.value = emptyList()
                 LocationStatus.display.value =
                     if (providerActive) "模擬位置停留中" else "真實定位"
+                if (providerActive) target?.let { journal.record(it, force = true) }
+                refreshNotification()
                 return START_STICKY
             }
             ACTION_TELEPORT -> {
@@ -266,8 +303,10 @@ class MockLocationService : Service() {
                 LocationStatus.mode.value = null
                 LocationStatus.geometry.value = emptyList()
                 target = point
+                journal.record(point, force = true)
                 LocationStatus.display.value = "瞬移後原地停留"
                 scheduleTicks()
+                refreshNotification()
                 return START_STICKY
             }
             ACTION_START_ROUTE -> {
@@ -284,6 +323,7 @@ class MockLocationService : Service() {
                 track = planned
                 trackLengthMeters = WalkingGeometry.lengthMeters(track)
                 target = planned.first()
+                journal.record(planned.first(), force = true)
                 speedMetersPerSecond = intent.getDoubleExtra(EXTRA_SPEED, 1.4).coerceIn(0.5, 3.0)
                 walkingDistanceMeters = 0.0
                 loopRoute = intent.getBooleanExtra(EXTRA_LOOP, false)
@@ -296,6 +336,7 @@ class MockLocationService : Service() {
                 LocationStatus.geometry.value = track
                 LocationStatus.display.value = if (mode == WalkMode.FLOWERS) "尋花步行中" else "沿道路步行中"
                 scheduleTicks()
+                refreshNotification()
                 return START_STICKY
             }
             else -> return START_NOT_STICKY
@@ -327,7 +368,7 @@ class MockLocationService : Service() {
             true
         } catch (e: Exception) {
             LocationStatus.display.value = "請在 Android 開發者選項中選取 PikminBee 作為模擬位置 App"
-            releaseMock()
+            releaseMock(clearCheckpoint = false)
             stopSelf()
             false
         }
@@ -360,29 +401,66 @@ class MockLocationService : Service() {
             })
         } catch (e: Exception) {
             LocationStatus.display.value = "模擬定位中斷，已停止"
-            releaseMock()
+            releaseMock(clearCheckpoint = false)
             stopSelf()
         }
     }
 
     private fun notification(): Notification {
-        val stop = PendingIntent.getService(
-            this, 0, stopIntent(this),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-        return Notification.Builder(this, CHANNEL)
+        val builder = Notification.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setContentTitle("PikminBee · 測試定位")
-            .setContentText("模擬位置運作中 · 點擊停止可恢復真實定位")
+            .setContentText(LocationStatus.display.value)
             .setOngoing(true)
-            .addAction(Notification.Action.Builder(
-                android.graphics.drawable.Icon.createWithResource(this, android.R.drawable.ic_media_pause),
-                "恢復真實 GPS", stop
+            .setOnlyAlertOnce(true)
+
+        if (phase == WalkPhase.MOVING || phase == WalkPhase.PAUSED) {
+            val paused = phase == WalkPhase.PAUSED
+            val action = if (paused) ACTION_RESUME_ROUTE else ACTION_PAUSE_ROUTE
+            val toggle = PendingIntent.getService(
+                this, if (paused) 2 else 1, command(this, action),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+            builder.addAction(Notification.Action.Builder(
+                android.graphics.drawable.Icon.createWithResource(
+                    this, if (paused) android.R.drawable.ic_media_play else android.R.drawable.ic_media_pause,
+                ),
+                if (paused) "繼續" else "暫停", toggle,
             ).build())
-            .build()
+            val stopWalk = PendingIntent.getService(
+                this, 3, command(this, ACTION_STOP_ROUTE),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+            builder.addAction(Notification.Action.Builder(
+                android.graphics.drawable.Icon.createWithResource(
+                    this, android.R.drawable.ic_menu_close_clear_cancel,
+                ),
+                "停止行走", stopWalk,
+            ).build())
+        }
+
+        val restoreReal = PendingIntent.getService(
+            this, 0, stopIntent(this),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        builder.addAction(Notification.Action.Builder(
+            android.graphics.drawable.Icon.createWithResource(this, android.R.drawable.ic_menu_mylocation),
+            "恢復真實 GPS", restoreReal,
+        ).build())
+        return builder.build()
     }
 
-    private fun releaseMock() {
+    private fun refreshNotification() {
+        if (providerActive) {
+            runCatching {
+                getSystemService(NotificationManager::class.java)
+                    .notify(NOTIFICATION_ID, notification())
+            }
+        }
+    }
+
+    private fun releaseMock(clearCheckpoint: Boolean = true) {
+        if (clearCheckpoint) journal.clear()
         lanController?.close()
         lanController = null
         floatingControls?.dismiss()
@@ -404,8 +482,17 @@ class MockLocationService : Service() {
         LocationStatus.display.value = "真實定位"
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        // The foreground service normally survives removing the UI from Recents.
+        // Save the latest position but never start an alarm/service workaround.
+        if (providerActive) target?.let { journal.record(it, force = true) }
+        super.onTaskRemoved(rootIntent)
+    }
+
     override fun onDestroy() {
-        releaseMock()
+        // This can be a system shutdown of the service; only explicit ACTION_STOP
+        // is allowed to delete a useful checkpoint.
+        releaseMock(clearCheckpoint = false)
         super.onDestroy()
     }
 }
