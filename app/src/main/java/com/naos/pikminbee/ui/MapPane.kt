@@ -1,4 +1,4 @@
-package com.naos.gps.ui
+package com.naos.pikminbee.ui
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -16,9 +16,9 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import com.naos.gps.BuildConfig
-import com.naos.gps.data.MapProvider
-import com.naos.gps.domain.Coordinate
+import com.naos.pikminbee.BuildConfig
+import com.naos.pikminbee.data.MapProvider
+import com.naos.pikminbee.domain.Coordinate
 import com.google.android.gms.maps.GoogleMap
 import com.google.android.gms.maps.MapView as GoogleMapView
 import com.google.android.gms.maps.CameraUpdateFactory

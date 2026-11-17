@@ -1,7 +1,8 @@
-# NaosGPS TODO
+# PikminBee TODO
 
 ## v0.1 — Foundation (first milestone)
-- [x] Independent Android project under `personal/NaosGPS`.
+- [x] PikminBee branding: original bee icon and a nectar-collecting exploration concept, without game assets.
+- [x] Independent Android project under `personal/PikminBee`.
 - [x] Minimal CI and branch policy documentation.
 - [x] Initial Compose map-first UI with iOS-27-inspired frosted controls (compiled; visual/UAT verification pending).
 - [x] OpenFreeMap map integration + light/dark/system styles (compiled; device rendering pending).

@@ -28,4 +28,4 @@ Only set PikminBee as your device's mock location application when intentionally
 
 `staging` → **merge commit** → `main` (PROD)
 
-See [branch policy](docs/BRANCHING.md). Remote GitHub repository is not connected yet.
+See [branch policy](docs/BRANCHING.md). Repository: https://github.com/Naos2w/PikminBee.

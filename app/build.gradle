@@ -11,11 +11,11 @@ if (secretsFile.exists()) {
 def mapsKey = secrets.getProperty('GOOGLE_MAPS_API_KEY', '')
 
 android {
-    namespace 'com.naos.gps'
+    namespace 'com.naos.pikminbee'
     compileSdk 37
 
     defaultConfig {
-        applicationId 'com.naos.gps'
+        applicationId 'com.naos.pikminbee'
         minSdk 28
         targetSdk 36
         versionCode 1

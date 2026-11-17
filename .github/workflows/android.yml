@@ -34,6 +34,6 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
-          name: NaosGPS-debug
+          name: PikminBee-debug
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 7

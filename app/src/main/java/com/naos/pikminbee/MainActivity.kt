@@ -1,4 +1,4 @@
-package com.naos.gps
+package com.naos.pikminbee
 
 import android.Manifest
 import android.content.Intent
@@ -54,23 +54,23 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import com.naos.gps.data.AppPreferences
-import com.naos.gps.data.MapAppearance
-import com.naos.gps.data.MapProvider
-import com.naos.gps.domain.Coordinate
-import com.naos.gps.location.LocationStatus
-import com.naos.gps.location.MockLocationService
-import com.naos.gps.ui.LocationMap
+import com.naos.pikminbee.data.AppPreferences
+import com.naos.pikminbee.data.MapAppearance
+import com.naos.pikminbee.data.MapProvider
+import com.naos.pikminbee.domain.Coordinate
+import com.naos.pikminbee.location.LocationStatus
+import com.naos.pikminbee.location.MockLocationService
+import com.naos.pikminbee.ui.LocationMap
 
 private val navy = Color(0xFF18263A)
-private val blue = Color(0xFF267CF5)
+private val honey = Color(0xFF9F5E0C)
 private val lightGlass = Color.White.copy(alpha = 0.91f)
 private val darkGlass = Color(0xFF1E2B3C).copy(alpha = 0.91f)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { NaosGpsScreen() }
+        setContent { PikminBeeScreen() }
     }
 }
 
@@ -90,7 +90,7 @@ private fun FrostedCard(dark: Boolean, modifier: Modifier = Modifier, content: @
 }
 
 @Composable
-private fun NaosGpsScreen() {
+private fun PikminBeeScreen() {
     val context = LocalContext.current
     val prefs = remember(context) { AppPreferences(context) }
     val systemDark = androidx.compose.foundation.isSystemInDarkTheme()
@@ -147,10 +147,10 @@ private fun NaosGpsScreen() {
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Column {
-                                Text("NaosGPS", fontSize = 23.sp, fontWeight = FontWeight.Bold, color = foreground)
-                                Text(mockStatus, fontSize = 12.sp, color = muted)
+                                Text("PikminBee", fontSize = 23.sp, fontWeight = FontWeight.Bold, color = foreground)
+                                Text("尋花採蜜 · $mockStatus", fontSize = 12.sp, color = muted)
                             }
-                            Text("v0.1 DEV", fontSize = 11.sp, color = blue, fontWeight = FontWeight.SemiBold)
+                            Text("v0.1 DEV", fontSize = 11.sp, color = honey, fontWeight = FontWeight.SemiBold)
                         }
 
                         Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
@@ -199,7 +199,7 @@ private fun NaosGpsScreen() {
                                 Box(
                                     modifier = Modifier.weight(1f).height(45.dp)
                                         .background(
-                                            if (tab == option) blue else Color.Transparent,
+                                            if (tab == option) honey else Color.Transparent,
                                             RoundedCornerShape(16.dp)
                                         )
                                         .clickable { tab = option },
@@ -250,7 +250,7 @@ private fun NaosGpsScreen() {
                                             }
                                         },
                                         modifier = Modifier.weight(1f).height(52.dp),
-                                        colors = ButtonDefaults.buttonColors(containerColor = blue)
+                                        colors = ButtonDefaults.buttonColors(containerColor = honey)
                                     ) { Text("瞬移並停留") }
                                     OutlinedButton(
                                         onClick = {

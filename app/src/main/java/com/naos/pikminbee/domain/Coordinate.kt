@@ -1,4 +1,4 @@
-package com.naos.gps.domain
+package com.naos.pikminbee.domain
 
 data class Coordinate(val latitude: Double, val longitude: Double) {
     init {

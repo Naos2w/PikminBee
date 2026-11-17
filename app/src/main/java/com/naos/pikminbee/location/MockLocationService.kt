@@ -1,4 +1,4 @@
-package com.naos.gps.location
+package com.naos.pikminbee.location
 
 import android.Manifest
 import android.app.Notification
@@ -17,7 +17,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
 import androidx.core.content.ContextCompat
-import com.naos.gps.domain.Coordinate
+import com.naos.pikminbee.domain.Coordinate
 import kotlinx.coroutines.flow.MutableStateFlow
 
 /** Single opt-in mock-location source for the user's own Android test device. */
@@ -28,11 +28,11 @@ object LocationStatus {
 
 class MockLocationService : Service() {
     companion object {
-        const val ACTION_TELEPORT = "com.naos.gps.action.TELEPORT"
-        const val ACTION_STOP = "com.naos.gps.action.STOP_MOCK"
+        const val ACTION_TELEPORT = "com.naos.pikminbee.action.TELEPORT"
+        const val ACTION_STOP = "com.naos.pikminbee.action.STOP_MOCK"
         const val EXTRA_LAT = "lat"
         const val EXTRA_LON = "lon"
-        private const val CHANNEL = "naos_gps_active"
+        private const val CHANNEL = "pikminbee_active"
         private const val NOTIFICATION_ID = 301
 
         fun teleportIntent(context: android.content.Context, coordinate: Coordinate): Intent =
@@ -60,7 +60,7 @@ class MockLocationService : Service() {
         manager = getSystemService(LocationManager::class.java)
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(
-            CHANNEL, "NaosGPS 模擬位置", NotificationManager.IMPORTANCE_LOW
+            CHANNEL, "PikminBee 模擬位置", NotificationManager.IMPORTANCE_LOW
         ))
     }
 
@@ -111,7 +111,7 @@ class MockLocationService : Service() {
             LocationStatus.display.value = "模擬位置執行中"
             START_STICKY
         } catch (ex: Exception) {
-            LocationStatus.display.value = "無法啟動：請在開發者選項選取 NaosGPS"
+            LocationStatus.display.value = "無法啟動：請在開發者選項選取 PikminBee"
             releaseMock()
             stopSelf()
             START_NOT_STICKY
@@ -154,7 +154,7 @@ class MockLocationService : Service() {
         )
         return Notification.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
-            .setContentTitle("NaosGPS · 測試定位")
+            .setContentTitle("PikminBee · 測試定位")
             .setContentText("模擬位置運作中 · 點擊通知的停止以恢復真實 GPS")
             .setOngoing(true)
             .addAction(Notification.Action.Builder(

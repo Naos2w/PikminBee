@@ -11,10 +11,10 @@
     <application
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
-        android:icon="@drawable/ic_naos_gps"
+        android:icon="@drawable/ic_pikminbee"
         android:usesCleartextTraffic="false"
-        android:label="NaosGPS"
-        android:theme="@style/Theme.NaosGPS"
+        android:label="PikminBee"
+        android:theme="@style/Theme.PikminBee"
         android:supportsRtl="true">
         <meta-data android:name="com.google.android.geo.API_KEY"
             android:value="${googleMapsKey}" />

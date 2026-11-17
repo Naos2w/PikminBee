@@ -1,4 +1,4 @@
-package com.naos.gps.domain
+package com.naos.pikminbee.domain
 
 import org.junit.Assert.*
 import org.junit.Test

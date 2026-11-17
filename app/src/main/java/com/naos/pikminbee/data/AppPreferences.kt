@@ -1,7 +1,7 @@
-package com.naos.gps.data
+package com.naos.pikminbee.data
 
 import android.content.Context
-import com.naos.gps.domain.Coordinate
+import com.naos.pikminbee.domain.Coordinate
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -11,7 +11,7 @@ enum class MapAppearance { SYSTEM, LIGHT, DARK }
 data class SavedPlace(val id: Long, val name: String, val coordinate: Coordinate)
 
 class AppPreferences(private val context: Context) {
-    private val prefs = context.getSharedPreferences("naosgps_preferences", Context.MODE_PRIVATE)
+    private val prefs = context.getSharedPreferences("pikminbee_preferences", Context.MODE_PRIVATE)
 
     fun provider(): MapProvider =
         enumValues<MapProvider>().firstOrNull { it.name == prefs.getString("provider", "") }
