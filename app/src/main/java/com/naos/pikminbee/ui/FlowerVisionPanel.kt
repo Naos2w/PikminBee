@@ -1,6 +1,7 @@
 package com.naos.pikminbee.ui
 
 import android.app.Activity
+import android.graphics.Bitmap
 import android.content.Context
 import android.media.projection.MediaProjectionManager
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -28,6 +29,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -41,6 +44,8 @@ import com.naos.pikminbee.vision.BloomVisionState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+private data class SelectedDocumentPreview(val revision: Long, val image: ImageBitmap)
 
 /**
  * An explicitly consented, read-only image recognition preview.
@@ -56,10 +61,15 @@ fun FlowerVisionPanel(
     val work = rememberCoroutineScope()
     val vision by BloomVisionState.state.collectAsState()
     var expanded by remember { mutableStateOf(false) }
+    // User-picked image pixels remain in this Compose session only, never in BloomVisionState.
+    var selectedDocument by remember { mutableStateOf<SelectedDocumentPreview?>(null) }
+    var activeDocumentRevision by remember { mutableStateOf(0L) }
     val captureLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { outcome ->
         if (outcome.resultCode == Activity.RESULT_OK && outcome.data != null) {
+            activeDocumentRevision = BloomVisionState.newDocumentRevision()
+            selectedDocument = null
             runCatching {
                 ContextCompat.startForegroundService(
                     context,
@@ -78,24 +88,45 @@ fun FlowerVisionPanel(
     val imageLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
-        if (uri != null) work.launch {
-            try {
-                val frame = withContext(Dispatchers.IO) {
-                    BloomImageLoader.fromDocument {
-                        context.contentResolver.openInputStream(uri)
+        if (uri != null) {
+            val revision = BloomVisionState.newDocumentRevision()
+            activeDocumentRevision = revision
+            selectedDocument = null
+            BloomVisionState.state.value = BloomVisionState.Snapshot(
+                message = "正在分析選取的圖片…", documentRevision = revision,
+            )
+            work.launch {
+                try {
+                    val frame = withContext(Dispatchers.IO) {
+                        BloomImageLoader.fromDocument {
+                            context.contentResolver.openInputStream(uri)
+                        }
                     }
+                    val (result, image) = withContext(Dispatchers.Default) {
+                        BloomDetector.analyse(frame) to Bitmap.createBitmap(
+                            frame.argb, frame.width, frame.height, Bitmap.Config.ARGB_8888,
+                        ).asImageBitmap()
+                    }
+                    // Ignore a late result from an older document-selection request.
+                    if (activeDocumentRevision != revision) return@launch
+                    selectedDocument = SelectedDocumentPreview(revision, image)
+                    BloomVisionState.state.value = BloomVisionState.Snapshot(
+                        phase = BloomVisionState.Phase.IDLE,
+                        message = if (result.mostlyBlank) result.note else
+                            "測試圖片找到 " + result.hits.size + " 個候選形狀；需實機圖片驗證",
+                        result = result,
+                        origin = "使用者自行選取的圖片",
+                        documentRevision = revision,
+                    )
+                } catch (e: Exception) {
+                    if (activeDocumentRevision != revision) return@launch
+                    selectedDocument = null
+                    BloomVisionState.state.value = BloomVisionState.Snapshot(
+                        message = "圖片辨識失敗：" + (e.message ?: "不支援此檔案"),
+                        documentRevision = revision,
+                    )
+                    onMessage("圖片辨識失敗：" + (e.message ?: "不支援此檔案"))
                 }
-                val result = withContext(Dispatchers.Default) { BloomDetector.analyse(frame) }
-                BloomVisionState.state.value = BloomVisionState.Snapshot(
-                    phase = BloomVisionState.Phase.IDLE,
-                    message = if (result.mostlyBlank) result.note else
-                        "測試圖片找到 " + result.hits.size + " 個候選形狀；需實機圖片驗證",
-                    result = result,
-                    origin = "使用者自行選取的圖片",
-                    documentRevision = BloomVisionState.newDocumentRevision(),
-                )
-            } catch (e: Exception) {
-                onMessage("圖片辨識失敗：" + (e.message ?: "不支援此檔案"))
             }
         }
     }
@@ -171,10 +202,13 @@ fun FlowerVisionPanel(
                     color = muted, fontSize = 11.sp,
                 )
             }
+            val preview = selectedDocument
             if (vision.origin == "使用者自行選取的圖片" &&
-                vision.phase == BloomVisionState.Phase.IDLE) {
+                vision.phase == BloomVisionState.Phase.IDLE &&
+                preview?.revision == vision.documentRevision) {
                 FlowerCalibrationPanel(
                     image = result,
+                    previewImage = preview.image,
                     documentRevision = vision.documentRevision,
                     foreground = foreground,
                     muted = muted,
