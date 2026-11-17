@@ -1,0 +1,21 @@
+# Android / Gradle
+.gradle/
+**/build/
+local.properties
+*.iml
+.idea/
+.cxx/
+.externalNativeBuild/
+captures/
+*.apk
+*.aab
+# Never commit secrets or production keystores.
+secrets.properties
+*.jks
+*.keystore
+*.p12
+.env*
+!*.example
+# Windows
+Thumbs.db
+Desktop.ini
