@@ -1,0 +1,57 @@
+name: android
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, synchronize]
+    branches: [develop, staging, main]
+  workflow_dispatch:
+    inputs:
+      package_apk:
+        description: 'Build and upload a debug APK (manual UAT only)'
+        type: boolean
+        default: false
+        required: false
+
+permissions:
+  contents: read
+
+# New pushes replace any still-running verification for the same PR.
+concurrency:
+  group: android-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    # A draft PR uses no Android runner minutes. Manually requested runs are explicit.
+    if: github.event_name == 'workflow_dispatch' || !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enforce branch promotion direction
+        if: github.event_name == 'pull_request'
+        env:
+          HEAD: ${{ github.head_ref }}
+          BASE: ${{ github.base_ref }}
+        run: |
+          case "$BASE:$HEAD" in
+            develop:feature/*|develop:fix/*|develop:chore/*|staging:develop|main:staging) ;;
+            *) echo "Invalid branch promotion: $HEAD -> $BASE"; exit 1 ;;
+          esac
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Verify source (no APK packaging)
+        run: ./gradlew :app:testDebugUnitTest :app:lintDebug --no-daemon --console=plain
+      - name: Package test APK only when explicitly requested
+        if: github.event_name == 'workflow_dispatch' && inputs.package_apk == true
+        run: ./gradlew :app:assembleDebug --no-daemon --console=plain
+      - name: Upload manually requested UAT APK
+        if: github.event_name == 'workflow_dispatch' && inputs.package_apk == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: PikminBee-UAT-debug
+          path: app/build/outputs/apk/debug/*.apk
+          retention-days: 3

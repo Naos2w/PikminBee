@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Original PikminBee emblem: a small bee exploring a honey-coloured world. -->
+    <path android:fillColor="#183049"
+        android:pathData="M23,5 L85,5 Q103,5 103,23 L103,85 Q103,103 85,103 L23,103 Q5,103 5,85 L5,23 Q5,5 23,5 Z"/>
+    <path android:fillColor="#294965"
+        android:pathData="M22,12 L86,12 Q96,12 96,23 L96,86 Q96,96 86,96 L22,96 Q12,96 12,86 L12,23 Q12,12 22,12 Z"/>
+    <path android:fillColor="#FFC861" android:fillAlpha="0.13"
+        android:pathData="M54,15 L88,35 L88,73 L54,92 L20,73 L20,35 Z"/>
+    <path android:strokeColor="#F6BD55" android:strokeAlpha="0.35"
+        android:strokeWidth="1.5" android:fillColor="#00000000"
+        android:pathData="M54,15 L88,35 L88,73 L54,92 L20,73 L20,35 Z"/>
+    <!-- Clear, translucent wings. -->
+    <path android:fillColor="#E7F7FF"
+        android:pathData="M52,48 C44,25 26,28 29,41 C31,55 44,58 53,54 Z"/>
+    <path android:fillColor="#E7F7FF"
+        android:pathData="M56,48 C64,25 82,28 79,41 C77,55 64,58 55,54 Z"/>
+    <!-- Gold body with two midnight stripes. -->
+    <path android:fillColor="#FFC854"
+        android:pathData="M54,43 C68,43 75,56 72,67 C70,78 59,85 54,88 C49,85 38,78 36,67 C33,56 40,43 54,43 Z"/>
+    <path android:fillColor="#263549"
+        android:pathData="M37,60 Q54,67 71,60 L72,66 Q54,74 36,66 Z"/>
+    <path android:fillColor="#263549"
+        android:pathData="M41,74 Q54,79 67,74 Q64,79 60,82 Q54,84 48,82 Z"/>
+    <!-- Friendly eyes and antennae, not game character artwork. -->
+    <path android:fillColor="#203047"
+        android:pathData="M44,54 A2,2 0,1 0,48 54 A2,2 0,1 0,44 54 Z"/>
+    <path android:fillColor="#203047"
+        android:pathData="M60,54 A2,2 0,1 0,64 54 A2,2 0,1 0,60 54 Z"/>
+    <path android:strokeColor="#FFC854" android:strokeWidth="2"
+        android:strokeLineCap="round" android:fillColor="#00000000"
+        android:pathData="M48,44 Q44,38 40,36 M60,44 Q64,38 68,36"/>
+</vector>
