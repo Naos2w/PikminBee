@@ -42,7 +42,8 @@
 
 ## Flower vision backlog (separate PRs, not part of the initial recognition prototype)
 - [ ] Test with user-authorised real-world frames; tune colour, lighting and pale-flower false positives.
-- [ ] Implement explicit map pixel-to-GPS calibration with measured error before suggesting route waypoints.
+- [x] Added a memory-only, read-only still-image pixel-to-GPS calibration preview (3–16 user-entered landmarks; similarity transform; leave-one-out RMSE and out-of-hull indication). Unit-tested only; not measured real-game accuracy. No automatic route insertion.
+- [ ] Validate actual pixel-to-coordinate accuracy on independent user-authorised reference data before suggesting GPS route waypoints. See [FLOWER-VISION.md](FLOWER-VISION.md).
 - [ ] Verify Android 14+/HyperOS MediaProjection consent, app-window capture, orientation and cancellation on POCO during UAT.
 - [x] Do not integrate Overpass/OSM POI candidate search; favour image-based recognition as requested.
 
