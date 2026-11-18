@@ -143,6 +143,7 @@ private fun PikminBeeScreen() {
 
     var selected by remember { mutableStateOf(Coordinate(25.0330, 121.5654)) }
     var flowerPick by remember { mutableStateOf<FlowerMapPick?>(null) }
+    var editingFlowerStopIndex by remember { mutableStateOf<Int?>(null) }
     // A recorded flower is never silently treated as the route's starting point.
     var flowerStart by remember { mutableStateOf<Coordinate?>(null) }
     var flowerRoadPreview by remember { mutableStateOf(emptyList<Coordinate>()) }
@@ -169,8 +170,13 @@ private fun PikminBeeScreen() {
     LaunchedEffect(flowerStops, flowerStart, mockPosition) {
         flowerRoadPreview = emptyList()
     }
-    LaunchedEffect(flowerPick, tab) {
-        if (tab == ToolTab.FLOWERS && flowerPick != null) controlsScroll.animateScrollTo(0)
+    LaunchedEffect(flowerStops) {
+        // Any draft mutation invalidates the previous marker index.
+        editingFlowerStopIndex = null
+    }
+    LaunchedEffect(flowerPick, editingFlowerStopIndex, tab) {
+        if (tab == ToolTab.FLOWERS &&
+            (flowerPick != null || editingFlowerStopIndex != null)) controlsScroll.animateScrollTo(0)
     }
 
     val requestLocation = rememberLauncherForActivityResult(
@@ -336,7 +342,9 @@ private fun PikminBeeScreen() {
                         ToolTab.FLOWERS -> {
                             selected = point
                             flowerPick = FlowerMapPick(point)
-                            message = "已選擇地圖位置，請確認加入路線或設為起點"
+                            message = editingFlowerStopIndex?.let {
+                                "已選新位置，請確認是否替換第 ${it + 1} 個路點"
+                            } ?: "已選擇地圖位置，請確認加入路線或設為起點"
                         }
                         else -> {
                             selected = point
@@ -347,8 +355,18 @@ private fun PikminBeeScreen() {
                 onFlowerPick = { flower ->
                     selected = flower.coordinate
                     flowerPick = FlowerMapPick(flower.coordinate, flower)
-                    message = "已選擇「${flower.name}」，可確認是否加入尋花路線"
+                    message = editingFlowerStopIndex?.let {
+                        "已選擇「${flower.name}」，可確認是否替換第 ${it + 1} 個路點"
+                    } ?: "已選擇「${flower.name}」，可確認是否加入尋花路線"
                 },
+                onStopPick = if (tab == ToolTab.FLOWERS) { index: Int ->
+                    flowerStops.getOrNull(index)?.let { stop ->
+                        selected = stop
+                        flowerPick = null
+                        editingFlowerStopIndex = index
+                        message = "已選擇第 ${index + 1} 個路點；點地圖挑選新位置或直接移除"
+                    }
+                } else null,
                 modifier = Modifier.fillMaxSize()
             )
 
@@ -555,6 +573,7 @@ private fun PikminBeeScreen() {
                                     start = mockPosition ?: flowerStart,
                                     usingMockStart = mockPosition != null,
                                     selected = flowerPick,
+                                    editingStopIndex = editingFlowerStopIndex,
                                     stops = flowerStops,
                                     foreground = foreground, muted = muted,
                                     onAddSelected = {
@@ -584,6 +603,49 @@ private fun PikminBeeScreen() {
                                             }
                                         }
                                     },
+                                    onReplaceStop = {
+                                        val index = editingFlowerStopIndex
+                                        val chosen = flowerPick
+                                        val start = mockPosition ?: flowerStart
+                                        when {
+                                            index == null -> message = "請先選擇要編輯的路點"
+                                            chosen == null -> message = "請先點地圖選擇新位置"
+                                            start == null -> message = "請先設定路線起點"
+                                            else -> {
+                                                val update = FlowerMapDraft.replace(
+                                                    flowerStops, start, index, chosen.coordinate,
+                                                )
+                                                message = when (update.result) {
+                                                    FlowerMapDraft.ReplaceResult.REPLACED -> {
+                                                        prefs.saveFlowerDraft(update.stops)
+                                                        editingFlowerStopIndex = null
+                                                        flowerPick = null
+                                                        "已更新第 ${index + 1} 個路點；請重新預覽道路"
+                                                    }
+                                                    FlowerMapDraft.ReplaceResult.UNCHANGED ->
+                                                        "與原路點位置相同，未進行修改"
+                                                    FlowerMapDraft.ReplaceResult.DUPLICATE ->
+                                                        "新位置太靠近其他路點，未進行修改"
+                                                    FlowerMapDraft.ReplaceResult.AT_START ->
+                                                        "新位置太靠近起點，未進行修改"
+                                                    FlowerMapDraft.ReplaceResult.OUT_OF_RANGE ->
+                                                        "路點已變動，請重新選擇要編輯的路點"
+                                                }
+                                            }
+                                        }
+                                    },
+                                    onSelectStop = { index ->
+                                        flowerStops.getOrNull(index)?.let { stop ->
+                                            selected = stop
+                                            flowerPick = null
+                                            editingFlowerStopIndex = index
+                                            message = "已選中第 ${index + 1} 個路點，可在地圖上重新指定位置"
+                                        }
+                                    },
+                                    onCancelStopEdit = {
+                                        editingFlowerStopIndex = null
+                                        flowerPick = null
+                                    },
                                     onUseAsStart = {
                                         flowerPick?.let {
                                             flowerStart = it.coordinate
@@ -597,7 +659,13 @@ private fun PikminBeeScreen() {
                                         )
                                     },
                                     onRemoveStop = { index ->
-                                        prefs.saveFlowerDraft(FlowerMapDraft.remove(flowerStops, index))
+                                        val updated = FlowerMapDraft.remove(flowerStops, index)
+                                        if (updated != flowerStops) {
+                                            prefs.saveFlowerDraft(updated)
+                                            editingFlowerStopIndex = null
+                                            flowerPick = null
+                                            message = "已移除第 ${index + 1} 個路點；請重新預覽道路"
+                                        }
                                     },
                                 )
                                 JourneyControls(

@@ -31,10 +31,14 @@ fun FlowerMapControls(
     start: Coordinate?,
     usingMockStart: Boolean,
     selected: FlowerMapPick?,
+    editingStopIndex: Int?,
     stops: List<Coordinate>,
     foreground: Color,
     muted: Color,
     onAddSelected: () -> Unit,
+    onReplaceStop: () -> Unit,
+    onSelectStop: (Int) -> Unit,
+    onCancelStopEdit: () -> Unit,
     onUseAsStart: () -> Unit,
     onDismissSelected: () -> Unit,
     onMoveStop: (Int, Int) -> Unit,
@@ -43,8 +47,8 @@ fun FlowerMapControls(
     Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
         Text("地圖選花 · 設定行走路線", fontWeight = FontWeight.Bold, color = foreground)
         Text(
-            "點地圖選位置，或點已有的花點標記查看來源；確認後才會加入路線。" +
-                " 匯入的花點不等於遊戲內已驗證的大花。",
+            "點地圖選位置、點花點標記查看來源，或點既有路點標記進行編輯。" +
+                " 一切修改都需確認；匯入花點不是遊戲內已驗證的大花。",
             color = muted, fontSize = 12.sp,
         )
         Text(
@@ -55,6 +59,23 @@ fun FlowerMapControls(
             },
             color = foreground, fontSize = 12.sp,
         )
+        val editing = editingStopIndex?.takeIf { it in stops.indices }
+        if (editing != null) {
+            Text("正在編輯第 ${editing + 1} 個路點", color = foreground,
+                fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+            Text("點地圖上的新位置或花點標記，再確認替換；其他路點不會變動。" +
+                " 編輯只影響草稿，已開始的行走路線須停止後重新規劃。",
+                color = muted, fontSize = 12.sp)
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                TextButton(onClick = onCancelStopEdit) { Text("取消路點編輯", fontSize = 12.sp) }
+                TextButton(onClick = { onRemoveStop(editing) }) {
+                    Text("移除此路點", color = Color(0xFFC45A4A), fontSize = 12.sp)
+                }
+            }
+        }
         if (selected != null) {
             Text(
                 selected.flower?.let {
@@ -66,26 +87,38 @@ fun FlowerMapControls(
             Text(selected.coordinate.label(), color = muted, fontSize = 11.sp)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Button(
-                    onClick = onAddSelected,
-                    enabled = start != null && stops.size < 14,
+                    onClick = if (editing != null) onReplaceStop else onAddSelected,
+                    enabled = start != null && (editing != null || stops.size < 14),
                     modifier = Modifier.weight(1f),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF9F5E0C)),
-                ) { Text("加入尋花路線", fontSize = 12.sp) }
+                ) { Text(if (editing != null) "替換第 ${editing + 1} 點" else "加入尋花路線", fontSize = 12.sp) }
                 OutlinedButton(
-                    onClick = onUseAsStart, enabled = !usingMockStart,
+                    onClick = onUseAsStart, enabled = !usingMockStart && editing == null,
                     modifier = Modifier.weight(1f),
                 ) { Text("設為起點", fontSize = 12.sp) }
             }
             TextButton(onClick = onDismissSelected) { Text("取消選取", fontSize = 12.sp) }
+        }
+        if (editing != null && selected == null) {
+            Text("請點地圖選新位置，也可以先取消編輯。", color = muted, fontSize = 12.sp)
         }
         if (stops.isNotEmpty()) {
             Text("路點順序（${stops.size}/14）", color = foreground,
                 fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
             stops.forEachIndexed { index, coordinate ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("${index + 1}. ${coordinate.label()}",
-                        modifier = Modifier.weight(1f), color = muted, fontSize = 11.sp,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    TextButton(
+                        onClick = { onSelectStop(index) },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(
+                            "${index + 1}. ${coordinate.label()}" +
+                                if (editing == index) " · 編輯中" else "",
+                            color = if (editing == index) foreground else muted,
+                            fontSize = 11.sp, maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                     TextButton(enabled = index > 0, onClick = { onMoveStop(index, -1) },
                         modifier = Modifier.semantics { contentDescription = "第 ${index + 1} 點上移" }) {
                         Text("↑", fontSize = 14.sp)
