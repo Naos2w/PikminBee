@@ -16,6 +16,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
@@ -24,6 +25,7 @@ import androidx.compose.ui.unit.sp
 import com.naos.pikminbee.domain.Coordinate
 import com.naos.pikminbee.vision.BloomDetector
 import com.naos.pikminbee.vision.FlowerPixelCalibration
+import com.naos.pikminbee.vision.ImageTapMapper
 import java.util.Locale
 import kotlin.math.hypot
 
@@ -34,6 +36,7 @@ import kotlin.math.hypot
 @Composable
 fun FlowerCalibrationPanel(
     image: BloomDetector.Result,
+    previewImage: ImageBitmap,
     documentRevision: Long,
     foreground: Color,
     muted: Color,
@@ -58,12 +61,32 @@ fun FlowerCalibrationPanel(
         if (!expanded) return@Column
 
         Text(
-            "只針對這張 " + image.width + "×" + image.height +
-                " 的靜態圖片。請從圖片上找出至少 3 個分散的已知地標，輸入" +
-                "它們在縮圖尺寸下的像素位置與自行確認的 GPS 座標。" +
-                " 原圖會縮小，需先換算座標；目前不提供點圖選取。" +
+            "在下方圖片點選至少 3 個分散的已知地標，再輸入自行確認的 GPS 座標。" +
+                " 點選位置會自動填入縮圖像素，也可以手動修改 X/Y。" +
                 " 校正點僅存記憶體，不會加入任何路徑。",
             color = muted, fontSize = 12.sp,
+        )
+        val x = pixelX.trim().toFloatOrNull()
+        val y = pixelY.trim().toFloatOrNull()
+        val selectedPixel = if (x != null && y != null && x.isFinite() && y.isFinite() &&
+            x in 0f..(image.width - 1).toFloat() &&
+            y in 0f..(image.height - 1).toFloat()
+        ) ImageTapMapper.Pixel(x, y) else null
+        FlowerTapPreview(
+            previewImage = previewImage,
+            documentRevision = documentRevision,
+            anchors = anchors,
+            pending = selectedPixel,
+            onPixelSelected = { point ->
+                pixelX = String.format(Locale.US, "%.1f", point.x)
+                pixelY = String.format(Locale.US, "%.1f", point.y)
+                error = null
+            },
+        )
+        Text(
+            "青色圈＝目前選取地標，黃色圈＝已加入地標。" +
+                " 圖片以 Fit 縮放；黑邊點擊不會建立座標。",
+            color = muted, fontSize = 11.sp,
         )
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(
