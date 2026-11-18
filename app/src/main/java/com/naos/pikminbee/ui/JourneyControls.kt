@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.naos.pikminbee.domain.Coordinate
 import com.naos.pikminbee.domain.FlowerMapDraft
+import com.naos.pikminbee.domain.RouteEstimate
 import com.naos.pikminbee.domain.WalkMode
 import com.naos.pikminbee.domain.WalkPhase
 import com.naos.pikminbee.domain.WalkSpeedPreset
@@ -71,7 +72,7 @@ fun JourneyControls(
     LaunchedEffect(stops, origin, loop, mode) {
         requestRevision++
         previewDistance = null
-        if (flower) onPreviewRoad(emptyList())
+        onPreviewRoad(emptyList())
     }
     fun requestedPoints(start: Coordinate): List<Coordinate> =
         if (flower) FlowerMapDraft.routePoints(start, stops, loop) else buildList {
@@ -80,11 +81,14 @@ fun JourneyControls(
                 if (WalkingGeometry.distanceMeters(last(), stop) > 1.0) add(stop)
             }
         }
+    val canPlan = origin?.let { start ->
+        runCatching { requestedPoints(start).size >= 2 }.getOrDefault(false)
+    } ?: false
 
     fun previewOrStart(startWalking: Boolean) {
         if (planning) return
         val start = origin ?: run {
-            onMessage("請先在地圖選位置，並設為尋花起點")
+            onMessage(if (flower) "請先在地圖設為尋花起點" else "請先選取路徑起點")
             return
         }
         if (startWalking && ContextCompat.checkSelfPermission(
@@ -92,6 +96,10 @@ fun JourneyControls(
             ) != PackageManager.PERMISSION_GRANTED
         ) {
             onAskLocation()
+            return
+        }
+        if (startWalking && !BeePermissions.inspect(context).selectedMockApp) {
+            onMessage("請先在 Android 開發人員選項選取 PikminBee 作為模擬位置 App")
             return
         }
         val points = try { requestedPoints(start) } catch (e: IllegalArgumentException) {
@@ -109,10 +117,8 @@ fun JourneyControls(
             try {
                 val geometry = ValhallaPlanner.plan(points)
                 if (revision != requestRevision) return@launch
-                if (flower) {
-                    onPreviewRoad(geometry)
-                    previewDistance = WalkingGeometry.lengthMeters(geometry)
-                }
+                onPreviewRoad(geometry)
+                previewDistance = WalkingGeometry.lengthMeters(geometry)
                 if (startWalking) {
                     ContextCompat.startForegroundService(
                         context, MockLocationService.routeIntent(
@@ -140,11 +146,17 @@ fun JourneyControls(
         )
         Text(
             if (flower) "地圖先選點並確認加入，預覽道路後再開始；花點來源不代表遊戲即時狀態。"
-            else "在地圖依序點選目的地，開始後才查詢行人道路，避免浪費路線服務。",
+            else "依順序新增路點，點選預覽後會依步行道路計算距離及時間，不會開始移動。",
             color = muted, fontSize = 12.sp
         )
         Text("已加入 ${stops.size} 個路點 · 起點 ${origin?.label() ?: "尚未設定"}",
             color = muted, fontSize = 12.sp)
+        if (!flower && stops.isNotEmpty()) {
+            Text("路徑順序  " + stops.indices.joinToString("  →  ") { "${it + 1}" },
+                color = foreground, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Text("綠色 1 為起點 · 藍色為途經點 · 紅色為終點",
+                color = muted, fontSize = 12.sp)
+        }
         Text("本次行走速度（個人預設請至共用設定）", color = muted, fontSize = 12.sp)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
             WalkSpeedPreset.entries.forEach { option ->
@@ -169,17 +181,21 @@ fun JourneyControls(
             label = { Text("循環路線", fontSize = 12.sp) },
         )
 
-        if (flower) {
+        run {
             OutlinedButton(
                 onClick = { previewOrStart(startWalking = false) },
-                enabled = !planning && stops.isNotEmpty() && origin != null &&
+                enabled = !planning && canPlan &&
                     (!active || phase !in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)),
                 modifier = Modifier.fillMaxWidth().height(46.dp),
             ) { Text(if (planning) "道路規劃中…" else "先預覽步行道路（不移動）", fontSize = 12.sp) }
             previewDistance?.let { metres ->
+                val estimate = RouteEstimate.fromDistance(metres, speedPreset)
                 Text(
-                    "預覽步行路線約 " + "%.0f".format(java.util.Locale.US, metres) +
-                        " 公尺 · 目前未因此開始行走",
+                    "道路距離 ${estimate.distanceLabel} · 預估行走 ${estimate.durationLabel}",
+                    color = foreground, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    "依 ${speedPreset.kilometresPerHour} km/h 估算，不含休息及系統延遲；改變速度會同步更新。",
                     color = muted, fontSize = 12.sp,
                 )
             }
@@ -187,7 +203,7 @@ fun JourneyControls(
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Button(
                 onClick = { previewOrStart(startWalking = true) },
-                enabled = !planning && stops.isNotEmpty() && origin != null &&
+                enabled = !planning && canPlan &&
                     (!active || phase !in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)),
                 modifier = Modifier.weight(1.3f).height(46.dp),
                 colors = ButtonDefaults.buttonColors(

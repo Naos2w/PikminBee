@@ -12,6 +12,9 @@ import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import com.naos.pikminbee.data.AppPreferences
+import com.naos.pikminbee.data.MapAppearance
+import android.content.res.Configuration
 import com.naos.pikminbee.domain.WalkMode
 import com.naos.pikminbee.domain.WalkPhase
 import com.naos.pikminbee.domain.WalkSpeedPreset
@@ -123,16 +126,25 @@ class FloatingControls(
         }
     }
 
+    private fun isDark(): Boolean = when (AppPreferences(context).appearance()) {
+        MapAppearance.LIGHT -> false
+        MapAppearance.DARK -> true
+        MapAppearance.SYSTEM -> context.resources.configuration.uiMode and
+            Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
+    }
+
     private fun glass() = GradientDrawable().apply {
-        cornerRadius = dp(22).toFloat()
-        setColor(Color.argb(226, 26, 40, 60))
-        setStroke(dp(1), Color.argb(110, 255, 255, 255))
+        cornerRadius = dp(24).toFloat()
+        setColor(if (isDark()) Color.argb(220, 32, 52, 81)
+            else Color.argb(231, 242, 248, 255))
+        setStroke(dp(1), if (isDark()) Color.argb(180, 215, 235, 255)
+            else Color.argb(225, 255, 255, 255))
     }
 
     private fun action(label: String, click: () -> Unit): TextView = TextView(context).apply {
         text = label
         textSize = 14f
-        setTextColor(Color.WHITE)
+        setTextColor(if (isDark()) Color.rgb(241, 247, 255) else Color.rgb(29, 48, 78))
         gravity = Gravity.CENTER
         minWidth = dp(66)
         minHeight = dp(48)
@@ -339,8 +351,10 @@ class FloatingControls(
                 button.tag = selected
                 button.background = GradientDrawable().apply {
                     cornerRadius = dp(12).toFloat()
-                    setColor(if (selected) Color.rgb(151, 95, 22) else Color.TRANSPARENT)
-                    setStroke(dp(1), if (selected) Color.rgb(242, 185, 78) else Color.GRAY)
+                    setColor(if (selected) if (isDark()) Color.rgb(52, 103, 177)
+                        else Color.rgb(207, 227, 255) else Color.TRANSPARENT)
+                    setStroke(dp(1), if (selected) Color.rgb(106, 168, 247)
+                        else if (isDark()) Color.rgb(165, 185, 212) else Color.rgb(105, 136, 181))
                 }
                 button.contentDescription = "速度：${option.display}" +
                     if (selected) "，目前選擇" else ""

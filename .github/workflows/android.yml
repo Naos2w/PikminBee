@@ -43,6 +43,10 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: gradle/actions/setup-gradle@v4
+      - name: Check semantic version progression rules
+        run: |
+          python3 -m unittest discover -s scripts -p 'test_version*.py'
+          python3 scripts/bump_version.py check
       - name: Verify source (no APK packaging)
         run: ./gradlew :app:testDebugUnitTest :app:lintDebug --no-daemon --console=plain
       - name: Restore private, fixed UAT signing key
@@ -50,6 +54,10 @@ jobs:
         env:
           UAT_KEYSTORE_BASE64: ${{ secrets.PIKMINBEE_UAT_KEYSTORE_BASE64 }}
         run: |
+          if [ "$GITHUB_REF" != "refs/heads/staging" ]; then
+            echo "Signed UAT APKs may only be built from staging."
+            exit 1
+          fi
           if [ -z "$UAT_KEYSTORE_BASE64" ]; then
             echo "Missing private UAT keystore. Refusing a rotating debug signature."
             exit 1
@@ -80,7 +88,7 @@ jobs:
           fi
           # AGP writes the actual applicationId and versionCode into output-metadata.json.
           # aapt is optional on some hosted Android SDK installations.
-          python3 -c "import json; d=json.load(open('$METADATA')); assert d['applicationId']=='com.naos.pikminbee.uat', d['applicationId']; assert int(d['elements'][0]['versionCode']) >= 1000; assert d['elements'][0]['versionName'].endswith('-uat'); print('Validated UAT package metadata:', d['applicationId'], d['elements'][0]['versionCode'])"
+          python3 -c "import json; d=json.load(open('$METADATA')); expected=next(line.split('=',1)[1].strip() for line in open('gradle.properties') if line.startswith('pikminbeeUatVersion=')); assert d['applicationId']=='com.naos.pikminbee.uat', d['applicationId']; assert int(d['elements'][0]['versionCode']) > 1051, d['elements'][0]['versionCode']; assert d['elements'][0]['versionName']==expected, (d['elements'][0]['versionName'], expected); print('Validated UAT metadata:', d['applicationId'], d['elements'][0]['versionName'], d['elements'][0]['versionCode'])"
           SDK_DIR="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
           if [ ! -d "$SDK_DIR/build-tools" ]; then
             echo "Android SDK build-tools not found: $SDK_DIR"

@@ -1,5 +1,6 @@
 package com.naos.pikminbee.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -17,6 +18,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -49,12 +51,16 @@ fun BeeSettingsScreen(
     onToggleWifi: () -> Unit,
     onAskLocation: () -> Unit,
     onMessage: (String) -> Unit,
+    statusMessage: String,
     onBack: () -> Unit,
 ) {
     val foreground = if (dark) Color(0xFFF3F7FF) else Color(0xFF18263A)
     val muted = if (dark) Color(0xFFC6D3E6) else Color(0xFF52627A)
     Column(
         Modifier.fillMaxSize()
+            .background(Brush.verticalGradient(if (dark)
+                listOf(Color(0xFF142541), Color(0xFF0C152A), Color(0xFF1C3150))
+                else listOf(Color(0xFFDFEBFF), Color(0xFFF8FBFF), Color(0xFFE8EFFF))))
             .statusBarsPadding().navigationBarsPadding()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 13.dp),
@@ -63,7 +69,7 @@ fun BeeSettingsScreen(
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = onBack) { Text("‹ 返回地圖") }
-            Text("共用設定", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            Text("共用設定", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = foreground)
             Text("UAT", color = muted, fontSize = 11.sp)
         }
         MapGlass(dark, Modifier.fillMaxWidth()) {
@@ -108,7 +114,7 @@ fun BeeSettingsScreen(
                     listOf(
                         MapAppearance.SYSTEM to "跟隨系統",
                         MapAppearance.LIGHT to "淺色",
-                        MapAppearance.DARK to "深色玻璃",
+                        MapAppearance.DARK to "深色",
                     ).forEach { (option, label) ->
                         FilterChip(
                             selected = appearance == option,
@@ -146,6 +152,12 @@ fun BeeSettingsScreen(
                 TextButton(onClick = onOverlay) {
                     Text(if (overlayVisible) "🐝 隱藏懸浮控制" else "🐝 開啟懸浮控制")
                 }
+                Text(
+                    if (overlayVisible) "懸浮控制已顯示，點蜜蜂圖示可展開功能。"
+                    else "開啟時會檢查「顯示在其他應用程式上層」權限，無需先啟動模擬定位。",
+                    color = muted, fontSize = 12.sp,
+                )
+                Text(statusMessage, color = foreground, fontSize = 12.sp)
                 TextButton(onClick = onToggleWifi) {
                     Text(if (showWifiPanel) "收起 Wi-Fi 遠端控制" else "Wi-Fi 遠端控制")
                 }

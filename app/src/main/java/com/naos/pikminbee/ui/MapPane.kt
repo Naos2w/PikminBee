@@ -39,6 +39,7 @@ import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.Style
 import org.maplibre.android.camera.CameraPosition as LibreCameraPosition
 import org.maplibre.android.geometry.LatLng as LibreLatLng
+import org.maplibre.android.annotations.IconFactory as LibreIconFactory
 import org.maplibre.android.annotations.MarkerOptions as LibreMarkerOptions
 import org.maplibre.android.annotations.PolylineOptions as LibrePolylineOptions
 import org.maplibre.android.geometry.LatLngBounds as LibreLatLngBounds
@@ -56,6 +57,8 @@ fun LocationMap(
     provider: MapProvider,
     dark: Boolean,
     selected: Coordinate,
+    current: Coordinate?,
+    currentIsMock: Boolean,
     start: Coordinate?,
     stops: List<Coordinate>,
     road: List<Coordinate>,
@@ -71,14 +74,14 @@ fun LocationMap(
     modifier: Modifier = Modifier,
 ) {
     when (provider) {
-        MapProvider.OPEN_FREE_MAP -> OpenFreeMapPane(dark, selected, start, stops, road, previewRoad, flowerSpots,
+        MapProvider.OPEN_FREE_MAP -> OpenFreeMapPane(dark, selected, current, currentIsMock, start, stops, road, previewRoad, flowerSpots,
             freeMapStyle, cameraRequest, mapExplore, onCameraFailure,
             onPick, onFlowerPick, onStopPick, modifier)
         MapProvider.GOOGLE_MAPS -> if (BuildConfig.HAS_GOOGLE_MAPS_KEY) {
-            GoogleMapsPane(dark, selected, start, stops, road, previewRoad, flowerSpots,
+            GoogleMapsPane(dark, selected, current, currentIsMock, start, stops, road, previewRoad, flowerSpots,
                 cameraRequest, mapExplore, onCameraFailure, onPick, onFlowerPick, onStopPick, modifier)
         } else {
-            OpenFreeMapPane(dark, selected, start, stops, road, previewRoad, flowerSpots,
+            OpenFreeMapPane(dark, selected, current, currentIsMock, start, stops, road, previewRoad, flowerSpots,
                 freeMapStyle, cameraRequest, mapExplore, onCameraFailure,
                 onPick, onFlowerPick, onStopPick, modifier)
         }
@@ -87,7 +90,8 @@ fun LocationMap(
 
 @Composable
 private fun OpenFreeMapPane(
-    dark: Boolean, selected: Coordinate, start: Coordinate?, stops: List<Coordinate>,
+    dark: Boolean, selected: Coordinate, current: Coordinate?, currentIsMock: Boolean,
+    start: Coordinate?, stops: List<Coordinate>,
     road: List<Coordinate>, previewRoad: Boolean, flowerSpots: List<FlowerSpot>,
     freeMapStyle: FreeMapStyle, cameraRequest: MapCameraRequest?, mapExplore: Boolean,
     onCameraFailure: (String) -> Unit,
@@ -109,6 +113,9 @@ private fun OpenFreeMapPane(
     var styleVersion by remember { mutableIntStateOf(0) }
     var currentMarker by remember { mutableStateOf<org.maplibre.android.annotations.Marker?>(null) }
     var currentStyleVersion by remember { mutableIntStateOf(-1) }
+    var liveMarker by remember { mutableStateOf<org.maplibre.android.annotations.Marker?>(null) }
+    var liveStyleVersion by remember { mutableIntStateOf(-1) }
+    var liveWasMock by remember { mutableStateOf(false) }
     var startMarker by remember { mutableStateOf<org.maplibre.android.annotations.Marker?>(null) }
     var startStyleVersion by remember { mutableIntStateOf(-1) }
     var stopMarkers by remember { mutableStateOf(emptyList<org.maplibre.android.annotations.Marker>()) }
@@ -185,6 +192,25 @@ private fun OpenFreeMapPane(
             currentStyleVersion = styleVersion
         } else currentMarker?.position = position
     }
+    LaunchedEffect(map, styleVersion, current, currentIsMock) {
+        val m = map ?: return@LaunchedEffect
+        if (styleVersion == 0) return@LaunchedEffect
+        if (current == null) {
+            liveMarker?.let { m.removeMarker(it) }
+            liveMarker = null
+        } else {
+            val coordinate = LibreLatLng(current.latitude, current.longitude)
+            if (liveMarker == null || liveStyleVersion != styleVersion || liveWasMock != currentIsMock) {
+                liveMarker?.let { m.removeMarker(it) }
+                val bitmap = RoutePinBitmap.current(context, currentIsMock)
+                liveMarker = m.addMarker(LibreMarkerOptions().position(coordinate)
+                    .icon(LibreIconFactory.getInstance(context).fromBitmap(bitmap))
+                    .title(if (currentIsMock) "🐝 目前模擬位置" else "手機目前位置"))
+                liveStyleVersion = styleVersion
+                liveWasMock = currentIsMock
+            } else liveMarker?.position = coordinate
+        }
+    }
     LaunchedEffect(map, styleVersion, start) {
         val m = map ?: return@LaunchedEffect
         if (styleVersion == 0) return@LaunchedEffect
@@ -209,7 +235,10 @@ private fun OpenFreeMapPane(
         stopMarkers = stops.mapIndexed { index, coordinate ->
             m.addMarker(LibreMarkerOptions()
                 .position(LibreLatLng(coordinate.latitude, coordinate.longitude))
-                .title("路點 " + (index + 1)))
+                .icon(LibreIconFactory.getInstance(context).fromBitmap(
+                    RoutePinBitmap.create(context, index, stops.size)))
+                .title("第 ${index + 1} 點" + if (index == 0) " · 起點"
+                    else if (index == stops.lastIndex) " · 終點" else " · 途經點"))
         }
         line = if (road.size >= 2) m.addPolyline(LibrePolylineOptions()
             .addAll(road.map { LibreLatLng(it.latitude, it.longitude) })
@@ -266,7 +295,8 @@ private fun OpenFreeMapPane(
 
 @Composable
 private fun GoogleMapsPane(
-    dark: Boolean, selected: Coordinate, start: Coordinate?, stops: List<Coordinate>,
+    dark: Boolean, selected: Coordinate, current: Coordinate?, currentIsMock: Boolean,
+    start: Coordinate?, stops: List<Coordinate>,
     road: List<Coordinate>, previewRoad: Boolean, flowerSpots: List<FlowerSpot>,
     cameraRequest: MapCameraRequest?, mapExplore: Boolean,
     onCameraFailure: (String) -> Unit,
@@ -283,6 +313,8 @@ private fun GoogleMapsPane(
     val view = remember(context) { GoogleMapView(context).apply { onCreate(null) } }
     var map by remember { mutableStateOf<GoogleMap?>(null) }
     var currentMarker by remember { mutableStateOf<com.google.android.gms.maps.model.Marker?>(null) }
+    var liveMarker by remember { mutableStateOf<com.google.android.gms.maps.model.Marker?>(null) }
+    var liveWasMock by remember { mutableStateOf(false) }
     var startMarker by remember { mutableStateOf<com.google.android.gms.maps.model.Marker?>(null) }
     var stopMarkers by remember { mutableStateOf(emptyList<com.google.android.gms.maps.model.Marker>()) }
     var flowerMarkers by remember { mutableStateOf(emptyList<com.google.android.gms.maps.model.Marker>()) }
@@ -345,6 +377,24 @@ private fun GoogleMapsPane(
             currentMarker = m.addMarker(GoogleMarkerOptions().position(position).title("選取位置"))
         } else currentMarker?.position = position
     }
+    LaunchedEffect(map, current, currentIsMock) {
+        val m = map ?: return@LaunchedEffect
+        if (current == null) {
+            liveMarker?.remove()
+            liveMarker = null
+        } else {
+            val coordinate = GoogleLatLng(current.latitude, current.longitude)
+            if (liveMarker == null || liveWasMock != currentIsMock) {
+                liveMarker?.remove()
+                liveMarker = m.addMarker(GoogleMarkerOptions().position(coordinate)
+                    .anchor(.5f, .5f).icon(
+                        com.google.android.gms.maps.model.BitmapDescriptorFactory.fromBitmap(
+                            RoutePinBitmap.current(context, currentIsMock)))
+                    .title(if (currentIsMock) "🐝 目前模擬位置" else "手機目前位置"))
+                liveWasMock = currentIsMock
+            } else liveMarker?.position = coordinate
+        }
+    }
     LaunchedEffect(map, start) {
         val m = map ?: return@LaunchedEffect
         if (start == null) {
@@ -367,7 +417,11 @@ private fun GoogleMapsPane(
         stopMarkers = stops.mapIndexedNotNull { index, coordinate ->
             m.addMarker(GoogleMarkerOptions()
                 .position(GoogleLatLng(coordinate.latitude, coordinate.longitude))
-                .title("路點 " + (index + 1)))
+                .anchor(.5f, .5f)
+                .icon(com.google.android.gms.maps.model.BitmapDescriptorFactory.fromBitmap(
+                    RoutePinBitmap.create(context, index, stops.size)))
+                .title("第 ${index + 1} 點" + if (index == 0) " · 起點"
+                    else if (index == stops.lastIndex) " · 終點" else " · 途經點"))
         }
         line = if (road.size >= 2) m.addPolyline(GooglePolylineOptions()
             .addAll(road.map { GoogleLatLng(it.latitude, it.longitude) })

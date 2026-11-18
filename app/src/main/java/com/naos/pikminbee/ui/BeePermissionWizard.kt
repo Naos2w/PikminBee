@@ -14,6 +14,7 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -124,7 +125,7 @@ fun BeePermissionWizard(
     val headings = listOf("精確定位", "選擇模擬位置 App", "懸浮蜜蜂", "通知", "背景與省電設定")
     val details = listOf(
         "使用模擬 GPS 需要精確定位授權。僅瀏覽地圖可略過完整設定。",
-        "開啟 Android 開發者選項，將「選取模擬位置應用程式」設為 PikminBee。返回後檢查。",
+        "開啟 Android 開發人員選項，將「選取模擬位置應用程式」設為 PikminBee UAT（或已安裝的 DEV 版）。返回後按重新檢查。",
         "只有需要在其他 App 上方使用蜜蜂控制時，才開啟此權限。",
         "通知讓前景定位的暫停、停止與恢復真實 GPS 指令更方便使用。",
         "HyperOS 可能限制背景服務。可檢視電池及背景設定，但系統強制停止後無法自動重啟。",
@@ -155,13 +156,22 @@ fun BeePermissionWizard(
 
     Column(
         Modifier.fillMaxSize()
-            .background(if (dark) androidx.compose.ui.graphics.Color(0xFF0A0D15)
-                else androidx.compose.ui.graphics.Color(0xFFF5F7FA))
+            .background(Brush.verticalGradient(if (dark)
+                listOf(androidx.compose.ui.graphics.Color(0xFF142541),
+                    androidx.compose.ui.graphics.Color(0xFF0C152A))
+                else listOf(androidx.compose.ui.graphics.Color(0xFFDFEBFF),
+                    androidx.compose.ui.graphics.Color(0xFFF7FAFF))))
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 20.dp, vertical = 22.dp),
         verticalArrangement = Arrangement.spacedBy(15.dp),
     ) {
-        Text("PikminBee · 權限檢查", fontSize = 23.sp, fontWeight = FontWeight.Bold)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("權限檢查", fontSize = 22.sp, fontWeight = FontWeight.Bold,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface)
+            TextButton(onClick = if (initial) onFinish else onExit) {
+                Text(if (initial) "先略過 →" else "返回地圖 →")
+            }
+        }
         Text(
             if (initial) "首次設定將逐項引導。必要權限完成後才能使用模擬定位；選配項可略過。"
             else "重新確認裝置權限。這裡不會自行啟動定位或開啟系統權限。",
@@ -204,11 +214,8 @@ fun BeePermissionWizard(
                     "略過並繼續" else "下一步")
             }
         }
-        if (initial) {
-            TextButton(onClick = onFinish, modifier = Modifier.fillMaxWidth()) {
-                Text("先使用地圖（稍後再設定模擬定位）")
-            }
-        }
+        // The primary skip/exit control stays visible above the step list, even
+        // on POCO screens with larger fonts; re-entry is available in the drawer.
         Text("模擬位置 App 的選擇由 Android 管理；這裡僅檢查設定狀態，不會繞過權限。",
             fontSize = 12.sp,
             color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant)

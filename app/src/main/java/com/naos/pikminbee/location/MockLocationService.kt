@@ -224,13 +224,11 @@ class MockLocationService : Service() {
                 return START_STICKY
             }
             ACTION_SHOW_OVERLAY -> {
-                if (!providerActive) {
-                    LocationStatus.display.value = "請先啟動模擬位置，再開啟懸浮控制"
-                    return START_NOT_STICKY
-                }
+                // Showing controls is independent of whether mock GPS is running.
+                // Actual location-changing actions still check permissions via ensureProvider().
                 if (!Settings.canDrawOverlays(this)) {
                     LocationStatus.display.value = "請先授予 PikminBee 懸浮視窗權限"
-                    return START_STICKY
+                    return if (providerActive) START_STICKY else START_NOT_STICKY
                 }
                 runCatching {
                     if (floatingControls == null) {
@@ -261,17 +259,23 @@ class MockLocationService : Service() {
                     floatingControls?.show()
                     updateOverlay()
                     LocationStatus.overlayVisible.value = true
+                    LocationStatus.display.value = if (providerActive)
+                        "懸浮蜜蜂已開啟 · 可操作路徑" else "懸浮蜜蜂已開啟 · 定位測試尚未啟動"
+                    updateOverlay()
                 }.onFailure {
                     LocationStatus.overlayVisible.value = false
                     LocationStatus.display.value = "無法顯示懸浮視窗：" + (it.message ?: "權限問題")
                 }
-                return START_STICKY
+                // An overlay-only service is not a location foreground service:
+                // do not restart it automatically if Android reclaims the process.
+                return if (providerActive) START_STICKY else START_NOT_STICKY
             }
             ACTION_SET_SPEED -> {
                 val requested = intent.getStringExtra(EXTRA_SPEED_PRESET)
                 val preset = WalkSpeedPreset.entries.firstOrNull { it.name == requested }
                     ?: return START_NOT_STICKY
-                if (!providerActive) return START_NOT_STICKY
+                // The user may preselect walking speed from the floating bee
+                // even before a mock location session has begun.
                 AppPreferences(this).setWalkSpeedPreset(preset)
                 speedMetersPerSecond = preset.metresPerSecond
                 if (phase == WalkPhase.MOVING || phase == WalkPhase.PAUSED) {
@@ -280,8 +284,11 @@ class MockLocationService : Service() {
                         "$activity${if (phase == WalkPhase.PAUSED) "暫停" else "步行"} · ${preset.display}"
                     refreshNotification()
                 }
-                updateOverlay()
-                return START_STICKY
+                if (!providerActive) {
+                    LocationStatus.display.value = "已選擇 ${preset.display} · 下次行走時使用"
+                    updateOverlay()
+                }
+                return if (providerActive) START_STICKY else START_NOT_STICKY
             }
             ACTION_START_FLOWERS -> {
                 if (flowerPlanJob?.isActive == true) {
@@ -336,7 +343,9 @@ class MockLocationService : Service() {
                 floatingControls?.dismiss()
                 floatingControls = null
                 LocationStatus.overlayVisible.value = false
-                return START_STICKY
+                LocationStatus.display.value = if (providerActive) "懸浮控制已關閉 · 模擬定位保持" else "懸浮控制已關閉"
+                if (!providerActive) stopSelf()
+                return if (providerActive) START_STICKY else START_NOT_STICKY
             }
             ACTION_STOP -> {
                 releaseMock()
