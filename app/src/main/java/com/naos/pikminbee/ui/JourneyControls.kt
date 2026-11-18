@@ -51,7 +51,9 @@ fun JourneyControls(
     activeMode: WalkMode?,
     phase: WalkPhase,
     speedPreset: WalkSpeedPreset,
+    defaultSpeedPreset: WalkSpeedPreset,
     onSpeedSelected: (WalkSpeedPreset) -> Unit,
+    onSetDefaultSpeed: (WalkSpeedPreset) -> Unit,
     foreground: Color,
     muted: Color,
     onUndo: () -> Unit,
@@ -161,6 +163,20 @@ fun JourneyControls(
                     },
                 )
             }
+        }
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                "下次啟動預設：${defaultSpeedPreset.display}",
+                color = muted, fontSize = 12.sp,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(
+                onClick = { onSetDefaultSpeed(speedPreset) },
+                enabled = speedPreset != defaultSpeedPreset,
+            ) { Text("設為預設", fontSize = 12.sp) }
         }
         if (flower) FilterChip(
             selected = loop,

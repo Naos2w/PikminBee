@@ -13,5 +13,9 @@ enum class WalkSpeedPreset(val label: String, val kilometresPerHour: Double) {
         val DEFAULT: WalkSpeedPreset = WALK
         fun fromSaved(value: String?): WalkSpeedPreset =
             entries.firstOrNull { it.name == value } ?: DEFAULT
+
+        /** Existing installs migrate their previously saved last-selected speed. */
+        fun fromSavedDefault(explicitDefault: String?, oldSelection: String?): WalkSpeedPreset =
+            fromSaved(explicitDefault ?: oldSelection)
     }
 }

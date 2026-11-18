@@ -20,6 +20,7 @@ class FloatingControls(
     private val context: Context,
     private val sendAction: (String) -> Unit,
     private val onSpeedSelected: (WalkSpeedPreset) -> Unit,
+    private val onSetDefaultSpeed: (WalkSpeedPreset) -> Unit,
     private val openMap: () -> Unit,
 ) {
     companion object {
@@ -40,6 +41,8 @@ class FloatingControls(
     private var flowerAction: TextView? = null
     private var flowerSummary: TextView? = null
     private val speedButtons = linkedMapOf<WalkSpeedPreset, TextView>()
+    private var defaultSpeedAction: TextView? = null
+    private var currentSpeed: WalkSpeedPreset = WalkSpeedPreset.DEFAULT
     private var params: WindowManager.LayoutParams? = null
     private var expanded = false
 
@@ -111,6 +114,13 @@ class FloatingControls(
             speedRow.addView(button)
         }
         actions.addView(speedRow)
+        val setDefault = action("設為下次啟動預設") {
+            onSetDefaultSpeed(currentSpeed)
+        }.apply {
+            textSize = 12f
+            contentDescription = "將目前選取速度設為個人預設"
+        }
+        actions.addView(setDefault)
         val row1 = LinearLayout(context)
         val pause = action("暫停") { sendAction(if (pauseAction?.text == "繼續") RESUME else PAUSE) }
         val stop = action("停止行走") { sendAction(STOP_WALK) }
@@ -180,6 +190,7 @@ class FloatingControls(
         stopAction = stop
         flowerAction = startFlowers
         flowerSummary = summary
+        defaultSpeedAction = setDefault
         params = layout
         expanded = false
     }
@@ -195,6 +206,7 @@ class FloatingControls(
         mode: WalkMode?,
         flowerStops: Int,
         speedPreset: WalkSpeedPreset,
+        defaultSpeedPreset: WalkSpeedPreset,
         planningFlowers: Boolean,
         status: String,
     ) {
@@ -208,6 +220,14 @@ class FloatingControls(
         flowerAction?.isEnabled = canStartFlower
         flowerAction?.alpha = if (canStartFlower) 1f else .4f
         flowerSummary?.text = "尋花草稿 ${flowerStops}/14 點 · 循環 · ${speedPreset.display}"
+        currentSpeed = speedPreset
+        defaultSpeedAction?.apply {
+            text = "預設：${defaultSpeedPreset.display} · 設為目前速度"
+            isEnabled = speedPreset != defaultSpeedPreset
+            alpha = if (isEnabled) 1f else .45f
+            contentDescription = "目前預設 ${defaultSpeedPreset.display}。" +
+                if (isEnabled) "點此設為 ${speedPreset.display}" else "目前速度就是預設"
+        }
         speedButtons.forEach { (option, button) ->
             val selected = option == speedPreset
             if (button.tag != selected) {
@@ -248,6 +268,8 @@ class FloatingControls(
         flowerAction = null
         flowerSummary = null
         speedButtons.clear()
+        defaultSpeedAction = null
+        currentSpeed = WalkSpeedPreset.DEFAULT
         params = null
         expanded = false
     }
