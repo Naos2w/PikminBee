@@ -24,6 +24,8 @@ import com.google.android.gms.maps.model.LatLng as GoogleLatLng
 import com.google.android.gms.maps.model.MarkerOptions as GoogleMarkerOptions
 import com.google.android.gms.maps.model.MapStyleOptions
 import com.google.android.gms.maps.model.PolylineOptions as GooglePolylineOptions
+import com.google.android.gms.maps.model.LatLngBounds as GoogleLatLngBounds
+import com.naos.pikminbee.domain.MapCameraGeometry
 import com.naos.pikminbee.BuildConfig
 import com.naos.pikminbee.data.MapProvider
 import com.naos.pikminbee.domain.Coordinate
@@ -37,9 +39,17 @@ import org.maplibre.android.camera.CameraPosition as LibreCameraPosition
 import org.maplibre.android.geometry.LatLng as LibreLatLng
 import org.maplibre.android.annotations.MarkerOptions as LibreMarkerOptions
 import org.maplibre.android.annotations.PolylineOptions as LibrePolylineOptions
+import org.maplibre.android.geometry.LatLngBounds as LibreLatLngBounds
+import org.maplibre.android.camera.CameraUpdateFactory as LibreCameraUpdateFactory
 
 private const val LIBERTY = "https://tiles.openfreemap.org/styles/liberty"
 private const val DARK_STYLE = "https://tiles.openfreemap.org/styles/dark"
+
+/** An explicit, one-shot camera instruction. Live GPS updates never move the camera. */
+data class MapCameraRequest(
+    val id: Int,
+    val target: MapCameraGeometry.ViewTarget,
+)
 
 /** Both native providers consume precisely the same picked stops and real road geometry. */
 @Composable
@@ -52,15 +62,20 @@ fun LocationMap(
     road: List<Coordinate>,
     previewRoad: Boolean,
     flowerSpots: List<FlowerSpot>,
+    cameraRequest: MapCameraRequest? = null,
+    mapExplore: Boolean = false,
+    onCameraFailure: (String) -> Unit = {},
     onPick: (Coordinate) -> Unit,
     onFlowerPick: (FlowerSpot) -> Unit,
     onStopPick: ((Int) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     when (provider) {
-        MapProvider.OPEN_FREE_MAP -> OpenFreeMapPane(dark, selected, start, stops, road, previewRoad, flowerSpots, onPick, onFlowerPick, onStopPick, modifier)
+        MapProvider.OPEN_FREE_MAP -> OpenFreeMapPane(dark, selected, start, stops, road, previewRoad, flowerSpots,
+            cameraRequest, mapExplore, onCameraFailure, onPick, onFlowerPick, onStopPick, modifier)
         MapProvider.GOOGLE_MAPS -> if (BuildConfig.HAS_GOOGLE_MAPS_KEY) {
-            GoogleMapsPane(dark, selected, start, stops, road, previewRoad, flowerSpots, onPick, onFlowerPick, onStopPick, modifier)
+            GoogleMapsPane(dark, selected, start, stops, road, previewRoad, flowerSpots,
+                cameraRequest, mapExplore, onCameraFailure, onPick, onFlowerPick, onStopPick, modifier)
         } else {
             Box(modifier) { Text("Google Maps 尚未設定 API Key，請先在 secrets.properties 填寫設定。") }
         }
@@ -71,6 +86,8 @@ fun LocationMap(
 private fun OpenFreeMapPane(
     dark: Boolean, selected: Coordinate, start: Coordinate?, stops: List<Coordinate>,
     road: List<Coordinate>, previewRoad: Boolean, flowerSpots: List<FlowerSpot>,
+    cameraRequest: MapCameraRequest?, mapExplore: Boolean,
+    onCameraFailure: (String) -> Unit,
     onPick: (Coordinate) -> Unit, onFlowerPick: (FlowerSpot) -> Unit,
     onStopPick: ((Int) -> Unit)?, modifier: Modifier,
 ) {
@@ -79,6 +96,8 @@ private fun OpenFreeMapPane(
     val latestOnPick by rememberUpdatedState(onPick)
     val latestOnFlowerPick by rememberUpdatedState(onFlowerPick)
     val latestOnStopPick by rememberUpdatedState(onStopPick)
+    val latestStops by rememberUpdatedState(stops)
+    val latestOnCameraFailure by rememberUpdatedState(onCameraFailure)
     val view = remember(context) {
         MapLibre.getInstance(context)
         LibreMapView(context).apply { onCreate(null) }
@@ -122,7 +141,11 @@ private fun OpenFreeMapPane(
                     val index = flowerMarkers.indexOfFirst { it.id == tapped.id }
                     val flower = shownFlowers.getOrNull(index)
                     if (flower != null) {
-                        latestOnFlowerPick(flower)
+                        val overlap = if (stopCallback != null)
+                            MapCameraGeometry.overlappingStopIndex(flower.coordinate, latestStops)
+                        else null
+                        if (overlap != null) stopCallback?.invoke(overlap)
+                        else latestOnFlowerPick(flower)
                         true
                     } else false
                 }
@@ -200,6 +223,39 @@ private fun OpenFreeMapPane(
                     if (flower.evidence == FlowerEvidence.PERSONALLY_CHECKED) " · 本人確認" else " · 待確認"))
         }
     }
+    // Explicit camera actions only: do not follow the GPS marker at every tick.
+    // The map layout needs non-zero dimensions before the bounds update is valid.
+    LaunchedEffect(map, styleVersion, cameraRequest) {
+        val m = map ?: return@LaunchedEffect
+        val request = cameraRequest?.takeIf { it.target.hasAny } ?: return@LaunchedEffect
+        if (styleVersion == 0) return@LaunchedEffect
+        view.post {
+            if (!view.isAttachedToWindow || view.width <= 0 || view.height <= 0 || map !== m)
+                return@post
+            runCatching {
+                val targets = request.target.points
+                if (targets.size == 1) {
+                    val only = targets.first()
+                    m.animateCamera(LibreCameraUpdateFactory.newLatLngZoom(
+                        LibreLatLng(only.latitude, only.longitude), 15.0,
+                    ))
+                } else {
+                    val bounds = LibreLatLngBounds.Builder().includes(
+                        targets.map { LibreLatLng(it.latitude, it.longitude) },
+                    ).build()
+                    val density = view.resources.displayMetrics.density
+                    val side = (30f * density).toInt()
+                    val top = (100f * density).toInt().coerceAtMost(view.height / 4)
+                    val bottom = (95f * density).toInt().coerceAtMost(view.height / 4)
+                    m.animateCamera(LibreCameraUpdateFactory.newLatLngBounds(
+                        bounds, side, top, side, bottom,
+                    ))
+                }
+            }.onFailure {
+                latestOnCameraFailure("地圖無法調整顯示範圍，請手動移動或縮放")
+            }
+        }
+    }
     AndroidView(factory = { view }, modifier = modifier)
 }
 
@@ -207,6 +263,8 @@ private fun OpenFreeMapPane(
 private fun GoogleMapsPane(
     dark: Boolean, selected: Coordinate, start: Coordinate?, stops: List<Coordinate>,
     road: List<Coordinate>, previewRoad: Boolean, flowerSpots: List<FlowerSpot>,
+    cameraRequest: MapCameraRequest?, mapExplore: Boolean,
+    onCameraFailure: (String) -> Unit,
     onPick: (Coordinate) -> Unit, onFlowerPick: (FlowerSpot) -> Unit,
     onStopPick: ((Int) -> Unit)?, modifier: Modifier,
 ) {
@@ -215,6 +273,8 @@ private fun GoogleMapsPane(
     val latestOnPick by rememberUpdatedState(onPick)
     val latestOnFlowerPick by rememberUpdatedState(onFlowerPick)
     val latestOnStopPick by rememberUpdatedState(onStopPick)
+    val latestStops by rememberUpdatedState(stops)
+    val latestOnCameraFailure by rememberUpdatedState(onCameraFailure)
     val view = remember(context) { GoogleMapView(context).apply { onCreate(null) } }
     var map by remember { mutableStateOf<GoogleMap?>(null) }
     var currentMarker by remember { mutableStateOf<com.google.android.gms.maps.model.Marker?>(null) }
@@ -250,7 +310,11 @@ private fun GoogleMapsPane(
                     val index = flowerMarkers.indexOfFirst { it.id == tapped.id }
                     val flower = shownFlowers.getOrNull(index)
                     if (flower != null) {
-                        latestOnFlowerPick(flower)
+                        val overlap = if (stopCallback != null)
+                            MapCameraGeometry.overlappingStopIndex(flower.coordinate, latestStops)
+                        else null
+                        if (overlap != null) stopCallback?.invoke(overlap)
+                        else latestOnFlowerPick(flower)
                         true
                     } else false
                 }
@@ -325,6 +389,40 @@ private fun GoogleMapsPane(
         }
         flowerMarkers = created.map { it.first }
         shownFlowers = created.map { it.second }
+    }
+    LaunchedEffect(map, mapExplore) {
+        val m = map ?: return@LaunchedEffect
+        if (mapExplore) {
+            val density = view.resources.displayMetrics.density
+            m.setPadding(
+                (18f * density).toInt(), (94f * density).toInt(),
+                (18f * density).toInt(), (90f * density).toInt(),
+            )
+        } else m.setPadding(0, 0, 0, 0)
+    }
+    LaunchedEffect(map, cameraRequest) {
+        val m = map ?: return@LaunchedEffect
+        val request = cameraRequest?.takeIf { it.target.hasAny } ?: return@LaunchedEffect
+        view.post {
+            if (!view.isAttachedToWindow || view.width <= 0 || view.height <= 0 || map !== m)
+                return@post
+            runCatching {
+                val targets = request.target.points
+                if (targets.size == 1) {
+                    val only = targets.first()
+                    m.animateCamera(CameraUpdateFactory.newLatLngZoom(
+                        GoogleLatLng(only.latitude, only.longitude), 15f,
+                    ))
+                } else {
+                    val builder = GoogleLatLngBounds.Builder()
+                    targets.forEach { builder.include(GoogleLatLng(it.latitude, it.longitude)) }
+                    val padding = (34f * view.resources.displayMetrics.density).toInt()
+                    m.animateCamera(CameraUpdateFactory.newLatLngBounds(builder.build(), padding))
+                }
+            }.onFailure {
+                latestOnCameraFailure("地圖無法調整顯示範圍，請手動移動或縮放")
+            }
+        }
     }
     AndroidView(factory = { view }, modifier = modifier)
 }

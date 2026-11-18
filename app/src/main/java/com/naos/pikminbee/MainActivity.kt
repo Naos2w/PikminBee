@@ -8,6 +8,7 @@ import android.net.Uri
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.BorderStroke
@@ -46,6 +47,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -73,6 +75,7 @@ import com.naos.pikminbee.data.SavedRoute
 import com.naos.pikminbee.gpx.GpxCodec
 import com.naos.pikminbee.gpx.GpxImport
 import com.naos.pikminbee.domain.Coordinate
+import com.naos.pikminbee.domain.MapCameraGeometry
 import com.naos.pikminbee.domain.FlowerMapDraft
 import com.naos.pikminbee.domain.WalkMode
 import com.naos.pikminbee.domain.WalkPhase
@@ -86,6 +89,7 @@ import com.naos.pikminbee.location.CheckpointStatus
 import com.naos.pikminbee.location.SessionJournal
 import com.naos.pikminbee.location.MockLocationService
 import com.naos.pikminbee.ui.LocationMap
+import com.naos.pikminbee.ui.MapCameraRequest
 import com.naos.pikminbee.ui.JourneyControls
 import com.naos.pikminbee.ui.RouteLibraryPanel
 import com.naos.pikminbee.ui.FlowerCatalogPanel
@@ -147,6 +151,9 @@ private fun PikminBeeScreen() {
     // A recorded flower is never silently treated as the route's starting point.
     var flowerStart by remember { mutableStateOf<Coordinate?>(null) }
     var flowerRoadPreview by remember { mutableStateOf(emptyList<Coordinate>()) }
+    var mapExplore by remember { mutableStateOf(false) }
+    var cameraSerial by remember { mutableIntStateOf(0) }
+    var cameraRequest by remember { mutableStateOf<MapCameraRequest?>(null) }
     val controlsScroll = rememberScrollState()
     var latitudeText by remember { mutableStateOf(selected.latitude.toString()) }
     var longitudeText by remember { mutableStateOf(selected.longitude.toString()) }
@@ -307,6 +314,43 @@ private fun PikminBeeScreen() {
         longitudeText = selected.longitude.toString()
     }
 
+    val activeFlowerWalk = walkMode == WalkMode.FLOWERS &&
+        walkPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)
+    val activeRouteWalk = walkMode == WalkMode.ROUTE &&
+        walkPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)
+    val displayedRoad = when (tab) {
+        ToolTab.FLOWERS -> if (activeFlowerWalk) roadLine else flowerRoadPreview
+        ToolTab.ROUTE -> if (activeRouteWalk) roadLine else emptyList()
+        else -> emptyList()
+    }
+    fun moveMapCamera(target: MapCameraGeometry.ViewTarget) {
+        if (!target.hasAny) return
+        cameraSerial++
+        cameraRequest = MapCameraRequest(cameraSerial, target)
+        if (target.crossesDateLine) {
+            message = "路線跨越國際換日線，暫先聚焦起點；可手動縮放地圖"
+        }
+    }
+    fun fitCurrentRoute() {
+        val target = when (tab) {
+            ToolTab.FLOWERS -> MapCameraGeometry.forRoute(
+                mockPosition ?: flowerStart, flowerStops, displayedRoad,
+            )
+            ToolTab.ROUTE -> MapCameraGeometry.forRoute(
+                mockPosition ?: roadStops.firstOrNull() ?: selected, roadStops, displayedRoad,
+            )
+            else -> MapCameraGeometry.fitPoints(listOf(selected))
+        }
+        mapExplore = true
+        moveMapCamera(if (target.hasAny) target
+            else MapCameraGeometry.fitPoints(listOf(selected)))
+    }
+    fun focusMapPoint(point: Coordinate) {
+        mapExplore = true
+        moveMapCamera(MapCameraGeometry.fitPoints(listOf(point)))
+    }
+    BackHandler(enabled = mapExplore) { mapExplore = false }
+
     MaterialTheme {
         Box(Modifier.fillMaxSize().background(if (dark) Color(0xFF091321) else Color(0xFFF4F7FC))) {
             LocationMap(
@@ -321,17 +365,17 @@ private fun PikminBeeScreen() {
                     ToolTab.FLOWERS -> flowerStops
                     else -> emptyList()
                 },
-                road = if (tab == ToolTab.FLOWERS && flowerRoadPreview.isNotEmpty() &&
-                    !(walkMode == WalkMode.FLOWERS &&
-                        walkPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED))
-                ) flowerRoadPreview else roadLine,
-                previewRoad = tab == ToolTab.FLOWERS && flowerRoadPreview.isNotEmpty() &&
-                    !(walkMode == WalkMode.FLOWERS &&
-                        walkPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)),
+                road = displayedRoad,
+                previewRoad = tab == ToolTab.FLOWERS && !activeFlowerWalk &&
+                    flowerRoadPreview.isNotEmpty(),
+                cameraRequest = cameraRequest,
+                mapExplore = mapExplore,
+                onCameraFailure = { message = it },
                 flowerSpots = if (tab == ToolTab.FLOWERS) FlowerFinder.nearby(
                     selected, allFlowers, 5000.0, maxCount = 100
                 ) else emptyList(),
                 onPick = { point ->
+                    if (mapExplore) mapExplore = false
                     when (tab) {
                         ToolTab.ROUTE -> {
                             if (roadStops.size < 15) {
@@ -353,6 +397,7 @@ private fun PikminBeeScreen() {
                     }
                 },
                 onFlowerPick = { flower ->
+                    if (mapExplore) mapExplore = false
                     selected = flower.coordinate
                     flowerPick = FlowerMapPick(flower.coordinate, flower)
                     message = editingFlowerStopIndex?.let {
@@ -361,6 +406,7 @@ private fun PikminBeeScreen() {
                 },
                 onStopPick = if (tab == ToolTab.FLOWERS) { index: Int ->
                     flowerStops.getOrNull(index)?.let { stop ->
+                        if (mapExplore) mapExplore = false
                         selected = stop
                         flowerPick = null
                         editingFlowerStopIndex = index
@@ -375,6 +421,58 @@ private fun PikminBeeScreen() {
                     .padding(horizontal = 14.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.SpaceBetween,
             ) {
+                if (mapExplore) {
+                    FrostedCard(dark, Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column {
+                                    Text("地圖檢視", fontWeight = FontWeight.Bold, color = foreground)
+                                    Text(
+                                        if (tab == ToolTab.FLOWERS) "尋花路點 ${flowerStops.size} 個"
+                                        else if (tab == ToolTab.ROUTE) "道路路點 ${roadStops.size} 個"
+                                        else "自由瀏覽地圖",
+                                        color = muted, fontSize = 12.sp,
+                                    )
+                                }
+                                TextButton(onClick = { mapExplore = false }) {
+                                    Text("返回操作", fontSize = 12.sp)
+                                }
+                            }
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                OutlinedButton(
+                                    onClick = ::fitCurrentRoute,
+                                    modifier = Modifier.weight(1f).height(48.dp),
+                                ) { Text("整條路線", fontSize = 11.sp) }
+                                OutlinedButton(
+                                    onClick = {
+                                        val origin = when (tab) {
+                                            ToolTab.FLOWERS -> mockPosition ?: flowerStart ?: selected
+                                            ToolTab.ROUTE -> mockPosition ?: roadStops.firstOrNull() ?: selected
+                                            else -> selected
+                                        }
+                                        focusMapPoint(origin)
+                                    },
+                                    modifier = Modifier.weight(1f).height(48.dp),
+                                ) { Text("起點", fontSize = 11.sp) }
+                                OutlinedButton(
+                                    onClick = { focusMapPoint(selected) },
+                                    modifier = Modifier.weight(1f).height(48.dp),
+                                ) { Text("選點", fontSize = 11.sp) }
+                            }
+                        }
+                    }
+                    FrostedCard(dark, Modifier.fillMaxWidth()) {
+                        Text(message, Modifier.padding(12.dp), color = muted,
+                            fontSize = 12.sp, maxLines = 2)
+                    }
+                } else {
                 FrostedCard(dark, Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(
@@ -385,7 +483,16 @@ private fun PikminBeeScreen() {
                                 Text("PikminBee", fontSize = 23.sp, fontWeight = FontWeight.Bold, color = foreground)
                                 Text("尋花採蜜 · $mockStatus", fontSize = 12.sp, color = muted)
                             }
-                            Text("v0.2 DEV", fontSize = 11.sp, color = honey, fontWeight = FontWeight.SemiBold)
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text("DEV", fontSize = 11.sp, color = honey,
+                                    fontWeight = FontWeight.SemiBold)
+                                TextButton(onClick = ::fitCurrentRoute) {
+                                    Text("地圖檢視", fontSize = 12.sp)
+                                }
+                            }
                         }
 
                         Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
@@ -679,7 +786,15 @@ private fun PikminBeeScreen() {
                                     onClear = { prefs.saveFlowerDraft(emptyList()) },
                                     onMessage = { message = it },
                                     onAskLocation = { requestLocation.launch(Manifest.permission.ACCESS_FINE_LOCATION) },
-                                    onPreviewRoad = { flowerRoadPreview = it },
+                                    onPreviewRoad = { geometry ->
+                                        flowerRoadPreview = geometry
+                                        if (geometry.size >= 2) {
+                                            mapExplore = true
+                                            moveMapCamera(MapCameraGeometry.forRoute(
+                                                mockPosition ?: flowerStart, flowerStops, geometry,
+                                            ))
+                                        }
+                                    },
                                 )
                                 FlowerCatalogPanel(
                                     spots = allFlowers,
@@ -809,6 +924,7 @@ private fun PikminBeeScreen() {
                         Text(message, fontSize = 12.sp, color = muted, maxLines = 2)
                     }
                 }
+                } // mapExplore: full map vs editor
             }
         }
         pendingSimplifiedGpx?.let { candidate ->
