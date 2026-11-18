@@ -174,10 +174,12 @@ class LanController(private val context: Context) {
                 val json = parse(req.body) ?: return error(400, "JSON 無效")
                 val mode = mode(json.optString("mode")) ?: return error(400, "模式無效")
                 val target = coordinate(json) ?: return error(400, "經緯度無效")
-                val current = points(mode)
-                if (current.size >= 15) return error(409, "最多只允許 15 個路點")
-                savePoints(mode, current + target)
-                accepted("已新增路點")
+                val result = LanRouteDraftPolicy.add(
+                    mode, points(mode), target, LocationStatus.selected.value,
+                )
+                if (!result.accepted) return error(409, result.message)
+                savePoints(mode, result.stops)
+                accepted(result.message)
             }
             "/api/points/undo", "/api/points/clear" -> {
                 val json = parse(req.body) ?: return error(400, "JSON 無效")
@@ -187,27 +189,23 @@ class LanController(private val context: Context) {
                 accepted("路點已更新")
             }
             "/api/route/start" -> {
-                if (!planning.compareAndSet(false, true)) return error(409, "正在規劃另一條路線")
-                val json = parse(req.body)
-                val mode = mode(json?.optString("mode")) ?: run {
-                    planning.set(false)
-                    return error(400, "模式無效")
-                }
-                val stops = points(mode)
+                val json = parse(req.body) ?: return error(400, "JSON 無效")
+                val mode = mode(json.optString("mode")) ?: return error(400, "模式無效")
                 val start = LocationStatus.selected.value
-                if (start == null || stops.isEmpty()) {
-                    planning.set(false)
-                    return error(409, "請先在手機啟動模擬定位並加入路點")
+                    ?: return error(409, "請先在手機啟動模擬定位並加入路點")
+                val loop = json.optBoolean("loop", false)
+                val speed = json.optDouble("speed", 1.4)
+                if (!speed.isFinite() || speed !in setOf(1.0, 1.4, 2.0))
+                    return error(400, "步行速度僅支援 1.0、1.4、2.0 m/s")
+                val anchors = try {
+                    LanRouteDraftPolicy.anchors(mode, start, points(mode), loop)
+                } catch (e: IllegalArgumentException) {
+                    return error(409, e.message ?: "路點無效")
                 }
-                val loop = json?.optBoolean("loop", false) == true
-                val speed = json?.optDouble("speed", 1.4) ?: 1.4
+                if (!planning.compareAndSet(false, true))
+                    return error(409, "正在規劃另一條路線")
                 scope.launch {
                     try {
-                        val anchors = buildList {
-                            add(start)
-                            stops.forEach { if (com.naos.pikminbee.domain.WalkingGeometry.distanceMeters(last(), it) > 1.0) add(it) }
-                            if (loop && com.naos.pikminbee.domain.WalkingGeometry.distanceMeters(last(), start) > 1.0) add(start)
-                        }
                         val route = ValhallaPlanner.plan(anchors)
                         context.startService(MockLocationService.routeIntent(context, route, speed, mode, loop))
                     } catch (e: Exception) {
