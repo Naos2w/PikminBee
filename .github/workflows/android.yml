@@ -69,15 +69,31 @@ jobs:
           ./gradlew :app:assembleDebug --no-daemon --console=plain
       - name: Verify UAT package identity and certificate
         if: github.event_name == 'workflow_dispatch' && inputs.package_apk == true
+        shell: bash
         run: |
-          APK="$(find app/build/outputs/apk/debug -maxdepth 1 -name '*.apk' | head -n 1)"
-          [ -n "$APK" ] && [ -s "$APK" ] || exit 1
-          TOOL="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
-          AAPT="$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -n 1)"
-          [ -n "$TOOL" ] && [ -n "$AAPT" ] || exit 1
-          # Public fingerprint pin: fail closed if the private UAT key is rotated.
-          "$TOOL" verify --print-certs "$APK" | grep -F 'Signer #1 certificate SHA-256 digest: 7a34ec161ae557f0c2db222b54696e0ef574bd3f95d135e6597a7bff7e96f807'
-          "$AAPT" dump badging "$APK" | grep "package: name='com.naos.pikminbee.uat'"
+          set -euo pipefail
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          METADATA="app/build/outputs/apk/debug/output-metadata.json"
+          if [ ! -s "$APK" ] || [ ! -s "$METADATA" ]; then
+            echo "UAT APK or Android Gradle output metadata is missing"
+            exit 1
+          fi
+          # AGP writes the actual applicationId and versionCode into output-metadata.json.
+          # aapt is optional on some hosted Android SDK installations.
+          python3 -c "import json; d=json.load(open('$METADATA')); assert d['applicationId']=='com.naos.pikminbee.uat', d['applicationId']; assert int(d['elements'][0]['versionCode']) >= 1000; assert d['elements'][0]['versionName'].endswith('-uat'); print('Validated UAT package metadata:', d['applicationId'], d['elements'][0]['versionCode'])"
+          SDK_DIR="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          if [ ! -d "$SDK_DIR/build-tools" ]; then
+            echo "Android SDK build-tools not found: $SDK_DIR"
+            exit 1
+          fi
+          TOOL="$(find "$SDK_DIR/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
+          if [ -z "$TOOL" ]; then
+            echo "apksigner tool not installed in Android SDK build-tools"
+            exit 1
+          fi
+          # Public SHA-256 pin prevents rotation of the UAT signing identity.
+          "$TOOL" verify --print-certs "$APK" | tee "$RUNNER_TEMP/pikminbee-uat-certificate.txt"
+          grep -F 'Signer #1 certificate SHA-256 digest: 7a34ec161ae557f0c2db222b54696e0ef574bd3f95d135e6597a7bff7e96f807' "$RUNNER_TEMP/pikminbee-uat-certificate.txt"
           sha256sum "$APK"
       - name: Upload manually requested UAT APK
         if: github.event_name == 'workflow_dispatch' && inputs.package_apk == true
