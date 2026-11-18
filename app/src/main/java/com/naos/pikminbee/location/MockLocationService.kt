@@ -19,6 +19,9 @@ import android.os.SystemClock
 import android.provider.Settings
 import com.naos.pikminbee.MainActivity
 import com.naos.pikminbee.ui.FloatingControls
+import com.naos.pikminbee.data.AppPreferences
+import com.naos.pikminbee.data.RouteDraftState
+import com.naos.pikminbee.route.ValhallaPlanner
 import com.naos.pikminbee.lan.LanController
 import com.naos.pikminbee.lan.LanStatus
 import androidx.core.content.ContextCompat
@@ -26,6 +29,13 @@ import com.naos.pikminbee.domain.Coordinate
 import com.naos.pikminbee.domain.WalkMode
 import com.naos.pikminbee.domain.WalkPhase
 import com.naos.pikminbee.domain.WalkingGeometry
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 
 /** UI, future overlay and LAN controller must all observe this single GPS state. */
@@ -47,6 +57,7 @@ class MockLocationService : Service() {
         const val ACTION_RESUME_ROUTE = "com.naos.pikminbee.action.RESUME_ROUTE"
         const val ACTION_STOP_ROUTE = "com.naos.pikminbee.action.STOP_ROUTE"
         const val ACTION_CLEAR_ROUTE = "com.naos.pikminbee.action.CLEAR_ROUTE"
+        const val ACTION_START_FLOWERS = "com.naos.pikminbee.action.START_FLOWER_DRAFT"
         const val ACTION_SHOW_OVERLAY = "com.naos.pikminbee.action.SHOW_OVERLAY"
         const val ACTION_HIDE_OVERLAY = "com.naos.pikminbee.action.HIDE_OVERLAY"
         const val ACTION_ENABLE_LAN = "com.naos.pikminbee.action.ENABLE_LAN"
@@ -100,6 +111,9 @@ class MockLocationService : Service() {
     private var phase = WalkPhase.IDLE
     private var mode: WalkMode? = null
     private var floatingControls: FloatingControls? = null
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var flowerPlanJob: Job? = null
+    private var flowerPlanRevision = 0
     private var lanController: LanController? = null
     private lateinit var journal: SessionJournal
 
@@ -129,7 +143,7 @@ class MockLocationService : Service() {
                     LocationStatus.selected.value = point
                 }
             }
-            floatingControls?.update(phase, mode)
+            updateOverlay()
             lanController?.checkNetwork()
             if (providerActive) handler.postDelayed(this, 1_000L)
         }
@@ -138,6 +152,9 @@ class MockLocationService : Service() {
     override fun onCreate() {
         super.onCreate()
         manager = getSystemService(LocationManager::class.java)
+        // Also initialise saved route drafts when Android restores the service
+        // before the app Activity has ever been opened in this process.
+        AppPreferences(this)
         journal = SessionJournal(this)
         journal.read()
         getSystemService(NotificationManager::class.java).createNotificationChannel(
@@ -213,6 +230,7 @@ class MockLocationService : Service() {
                                     FloatingControls.PAUSE -> ACTION_PAUSE_ROUTE
                                     FloatingControls.RESUME -> ACTION_RESUME_ROUTE
                                     FloatingControls.STOP_WALK -> ACTION_STOP_ROUTE
+                                    FloatingControls.START_FLOWERS -> ACTION_START_FLOWERS
                                     FloatingControls.RESTORE_REAL -> ACTION_STOP
                                     else -> ACTION_HIDE_OVERLAY
                                 }
@@ -224,12 +242,61 @@ class MockLocationService : Service() {
                             })
                     }
                     floatingControls?.show()
-                    floatingControls?.update(phase, mode)
+                    updateOverlay()
                     LocationStatus.overlayVisible.value = true
                 }.onFailure {
                     LocationStatus.overlayVisible.value = false
                     LocationStatus.display.value = "無法顯示懸浮視窗：" + (it.message ?: "權限問題")
                 }
+                return START_STICKY
+            }
+            ACTION_START_FLOWERS -> {
+                if (flowerPlanJob?.isActive == true) {
+                    LocationStatus.display.value = "尋花道路規劃中，請先確認結果或取消"
+                    updateOverlay()
+                    return START_STICKY
+                }
+                val origin = target
+                val decision = FloatingFlowerRoutePolicy.prepare(
+                    providerActive, phase, origin, RouteDraftState.flowerStops.value,
+                )
+                if (!decision.allowed) {
+                    LocationStatus.display.value = "尋花未啟動：" + decision.problem
+                    updateOverlay()
+                    refreshNotification()
+                    return START_STICKY
+                }
+                val revision = ++flowerPlanRevision
+                LocationStatus.display.value = "尋花道路規劃中 · 尚未開始移動"
+                flowerPlanJob = serviceScope.launch {
+                    try {
+                        val geometry = ValhallaPlanner.plan(decision.anchors)
+                        // Never start a stale result after a stop, teleport, restore,
+                        // or another service command that changes the current origin.
+                        if (revision != flowerPlanRevision || !providerActive ||
+                            target != origin || phase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)
+                        ) return@launch
+                        activateRoute(
+                            geometry, FloatingFlowerRoutePolicy.SPEED_METRES_PER_SECOND,
+                            WalkMode.FLOWERS, loop = true,
+                        )
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        if (revision == flowerPlanRevision) {
+                            LocationStatus.display.value =
+                                "尋花道路規劃失敗：" + (e.message ?: "請確認網路與路點")
+                        }
+                    } finally {
+                        if (revision == flowerPlanRevision) {
+                            flowerPlanJob = null
+                            updateOverlay()
+                            refreshNotification()
+                        }
+                    }
+                }
+                updateOverlay()
+                refreshNotification()
                 return START_STICKY
             }
             ACTION_HIDE_OVERLAY -> {
@@ -264,6 +331,13 @@ class MockLocationService : Service() {
                 return START_STICKY
             }
             ACTION_STOP_ROUTE -> {
+                if (flowerPlanJob?.isActive == true) {
+                    cancelFlowerPlanning()
+                    LocationStatus.display.value = "尋花道路規劃已取消 · 目前位置不變"
+                    updateOverlay()
+                    refreshNotification()
+                    return START_STICKY
+                }
                 if (phase == WalkPhase.MOVING || phase == WalkPhase.PAUSED) {
                     phase = WalkPhase.PARKED
                     LocationStatus.phase.value = phase
@@ -274,6 +348,7 @@ class MockLocationService : Service() {
                 return START_STICKY
             }
             ACTION_CLEAR_ROUTE -> {
+                cancelFlowerPlanning()
                 track = emptyList()
                 trackLengthMeters = 0.0
                 walkingDistanceMeters = 0.0
@@ -294,6 +369,7 @@ class MockLocationService : Service() {
                     Coordinate(intent.getDoubleExtra(EXTRA_LAT, Double.NaN),
                         intent.getDoubleExtra(EXTRA_LON, Double.NaN))
                 }.getOrNull() ?: return START_NOT_STICKY
+                cancelFlowerPlanning()
                 if (!ensureProvider()) return START_NOT_STICKY
                 phase = WalkPhase.IDLE
                 mode = null
@@ -315,32 +391,69 @@ class MockLocationService : Service() {
                 val planned = runCatching {
                     raw.toList().chunked(2).map { Coordinate(it[0], it[1]) }
                 }.getOrNull() ?: return START_NOT_STICKY
-                if (WalkingGeometry.lengthMeters(planned) !in 0.1..80_000.0) {
-                    LocationStatus.display.value = "步行路線無效"
-                    return START_NOT_STICKY
-                }
-                if (!ensureProvider()) return START_NOT_STICKY
-                track = planned
-                trackLengthMeters = WalkingGeometry.lengthMeters(track)
-                target = planned.first()
-                journal.record(planned.first(), force = true)
-                speedMetersPerSecond = intent.getDoubleExtra(EXTRA_SPEED, 1.4).coerceIn(0.5, 3.0)
-                walkingDistanceMeters = 0.0
-                loopRoute = intent.getBooleanExtra(EXTRA_LOOP, false)
-                mode = runCatching {
+                val routeMode = runCatching {
                     WalkMode.valueOf(intent.getStringExtra(EXTRA_MODE) ?: "")
                 }.getOrDefault(WalkMode.ROUTE)
-                phase = WalkPhase.MOVING
-                LocationStatus.phase.value = phase
-                LocationStatus.mode.value = mode
-                LocationStatus.geometry.value = track
-                LocationStatus.display.value = if (mode == WalkMode.FLOWERS) "尋花步行中" else "沿道路步行中"
-                scheduleTicks()
-                refreshNotification()
-                return START_STICKY
+                cancelFlowerPlanning()
+                return if (activateRoute(
+                        planned,
+                        intent.getDoubleExtra(EXTRA_SPEED, 1.4),
+                        routeMode,
+                        intent.getBooleanExtra(EXTRA_LOOP, false),
+                    )
+                ) START_STICKY else START_NOT_STICKY
             }
             else -> return START_NOT_STICKY
         }
+    }
+
+    private fun updateOverlay() {
+        floatingControls?.update(
+            phase = phase,
+            mode = mode,
+            flowerStops = RouteDraftState.flowerStops.value.size,
+            planningFlowers = flowerPlanJob?.isActive == true,
+            status = LocationStatus.display.value,
+        )
+    }
+
+    private fun cancelFlowerPlanning() {
+        flowerPlanRevision++
+        flowerPlanJob?.cancel()
+        flowerPlanJob = null
+    }
+
+    /** Shared path for route intents and the explicit overlay flower shortcut. */
+    private fun activateRoute(
+        planned: List<Coordinate>,
+        speed: Double,
+        routeMode: WalkMode,
+        loop: Boolean,
+    ): Boolean {
+        val length = WalkingGeometry.lengthMeters(planned)
+        if (planned.size !in 2..10_000 || length !in 0.1..80_000.0) {
+            LocationStatus.display.value = "步行路線無效"
+            updateOverlay()
+            return false
+        }
+        if (!ensureProvider()) return false
+        track = planned
+        trackLengthMeters = length
+        target = planned.first()
+        journal.record(planned.first(), force = true)
+        speedMetersPerSecond = speed.coerceIn(0.5, 3.0)
+        walkingDistanceMeters = 0.0
+        loopRoute = loop
+        mode = routeMode
+        phase = WalkPhase.MOVING
+        LocationStatus.phase.value = phase
+        LocationStatus.mode.value = mode
+        LocationStatus.geometry.value = track
+        LocationStatus.display.value = if (mode == WalkMode.FLOWERS)
+            "尋花步行中" else "沿道路步行中"
+        scheduleTicks()
+        refreshNotification()
+        return true
     }
 
     private fun ensureProvider(): Boolean {
@@ -460,6 +573,7 @@ class MockLocationService : Service() {
     }
 
     private fun releaseMock(clearCheckpoint: Boolean = true) {
+        cancelFlowerPlanning()
         if (clearCheckpoint) journal.clear()
         lanController?.close()
         lanController = null
@@ -493,6 +607,7 @@ class MockLocationService : Service() {
         // This can be a system shutdown of the service; only explicit ACTION_STOP
         // is allowed to delete a useful checkpoint.
         releaseMock(clearCheckpoint = false)
+        serviceScope.cancel()
         super.onDestroy()
     }
 }

@@ -11,6 +11,15 @@
 - **User selects Restore real GPS:** The mock provider and session are stopped and the checkpoint is explicitly deleted. This prevents old test locations from being automatically resurrected.
 - **Force-stop, reboot, revoked developer-option mock-app selection:** No background restart promise. After opening PikminBee again, any recent checkpoint is visible in the background section and can be manually resumed if the OS permits.
 
+## 懸浮蜜蜂：從已儲存路點開始尋花（DEV 原始碼功能）
+
+- 在 PikminBee 主畫面先設定尋花路點，最多 **14 點**；明確啟用模擬位置、允許懸浮窗並點「🐝 開啟懸浮控制」。這個功能沒有增加獨立 GPS 引擎或背景自啟機制。
+- 點懸浮蜜蜂展開，按「🌸 開始尋花」，才會從**當下模擬位置**以預存的路點向 Valhalla 查詢**循環行人道路**。速度固定 **1.4 m/s**。按鈕在沒有有效草稿、正在步行或查詢中停用；仍有服務端驗證以阻擋無效意圖。
+- 查詢中**不移動**。只有得到完整合格的步行道路，才會使用原本的前景 GPS 服務開始尋花；失敗**不會改成直線行走**。
+- 查詢期間「停止行走」會顯示「取消規劃」，也能透過其他明確停止／清除／瞬移／恢復真實定位命令取消舊查詢；舊網路回應不會再啟動步行。已開始行走仍可暫停、繼續、停止／原地停留。
+- 服務被 Android 回收後，**仍只可恢復最後的原地位置**；不會自動重跑尋花、恢復浮窗或重開 Wi-Fi。路點草稿存在 App 資料，並非會自動執行的排程。
+- 真正的操作手感、懸浮窗版面、失敗提示和 Android／HyperOS 背景限制，仍須 POCO 實機 UAT 驗證，程式碼通過測試不表示實機已通過。
+
 ## Checkpoint details
 
 - Only the **last virtual WGS84 coordinate and timestamp** are stored in private app preferences; no route geometry, flower details, browser token or Wi-Fi PIN are in the checkpoint.

@@ -24,6 +24,7 @@ class FloatingControls(
         const val PAUSE = "pause"
         const val RESUME = "resume"
         const val STOP_WALK = "stop_walk"
+        const val START_FLOWERS = "start_flowers"
         const val RESTORE_REAL = "restore_real"
         const val HIDE = "hide"
     }
@@ -34,6 +35,8 @@ class FloatingControls(
     private var stateLabel: TextView? = null
     private var pauseAction: TextView? = null
     private var stopAction: TextView? = null
+    private var flowerAction: TextView? = null
+    private var flowerSummary: TextView? = null
     private var params: WindowManager.LayoutParams? = null
     private var expanded = false
 
@@ -77,6 +80,16 @@ class FloatingControls(
         description.setOnClickListener(null)
         description.textSize = 11f
         actions.addView(description)
+        val startFlowers = action("🌸 開始尋花") { sendAction(START_FLOWERS) }.apply {
+            contentDescription = "從目前模擬位置沿已儲存尋花路點開始循環道路行走"
+        }
+        actions.addView(startFlowers)
+        val summary = action("已儲存 0/14 點 · 循環 · 1.4 m/s") { }.apply {
+            textSize = 11f
+            setOnClickListener(null)
+            contentDescription = "尋花草稿狀態"
+        }
+        actions.addView(summary)
         val row1 = LinearLayout(context)
         val pause = action("暫停") { sendAction(if (pauseAction?.text == "繼續") RESUME else PAUSE) }
         val stop = action("停止行走") { sendAction(STOP_WALK) }
@@ -144,6 +157,8 @@ class FloatingControls(
         stateLabel = description
         pauseAction = pause
         stopAction = stop
+        flowerAction = startFlowers
+        flowerSummary = summary
         params = layout
         expanded = false
     }
@@ -154,17 +169,34 @@ class FloatingControls(
         params?.let { params -> root?.let { windows.updateViewLayout(it, params) } }
     }
 
-    fun update(phase: WalkPhase, mode: WalkMode?) {
-        pauseAction?.text = if (phase == WalkPhase.PAUSED) "繼續" else "暫停"
+    fun update(
+        phase: WalkPhase,
+        mode: WalkMode?,
+        flowerStops: Int,
+        planningFlowers: Boolean,
+        status: String,
+    ) {
         val walking = phase == WalkPhase.MOVING || phase == WalkPhase.PAUSED
+        pauseAction?.text = if (phase == WalkPhase.PAUSED) "繼續" else "暫停"
         pauseAction?.isEnabled = walking
         pauseAction?.alpha = if (walking) 1.0f else 0.4f
-        stopAction?.isEnabled = walking
-        stopAction?.alpha = if (walking) 1.0f else 0.4f
+
+        flowerAction?.text = if (planningFlowers) "規劃尋花道路中…" else "🌸 開始尋花"
+        val canStartFlower = !walking && !planningFlowers && flowerStops in 1..14
+        flowerAction?.isEnabled = canStartFlower
+        flowerAction?.alpha = if (canStartFlower) 1f else .4f
+        flowerSummary?.text = "尋花草稿 ${flowerStops}/14 點 · 循環 · 1.4 m/s"
+
+        stopAction?.text = if (planningFlowers) "取消規劃" else "停止行走"
+        stopAction?.isEnabled = walking || planningFlowers
+        stopAction?.alpha = if (walking || planningFlowers) 1f else .4f
         stateLabel?.text = when {
+            planningFlowers -> "正在查詢步行道路 · 尚未移動"
             mode == WalkMode.FLOWERS && phase == WalkPhase.MOVING -> "尋花巡迴中"
             phase == WalkPhase.MOVING -> "道路步行中"
+            mode == WalkMode.FLOWERS && phase == WalkPhase.PAUSED -> "尋花已暫停"
             phase == WalkPhase.PAUSED -> "已暫停"
+            status.startsWith("尋花") || status.startsWith("道路查詢失敗") -> status.take(55)
             phase == WalkPhase.PARKED -> "已停止 · 原地停留"
             else -> "PikminBee · 原地停留"
         }
@@ -177,6 +209,8 @@ class FloatingControls(
         stateLabel = null
         pauseAction = null
         stopAction = null
+        flowerAction = null
+        flowerSummary = null
         params = null
         expanded = false
     }
