@@ -19,6 +19,17 @@ class WalkSpeedPresetTest {
         assertEquals(WalkSpeedPreset.FAST, WalkSpeedPreset.fromSaved("FAST"))
     }
 
+    @Test fun storedDefaultOverridesLastSelectedWithSafeMigration() {
+        assertEquals(WalkSpeedPreset.FAST,
+            WalkSpeedPreset.fromSavedDefault(null, "FAST"))
+        assertEquals(WalkSpeedPreset.SLOW,
+            WalkSpeedPreset.fromSavedDefault("SLOW", "FAST"))
+        assertEquals(WalkSpeedPreset.WALK,
+            WalkSpeedPreset.fromSavedDefault(null, null))
+        assertEquals(WalkSpeedPreset.WALK,
+            WalkSpeedPreset.fromSavedDefault("INVALID", "FAST"))
+    }
+
     @Test fun labelsAreExplicitKmhNotOldMetresPerSecond() {
         assertEquals("慢走 · 0.8 km/h", WalkSpeedPreset.SLOW.display)
         assertEquals("走路 · 1.4 km/h", WalkSpeedPreset.WALK.display)

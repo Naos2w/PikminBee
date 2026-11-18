@@ -248,6 +248,10 @@ class MockLocationService : Service() {
                             onSpeedSelected = { preset ->
                                 startService(speedIntent(this, preset))
                             },
+                            onSetDefaultSpeed = { preset ->
+                                AppPreferences(this).setDefaultWalkSpeedPreset(preset)
+                                updateOverlay()
+                            },
                             openMap = {
                                 startActivity(Intent(this, MainActivity::class.java)
                                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
@@ -443,6 +447,7 @@ class MockLocationService : Service() {
             mode = mode,
             flowerStops = RouteDraftState.flowerStops.value.size,
             speedPreset = WalkSpeedState.selected.value,
+            defaultSpeedPreset = WalkSpeedState.preferred.value,
             planningFlowers = flowerPlanJob?.isActive == true,
             status = LocationStatus.display.value,
         )

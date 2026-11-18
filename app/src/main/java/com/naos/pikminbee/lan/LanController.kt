@@ -197,7 +197,15 @@ class LanController(private val context: Context) {
                 } ?: return error(400, "不支援的速度預設")
                 prefs.setWalkSpeedPreset(preset)
                 context.startService(MockLocationService.speedIntent(context, preset))
-                accepted("速度已設定：${preset.display}")
+                accepted("本次速度已設定：${preset.display}")
+            }
+            "/api/speed/default" -> {
+                val json = parse(req.body) ?: return error(400, "JSON 無效")
+                val preset = WalkSpeedPreset.entries.firstOrNull {
+                    it.name == json.optString("speedPreset")
+                } ?: return error(400, "不支援的預設速度")
+                prefs.setDefaultWalkSpeedPreset(preset)
+                accepted("下次開啟 App 的預設速度已設為：${preset.display}")
             }
             "/api/route/start" -> {
                 val json = parse(req.body) ?: return error(400, "JSON 無效")
@@ -269,6 +277,7 @@ class LanController(private val context: Context) {
             .put("mode", LocationStatus.mode.value?.name)
             .put("planning", planning.get())
             .put("speedPreset", WalkSpeedState.selected.value.name)
+            .put("defaultSpeedPreset", WalkSpeedState.preferred.value.name)
             .put("routeStops", coordinates(prefs.routeDraft()))
             .put("flowerStops", coordinates(prefs.flowerDraft()))
             .put("geometry", coordinates(path))

@@ -172,6 +172,7 @@ private fun PikminBeeScreen() {
     val savedRoutes by SavedRouteState.routes.collectAsState()
     var planning by remember { mutableStateOf(false) }
     val speedPreset by WalkSpeedState.selected.collectAsState()
+    val defaultSpeedPreset by WalkSpeedState.preferred.collectAsState()
     var flowerLoop by remember { mutableStateOf(true) }
     val work = rememberCoroutineScope()
     val mockStatus by LocationStatus.display.collectAsState()
@@ -343,6 +344,10 @@ private fun PikminBeeScreen() {
         }
         message = "速度已選擇：${next.display}" +
             if (moving) " · 行走中已要求更新" else " · 下次行走時使用"
+    }
+    fun setDefaultWalkSpeed(next: WalkSpeedPreset) {
+        prefs.setDefaultWalkSpeedPreset(next)
+        message = "已將 ${next.display} 設為下次開啟 App 的預設速度"
     }
     fun moveMapCamera(target: MapCameraGeometry.ViewTarget) {
         if (!target.hasAny) return
@@ -696,7 +701,9 @@ private fun PikminBeeScreen() {
                                     activeMode = walkMode,
                                     phase = walkPhase,
                                     speedPreset = speedPreset,
+                                    defaultSpeedPreset = defaultSpeedPreset,
                                     onSpeedSelected = ::chooseWalkSpeed,
+                                    onSetDefaultSpeed = ::setDefaultWalkSpeed,
                                     foreground = foreground, muted = muted,
                                     onUndo = { prefs.saveRouteDraft(roadStops.dropLast(1)) },
                                     onClear = { prefs.saveRouteDraft(emptyList()) },
@@ -829,7 +836,9 @@ private fun PikminBeeScreen() {
                                     activeMode = walkMode,
                                     phase = walkPhase,
                                     speedPreset = speedPreset,
+                                    defaultSpeedPreset = defaultSpeedPreset,
                                     onSpeedSelected = ::chooseWalkSpeed,
+                                    onSetDefaultSpeed = ::setDefaultWalkSpeed,
                                     foreground = foreground, muted = muted,
                                     onUndo = { prefs.saveFlowerDraft(flowerStops.dropLast(1)) },
                                     onClear = { prefs.saveFlowerDraft(emptyList()) },

@@ -142,6 +142,9 @@ $("clear").addEventListener("click", () => act("/api/points/clear", {mode}));
 $("speed").addEventListener("change", () => {
   act("/api/speed", {speedPreset:$("speed").value});
 });
+$("make-speed-default").addEventListener("click", () => {
+  act("/api/speed/default", {speedPreset:$("speed").value});
+});
 $("start").addEventListener("click", () => act("/api/route/start", {
   mode, speedPreset:$("speed").value, loop:$("loop").value === "true"
 }));
@@ -236,6 +239,10 @@ async function refresh() {
     current = latest.position;
     if (["SLOW","WALK","FAST"].includes(latest.speedPreset))
       $("speed").value = latest.speedPreset;
+    const names = {SLOW:"慢走 0.8 km/h",WALK:"走路 1.4 km/h",FAST:"快走 10.8 km/h"};
+    const savedDefault = latest.defaultSpeedPreset || "WALK";
+    $("default-speed").textContent = "個人預設：" + (names[savedDefault] || names.WALK);
+    $("make-speed-default").disabled = $("speed").value === savedDefault;
     $("status").textContent = (latest.status || "尚未模擬") +
       " · " + (latest.phase || "IDLE") +
       (latest.position ? " · " + latest.position.lat.toFixed(5) +

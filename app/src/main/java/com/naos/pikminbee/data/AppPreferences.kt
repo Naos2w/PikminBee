@@ -28,19 +28,22 @@ object RouteDraftState {
     }
 }
 
-/** Persisted speed selection shared by the editor and floating controls. */
+/** Current speed is temporary; the user's preferred default survives app restarts. */
 object WalkSpeedState {
     val selected = MutableStateFlow(WalkSpeedPreset.DEFAULT)
+    val preferred = MutableStateFlow(WalkSpeedPreset.DEFAULT)
     private var initialized = false
 
-    @Synchronized fun initialize(saved: WalkSpeedPreset) {
+    @Synchronized fun initialize(savedDefault: WalkSpeedPreset) {
         if (!initialized) {
-            selected.value = saved
+            selected.value = savedDefault
+            preferred.value = savedDefault
             initialized = true
         }
     }
 
     fun update(next: WalkSpeedPreset) { selected.value = next }
+    fun updatePreferred(next: WalkSpeedPreset) { preferred.value = next }
 }
 
 /** Saved routes are a distinct library from the currently edited map draft. */
@@ -61,14 +64,24 @@ class AppPreferences(private val context: Context) {
     init {
         RouteDraftState.initialize(loadPoints("route_draft"), loadPoints("flower_draft"))
         SavedRouteState.initialize(readSavedRoutes())
-        WalkSpeedState.initialize(WalkSpeedPreset.fromSaved(prefs.getString("walk_speed_preset", null)))
+        WalkSpeedState.initialize(WalkSpeedPreset.fromSavedDefault(
+            prefs.getString("walk_speed_default", null),
+            prefs.getString("walk_speed_preset", null),
+        ))
     }
 
     fun walkSpeedPreset(): WalkSpeedPreset = WalkSpeedState.selected.value
+    fun defaultWalkSpeedPreset(): WalkSpeedPreset = WalkSpeedState.preferred.value
 
+    /** Changes this session's speed; does not change the user's saved startup default. */
     fun setWalkSpeedPreset(next: WalkSpeedPreset) {
-        prefs.edit().putString("walk_speed_preset", next.name).apply()
         WalkSpeedState.update(next)
+    }
+
+    /** Explicit user choice; only this changes the next App launch's default speed. */
+    fun setDefaultWalkSpeedPreset(next: WalkSpeedPreset) {
+        prefs.edit().putString("walk_speed_default", next.name).apply()
+        WalkSpeedState.updatePreferred(next)
     }
 
     fun provider(): MapProvider = MapBasemapPolicy.resolveProvider(
