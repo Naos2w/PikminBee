@@ -81,12 +81,28 @@ function selectMode(next) {
   mode = next;
   $("mode-route").classList.toggle("mode-active", mode === "ROUTE");
   $("mode-flowers").classList.toggle("mode-active", mode === "FLOWERS");
-  const stops = mode === "ROUTE" ? (latest?.routeStops || []) : (latest?.flowerStops || []);
-  $("pointcount").textContent = stops.length + " 個路點";
+  updateRouteControls();
   renderMap();
 }
 $("mode-route").addEventListener("click", () => selectMode("ROUTE"));
 $("mode-flowers").addEventListener("click", () => selectMode("FLOWERS"));
+$("loop").addEventListener("change", updateRouteControls);
+
+function updateRouteControls() {
+  const stops = mode === "ROUTE" ? (latest?.routeStops || []) : (latest?.flowerStops || []);
+  const max = mode === "FLOWERS" ? 14 : 15;
+  const hasPosition = !!latest?.position;
+  const loop = $("loop").value === "true";
+  const invalidLoop = mode === "ROUTE" && loop && stops.length > 14;
+  $("pointcount").textContent = stops.length + " / " + max + " 個路點";
+  $("add").disabled = stops.length >= max || (mode === "FLOWERS" && !hasPosition);
+  $("start").disabled = stops.length === 0 || !hasPosition || invalidLoop || !!latest?.planning;
+  $("routehint").textContent = !hasPosition && mode === "FLOWERS" ?
+    "請先從手機啟動模擬定位，再新增花點" :
+    invalidLoop ? "15 點道路路線無法直接循環；請撤銷一點或改為不循環" :
+    mode === "FLOWERS" ? "尋花路線最多 14 點；會拒絕重複／接近起點的花點" :
+    "道路路線最多 15 點；循環時最多 14 點";
+}
 
 function readCoordinate() {
   const latText = $("lat").value.trim();
@@ -137,18 +153,22 @@ $("real").addEventListener("click", () => {
 
 const darkQuery = matchMedia("(prefers-color-scheme: dark)");
 const storeKey = "pikminbee-map-appearance";
-const savedTheme = localStorage.getItem(storeKey) || "system";
-$("theme").value = ["system","light","dark"].includes(savedTheme) ? savedTheme : "system";
-function isDark() { return $("theme").value === "dark" ||
-  ($("theme").value === "system" && darkQuery.matches); }
+const allowedStyles = ["auto","liberty","bright","positron","dark"];
+const savedStyle = localStorage.getItem(storeKey) || "auto";
+$("theme").value = allowedStyles.includes(savedStyle) ? savedStyle :
+  savedStyle === "light" ? "liberty" : savedStyle === "system" ? "auto" : "auto";
+function styleUrl() {
+  const selected = $("theme").value;
+  const name = selected === "auto" ? (darkQuery.matches ? "dark" : "liberty") :
+    (allowedStyles.includes(selected) ? selected : "liberty");
+  return "https://tiles.openfreemap.org/styles/" + name;
+}
 $("theme").addEventListener("change", () => {
-  localStorage.setItem(storeKey,$("theme").value);
-  if (map) map.setStyle(isDark() ? "https://tiles.openfreemap.org/styles/dark" :
-    "https://tiles.openfreemap.org/styles/liberty");
+  localStorage.setItem(storeKey, $("theme").value);
+  if (map) map.setStyle(styleUrl());
 });
 darkQuery.addEventListener?.("change", () => {
-  if ($("theme").value === "system" && map) map.setStyle(isDark() ?
-    "https://tiles.openfreemap.org/styles/dark" : "https://tiles.openfreemap.org/styles/liberty");
+  if ($("theme").value === "auto" && map) map.setStyle(styleUrl());
 });
 
 async function initialiseMap() {
@@ -157,8 +177,7 @@ async function initialiseMap() {
     maplibre = await import("/vendor/maplibre-gl.mjs");
     map = new maplibre.Map({
       container:"map",
-      style: isDark() ? "https://tiles.openfreemap.org/styles/dark" :
-        "https://tiles.openfreemap.org/styles/liberty",
+      style: styleUrl(),
       center:[chosen.lon,chosen.lat], zoom:13.5,
       attributionControl:true
     });
@@ -217,8 +236,7 @@ async function refresh() {
       (latest.position ? " · " + latest.position.lat.toFixed(5) +
         ", " + latest.position.lon.toFixed(5) : "");
     if (latest.note && latest.note.includes("失敗")) setMessage(latest.note);
-    const stops = mode === "ROUTE" ? (latest.routeStops || []) : (latest.flowerStops || []);
-    $("pointcount").textContent = stops.length + " 個路點";
+    updateRouteControls();
     renderMap();
   } catch (err) {
     if (token) $("connection").textContent = "連線中斷";

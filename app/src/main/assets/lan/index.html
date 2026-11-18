@@ -46,11 +46,17 @@ button:disabled{opacity:.42;cursor:not-allowed}button:focus-visible,input:focus-
 <div class="layout" id="controls">
 <section class="glass">
  <div class="inline" style="margin-bottom:9px"><strong>世界地圖</strong>
-  <select id="theme" style="max-width:155px" aria-label="地圖外觀"><option value="system">跟隨系統</option><option value="light">淺色地圖</option><option value="dark">深色地圖</option></select>
+  <select id="theme" style="max-width:172px" aria-label="免 Key 地圖樣式">
+   <option value="auto">跟隨系統</option>
+   <option value="liberty">Liberty</option>
+   <option value="bright">Bright</option>
+   <option value="positron">Positron</option>
+   <option value="dark">Dark</option>
+  </select>
  </div>
  <div id="map" aria-label="點選地圖以選取座標"></div>
  <div id="selected" class="muted" style="margin:10px 0">點一下地圖以選擇位置</div>
- <div class="muted">底圖：OpenFreeMap／OpenStreetMap。網頁程式已內建，地圖圖磚仍需要連線。</div>
+ <div class="muted">底圖：OpenFreeMap／OpenStreetMap（免 Google API Key）；圖磚仍需連線。切換底圖不會改變定位或路線。</div>
 </section>
 <section class="glass">
  <h2>遠端 GPS 控制</h2>
@@ -68,12 +74,13 @@ button:disabled{opacity:.42;cursor:not-allowed}button:focus-visible,input:focus-
   <div><label for="speed">步行速度</label><select id="speed"><option value="1">1.0 m/s</option><option value="1.4" selected>1.4 m/s</option><option value="2">2.0 m/s</option></select></div>
   <div><label for="loop">循環路線</label><select id="loop"><option value="false">不循環</option><option value="true">循環</option></select></div>
  </div>
- <div id="pointcount" class="muted">0 個路點</div>
+ <div id="pointcount" class="muted" aria-live="polite">0 / 15 個路點</div>
+ <div id="routehint" class="muted">尋花最多 14 點；循環道路最多 14 點，普通道路最多 15 點。</div>
  <div class="row"><button id="add">加入選取地點</button><button id="undo">撤銷</button><button id="clear">清除路點</button></div>
  <div class="row"><button id="start" class="primary">開始行走</button><button id="pause">暫停</button><button id="resume">繼續</button><button id="stop">停止</button></div>
  <div class="row"><button id="real">恢復真實 GPS</button></div>
  <div id="message" aria-live="polite"></div>
- <div class="hint">停止行走與恢復真實 GPS 是不同指令。路線服務故障時不會改用直線移動。自動偵測遊戲內大花尚未實作。</div>
+ <div class="hint">尋花模式必須先由手機啟動模擬定位，才可透過網頁新增花點。停止行走與恢復真實 GPS 是不同指令；道路服務故障時不會改走直線。遊戲大花的官方即時座標尚未取得。</div>
 </section>
 </div>
 </main>
