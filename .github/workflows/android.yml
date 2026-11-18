@@ -91,9 +91,15 @@ jobs:
             echo "apksigner tool not installed in Android SDK build-tools"
             exit 1
           fi
-          # Public SHA-256 pin prevents rotation of the UAT signing identity.
+          # Android apksigner may label a certificate as "Signer #1" or "V2 Signer".
+          # Check all reported SHA-256 digests, not the version-specific prefix.
           "$TOOL" verify --print-certs "$APK" | tee "$RUNNER_TEMP/pikminbee-uat-certificate.txt"
-          grep -F 'Signer #1 certificate SHA-256 digest: 7a34ec161ae557f0c2db222b54696e0ef574bd3f95d135e6597a7bff7e96f807' "$RUNNER_TEMP/pikminbee-uat-certificate.txt"
+          actual_sha256s="$(awk '/certificate SHA-256 digest:/ { print $NF }' "$RUNNER_TEMP/pikminbee-uat-certificate.txt" | tr '[:upper:]' '[:lower:]' | sort -u)"
+          expected_sha256='7a34ec161ae557f0c2db222b54696e0ef574bd3f95d135e6597a7bff7e96f807'
+          if [ "$actual_sha256s" != "$expected_sha256" ]; then
+            echo "UAT signing certificate is missing, unexpected, or ambiguous"
+            exit 1
+          fi
           sha256sum "$APK"
       - name: Upload manually requested UAT APK
         if: github.event_name == 'workflow_dispatch' && inputs.package_apk == true
