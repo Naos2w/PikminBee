@@ -21,6 +21,8 @@ import com.naos.pikminbee.MainActivity
 import com.naos.pikminbee.ui.FloatingControls
 import com.naos.pikminbee.data.AppPreferences
 import com.naos.pikminbee.data.RouteDraftState
+import com.naos.pikminbee.data.WalkSpeedState
+import com.naos.pikminbee.domain.WalkSpeedPreset
 import com.naos.pikminbee.route.ValhallaPlanner
 import com.naos.pikminbee.lan.LanController
 import com.naos.pikminbee.lan.LanStatus
@@ -58,6 +60,7 @@ class MockLocationService : Service() {
         const val ACTION_STOP_ROUTE = "com.naos.pikminbee.action.STOP_ROUTE"
         const val ACTION_CLEAR_ROUTE = "com.naos.pikminbee.action.CLEAR_ROUTE"
         const val ACTION_START_FLOWERS = "com.naos.pikminbee.action.START_FLOWER_DRAFT"
+        const val ACTION_SET_SPEED = "com.naos.pikminbee.action.SET_WALK_SPEED"
         const val ACTION_SHOW_OVERLAY = "com.naos.pikminbee.action.SHOW_OVERLAY"
         const val ACTION_HIDE_OVERLAY = "com.naos.pikminbee.action.HIDE_OVERLAY"
         const val ACTION_ENABLE_LAN = "com.naos.pikminbee.action.ENABLE_LAN"
@@ -68,6 +71,7 @@ class MockLocationService : Service() {
         const val EXTRA_LON = "lon"
         const val EXTRA_GEOMETRY = "route_geometry"
         const val EXTRA_SPEED = "speed_mps"
+        const val EXTRA_SPEED_PRESET = "walk_speed_preset"
         const val EXTRA_MODE = "walk_mode"
         const val EXTRA_LOOP = "route_loop"
         private const val CHANNEL = "pikminbee_active"
@@ -83,6 +87,10 @@ class MockLocationService : Service() {
         fun command(context: android.content.Context, action: String): Intent =
             Intent(context, MockLocationService::class.java).setAction(action)
 
+        fun speedIntent(context: android.content.Context, preset: WalkSpeedPreset): Intent =
+            Intent(context, MockLocationService::class.java).setAction(ACTION_SET_SPEED)
+                .putExtra(EXTRA_SPEED_PRESET, preset.name)
+
         fun routeIntent(context: android.content.Context, track: List<Coordinate>, speed: Double,
                         mode: WalkMode = WalkMode.ROUTE, loop: Boolean = false): Intent {
             require(track.size in 2..10_000) { "Invalid walking route" }
@@ -92,7 +100,7 @@ class MockLocationService : Service() {
             }
             return Intent(context, MockLocationService::class.java).setAction(ACTION_START_ROUTE)
                 .putExtra(EXTRA_GEOMETRY, packed)
-                .putExtra(EXTRA_SPEED, speed.coerceIn(0.5, 3.0))
+                .putExtra(EXTRA_SPEED, speed.coerceIn(0.2, 3.0))
                 .putExtra(EXTRA_MODE, mode.name)
                 .putExtra(EXTRA_LOOP, loop)
         }
@@ -105,7 +113,7 @@ class MockLocationService : Service() {
     private var track = emptyList<Coordinate>()
     private var trackLengthMeters = 0.0
     private var walkingDistanceMeters = 0.0
-    private var speedMetersPerSecond = 1.4
+    private var speedMetersPerSecond = WalkSpeedPreset.DEFAULT.metresPerSecond
     private var loopRoute = false
     private var previousTickMillis = 0L
     private var phase = WalkPhase.IDLE
@@ -155,6 +163,7 @@ class MockLocationService : Service() {
         // Also initialise saved route drafts when Android restores the service
         // before the app Activity has ever been opened in this process.
         AppPreferences(this)
+        speedMetersPerSecond = WalkSpeedState.selected.value.metresPerSecond
         journal = SessionJournal(this)
         journal.read()
         getSystemService(NotificationManager::class.java).createNotificationChannel(
@@ -236,6 +245,9 @@ class MockLocationService : Service() {
                                 }
                                 startService(command(this, actionName))
                             },
+                            onSpeedSelected = { preset ->
+                                startService(speedIntent(this, preset))
+                            },
                             openMap = {
                                 startActivity(Intent(this, MainActivity::class.java)
                                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
@@ -248,6 +260,22 @@ class MockLocationService : Service() {
                     LocationStatus.overlayVisible.value = false
                     LocationStatus.display.value = "無法顯示懸浮視窗：" + (it.message ?: "權限問題")
                 }
+                return START_STICKY
+            }
+            ACTION_SET_SPEED -> {
+                val requested = intent.getStringExtra(EXTRA_SPEED_PRESET)
+                val preset = WalkSpeedPreset.entries.firstOrNull { it.name == requested }
+                    ?: return START_NOT_STICKY
+                if (!providerActive) return START_NOT_STICKY
+                AppPreferences(this).setWalkSpeedPreset(preset)
+                speedMetersPerSecond = preset.metresPerSecond
+                if (phase == WalkPhase.MOVING || phase == WalkPhase.PAUSED) {
+                    val activity = if (mode == WalkMode.FLOWERS) "尋花" else "道路"
+                    LocationStatus.display.value =
+                        "$activity${if (phase == WalkPhase.PAUSED) "暫停" else "步行"} · ${preset.display}"
+                    refreshNotification()
+                }
+                updateOverlay()
                 return START_STICKY
             }
             ACTION_START_FLOWERS -> {
@@ -277,7 +305,7 @@ class MockLocationService : Service() {
                             target != origin || phase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)
                         ) return@launch
                         activateRoute(
-                            geometry, FloatingFlowerRoutePolicy.SPEED_METRES_PER_SECOND,
+                            geometry, WalkSpeedState.selected.value.metresPerSecond,
                             WalkMode.FLOWERS, loop = true,
                         )
                     } catch (e: CancellationException) {
@@ -397,7 +425,9 @@ class MockLocationService : Service() {
                 cancelFlowerPlanning()
                 return if (activateRoute(
                         planned,
-                        intent.getDoubleExtra(EXTRA_SPEED, 1.4),
+                        intent.getDoubleExtra(
+                            EXTRA_SPEED, WalkSpeedState.selected.value.metresPerSecond,
+                        ),
                         routeMode,
                         intent.getBooleanExtra(EXTRA_LOOP, false),
                     )
@@ -412,6 +442,7 @@ class MockLocationService : Service() {
             phase = phase,
             mode = mode,
             flowerStops = RouteDraftState.flowerStops.value.size,
+            speedPreset = WalkSpeedState.selected.value,
             planningFlowers = flowerPlanJob?.isActive == true,
             status = LocationStatus.display.value,
         )
@@ -441,7 +472,7 @@ class MockLocationService : Service() {
         trackLengthMeters = length
         target = planned.first()
         journal.record(planned.first(), force = true)
-        speedMetersPerSecond = speed.coerceIn(0.5, 3.0)
+        speedMetersPerSecond = speed.coerceIn(0.2, 3.0)
         walkingDistanceMeters = 0.0
         loopRoute = loop
         mode = routeMode

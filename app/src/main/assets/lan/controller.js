@@ -139,8 +139,11 @@ $("add").addEventListener("click", () => {
 });
 $("undo").addEventListener("click", () => act("/api/points/undo", {mode}));
 $("clear").addEventListener("click", () => act("/api/points/clear", {mode}));
+$("speed").addEventListener("change", () => {
+  act("/api/speed", {speedPreset:$("speed").value});
+});
 $("start").addEventListener("click", () => act("/api/route/start", {
-  mode, speed:Number($("speed").value), loop:$("loop").value === "true"
+  mode, speedPreset:$("speed").value, loop:$("loop").value === "true"
 }));
 for (const [element,action] of [["pause","pause"],["resume","resume"],["stop","stop"]]) {
   $(element).addEventListener("click", () => act("/api/control", {action}));
@@ -231,6 +234,8 @@ async function refresh() {
   try {
     latest = await call("/api/state");
     current = latest.position;
+    if (["SLOW","WALK","FAST"].includes(latest.speedPreset))
+      $("speed").value = latest.speedPreset;
     $("status").textContent = (latest.status || "尚未模擬") +
       " · " + (latest.phase || "IDLE") +
       (latest.position ? " · " + latest.position.lat.toFixed(5) +

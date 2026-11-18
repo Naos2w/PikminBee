@@ -4,6 +4,7 @@ import android.content.Context
 import com.naos.pikminbee.BuildConfig
 import com.naos.pikminbee.domain.Coordinate
 import com.naos.pikminbee.domain.WalkMode
+import com.naos.pikminbee.domain.WalkSpeedPreset
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,6 +28,21 @@ object RouteDraftState {
     }
 }
 
+/** Persisted speed selection shared by the editor and floating controls. */
+object WalkSpeedState {
+    val selected = MutableStateFlow(WalkSpeedPreset.DEFAULT)
+    private var initialized = false
+
+    @Synchronized fun initialize(saved: WalkSpeedPreset) {
+        if (!initialized) {
+            selected.value = saved
+            initialized = true
+        }
+    }
+
+    fun update(next: WalkSpeedPreset) { selected.value = next }
+}
+
 /** Saved routes are a distinct library from the currently edited map draft. */
 object SavedRouteState {
     val routes = MutableStateFlow<List<SavedRoute>>(emptyList())
@@ -45,6 +61,14 @@ class AppPreferences(private val context: Context) {
     init {
         RouteDraftState.initialize(loadPoints("route_draft"), loadPoints("flower_draft"))
         SavedRouteState.initialize(readSavedRoutes())
+        WalkSpeedState.initialize(WalkSpeedPreset.fromSaved(prefs.getString("walk_speed_preset", null)))
+    }
+
+    fun walkSpeedPreset(): WalkSpeedPreset = WalkSpeedState.selected.value
+
+    fun setWalkSpeedPreset(next: WalkSpeedPreset) {
+        prefs.edit().putString("walk_speed_preset", next.name).apply()
+        WalkSpeedState.update(next)
     }
 
     fun provider(): MapProvider = MapBasemapPolicy.resolveProvider(

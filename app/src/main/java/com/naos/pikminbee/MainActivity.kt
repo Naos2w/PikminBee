@@ -73,6 +73,8 @@ import com.naos.pikminbee.data.MapProvider
 import com.naos.pikminbee.data.FreeMapStyle
 import com.naos.pikminbee.data.MapBasemapPolicy
 import com.naos.pikminbee.data.RouteDraftState
+import com.naos.pikminbee.data.WalkSpeedState
+import com.naos.pikminbee.domain.WalkSpeedPreset
 import com.naos.pikminbee.data.SavedRouteState
 import com.naos.pikminbee.data.SavedRoute
 import com.naos.pikminbee.gpx.GpxCodec
@@ -169,7 +171,7 @@ private fun PikminBeeScreen() {
     val flowerStops by RouteDraftState.flowerStops.collectAsState()
     val savedRoutes by SavedRouteState.routes.collectAsState()
     var planning by remember { mutableStateOf(false) }
-    var speed by remember { mutableStateOf(1.4) }
+    val speedPreset by WalkSpeedState.selected.collectAsState()
     var flowerLoop by remember { mutableStateOf(true) }
     val work = rememberCoroutineScope()
     val mockStatus by LocationStatus.display.collectAsState()
@@ -326,6 +328,21 @@ private fun PikminBeeScreen() {
         ToolTab.FLOWERS -> if (activeFlowerWalk) roadLine else flowerRoadPreview
         ToolTab.ROUTE -> if (activeRouteWalk) roadLine else emptyList()
         else -> emptyList()
+    }
+    fun chooseWalkSpeed(next: WalkSpeedPreset) {
+        prefs.setWalkSpeedPreset(next)
+        val moving = mockPosition != null &&
+            walkPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)
+        if (moving) {
+            runCatching {
+                context.startService(MockLocationService.speedIntent(context, next))
+            }.onFailure {
+                message = "速度已儲存，但無法即時套用：${it.message}"
+                return
+            }
+        }
+        message = "速度已選擇：${next.display}" +
+            if (moving) " · 行走中已要求更新" else " · 下次行走時使用"
     }
     fun moveMapCamera(target: MapCameraGeometry.ViewTarget) {
         if (!target.hasAny) return
@@ -678,6 +695,8 @@ private fun PikminBeeScreen() {
                                     origin = mockPosition ?: roadStops.firstOrNull() ?: selected,
                                     activeMode = walkMode,
                                     phase = walkPhase,
+                                    speedPreset = speedPreset,
+                                    onSpeedSelected = ::chooseWalkSpeed,
                                     foreground = foreground, muted = muted,
                                     onUndo = { prefs.saveRouteDraft(roadStops.dropLast(1)) },
                                     onClear = { prefs.saveRouteDraft(emptyList()) },
@@ -809,6 +828,8 @@ private fun PikminBeeScreen() {
                                     origin = mockPosition ?: flowerStart,
                                     activeMode = walkMode,
                                     phase = walkPhase,
+                                    speedPreset = speedPreset,
+                                    onSpeedSelected = ::chooseWalkSpeed,
                                     foreground = foreground, muted = muted,
                                     onUndo = { prefs.saveFlowerDraft(flowerStops.dropLast(1)) },
                                     onClear = { prefs.saveFlowerDraft(emptyList()) },

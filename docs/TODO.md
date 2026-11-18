@@ -20,7 +20,7 @@
 - [x] Route/flower drafts saved locally, flower loop playback and speed presets; named route library (save/rename/load/delete) and GPX 1.1 route/track import/export are implemented with unit tests. [ ] POCO file picker/UI UAT.
 
 ## v0.3 — Overlay and persistence
-- [x] Basic draggable bee overlay sharing the existing GPS foreground service, with Pause/Resume/Stop/Map/Hide/Restore actions; [x] one-tap "開始尋花" shortcut uses the saved flower draft, current explicit simulated position and Valhalla pedestrian loop (1.4 m/s), with cancel/stop and stale-result rejection; no second GPS engine. [ ] Device-level interaction, permission, background and route-planning UAT.
+- [x] Basic draggable bee overlay sharing the existing GPS foreground service, with Pause/Resume/Stop/Map/Hide/Restore actions; [x] one-tap "開始尋花" shortcut uses the saved flower draft, current explicit simulated position and Valhalla pedestrian loop, with cancel/stop and stale-result rejection; no second GPS engine. [x] Shared App/overlay/LAN speed presets: Slow 0.8 km/h, Walk 1.4 km/h (default), Fast 10.8 km/h, persisted with live speed adjustments during a walk. [ ] Device-level interaction, permission, speed accuracy, background and route-planning UAT.
 - [x] Foreground GPS service + notification actions (pause/resume/stop/restore), 5-second last-coordinate journal and safe START_STICKY null-Intent recovery as PARKED; [ ] on-device lifecycle/restart UAT.
 - [x] In-app HyperOS/POCO background guidance, standard Android app settings link and user-triggered permission flow; force-stop/reboot limitations documented in [BACKGROUND-LIFECYCLE.md](BACKGROUND-LIFECYCLE.md). [ ] POCO/UAT verification.
 
