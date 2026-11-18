@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<title>PikminBee · Wi-Fi 控制</title>
+<link rel="stylesheet" href="/vendor/maplibre-gl.css">
+<style>
+:root{color-scheme:dark;--bg:#111a27;--card:rgba(30,45,65,.90);--line:rgba(255,255,255,.13);--text:#eef4fb;--sub:#a9b8c9;--gold:#edbb5b;--button:#bb811e}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,BlinkMacSystemFont,"Noto Sans TC",sans-serif}
+.page{max-width:1140px;margin:auto;padding:18px 18px 36px}.head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 15px}
+h1{font-size:23px;letter-spacing:-.7px;margin:0}h2{font-size:15px;margin:0 0 12px}.sub,.muted{color:var(--sub);font-size:12px}
+.stamp{display:inline-flex;gap:7px;align-items:center;background:var(--card);padding:7px 12px;border:1px solid var(--line);border-radius:999px}
+.dot{background:#f6b347;border-radius:50%;width:8px;height:8px}.layout{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(295px,1fr);gap:14px}
+.glass{background:var(--card);border:1px solid var(--line);border-radius:23px;padding:17px;box-shadow:0 12px 35px rgba(0,0,0,.13)}
+#map{height:540px;border-radius:15px;overflow:hidden;background:#273a50}
+.inline{display:flex;gap:9px;align-items:center;flex-wrap:wrap}.inline>*{flex:1;min-width:0}
+label{display:block;color:var(--sub);font-size:12px;margin-bottom:5px}
+input,select,button{font:inherit}input,select{width:100%;padding:11px;border:1px solid var(--line);border-radius:12px;background:#1d2e42;color:var(--text);min-height:46px}
+button{padding:11px 13px;border-radius:13px;border:1px solid var(--line);background:#25374c;color:var(--text);cursor:pointer;min-height:44px}
+button.primary{background:var(--button);color:#fff;border-color:#be8a25;font-weight:700}
+button:disabled{opacity:.42;cursor:not-allowed}button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin:9px 0}.row>*{flex:1}.spacer{height:12px}
+#pairbox{max-width:520px;margin:38px auto}#controls{display:none}#controls.is-visible{display:grid}.hint{background:rgba(229,173,73,.09);border:1px solid rgba(229,173,73,.18);border-radius:12px;padding:10px;margin-top:9px;color:#ecd4aa;font-size:12px}
+.mode-active{border-color:var(--gold);color:var(--gold);background:#3b3327}
+#message{min-height:20px;color:var(--gold);font-size:13px;margin:9px 0}
+#pointcount{margin:9px 0}.layout .glass:nth-child(2){max-height:700px;overflow:auto}
+@media(max-width:760px){.page{padding:12px 11px}.layout{display:flex;flex-direction:column}#controls.is-visible{display:flex}.glass{padding:13px;border-radius:18px}#map{height:340px}.layout .glass:nth-child(2){max-height:none}.head{flex-direction:row;align-items:start}h1{font-size:21px}}
+</style>
+</head>
+<body>
+<main class="page">
+<header class="head">
+ <div><h1>🐝 PikminBee</h1><div class="sub">蜜蜂探索世界 · 區域網路控制</div></div>
+ <div class="stamp"><span class="dot"></span><span id="connection">等待配對</span></div>
+</header>
+<section class="glass" id="pairbox">
+ <h2>用手機上的 6 位數配對碼連線</h2>
+ <p class="muted">只有在 PikminBee 手機 App 內手動啟用 Wi-Fi 控制後才能使用。每次重新啟用都會更換配對碼。</p>
+ <div class="inline"><input id="pin" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" placeholder="六位數配對碼" aria-label="六位數配對碼">
+ <button class="primary" id="connect">連線</button></div>
+ <div class="hint">只限可信任的私人 Wi-Fi。此區域網路頁面使用 HTTP、沒有端對端加密；請勿在公共 Wi-Fi 開啟。關閉手機上的 Wi-Fi 控制後，網頁授權立即失效。</div>
+ <div id="pairmessage" aria-live="polite"></div>
+</section>
+<div class="layout" id="controls">
+<section class="glass">
+ <div class="inline" style="margin-bottom:9px"><strong>世界地圖</strong>
+  <select id="theme" style="max-width:172px" aria-label="免 Key 地圖樣式">
+   <option value="auto">跟隨系統</option>
+   <option value="liberty">Liberty</option>
+   <option value="bright">Bright</option>
+   <option value="positron">Positron</option>
+   <option value="dark">Dark</option>
+  </select>
+ </div>
+ <div id="map" aria-label="點選地圖以選取座標"></div>
+ <div id="selected" class="muted" style="margin:10px 0">點一下地圖以選擇位置</div>
+ <div class="muted">底圖：OpenFreeMap／OpenStreetMap（免 Google API Key）；圖磚仍需連線。切換底圖不會改變定位或路線。</div>
+</section>
+<section class="glass">
+ <h2>遠端 GPS 控制</h2>
+ <div id="status" class="muted" aria-live="polite">正在讀取狀態…</div>
+ <div class="spacer"></div>
+ <div class="inline">
+  <div><label for="lat">緯度 Latitude</label><input type="number" id="lat" step="any" placeholder="25.033000"></div>
+  <div><label for="lon">經度 Longitude</label><input type="number" id="lon" step="any" placeholder="121.565400"></div>
+ </div>
+ <div class="row"><button class="primary" id="teleport">瞬移到座標</button><button id="follow">查看模擬位置</button></div>
+ <div class="spacer"></div>
+ <h2>多點道路／尋花</h2>
+ <div class="row"><button id="mode-route" class="mode-active">多點路徑</button><button id="mode-flowers">手動尋花</button></div>
+ <div class="inline">
+  <div><label for="speed">目前速度（km/h，可即時切換）</label><select id="speed"><option value="SLOW">慢走 0.8 km/h</option><option value="WALK" selected>走路 1.4 km/h</option><option value="FAST">快走 10.8 km/h</option></select></div>
+  <div><label for="loop">循環路線</label><select id="loop"><option value="false">不循環</option><option value="true">循環</option></select></div>
+ </div>
+ <div class="row">
+  <span id="default-speed" class="muted" aria-live="polite">個人預設：走路 1.4 km/h</span>
+  <button id="make-speed-default">將目前速度設為預設</button>
+ </div>
+ <div id="pointcount" class="muted" aria-live="polite">0 / 15 個路點</div>
+ <div id="routehint" class="muted">尋花最多 14 點；循環道路最多 14 點，普通道路最多 15 點。</div>
+ <div class="row"><button id="add">加入選取地點</button><button id="undo">撤銷</button><button id="clear">清除路點</button></div>
+ <div class="row"><button id="start" class="primary">開始行走</button><button id="pause">暫停</button><button id="resume">繼續</button><button id="stop">停止</button></div>
+ <div class="row"><button id="real">恢復真實 GPS</button></div>
+ <div id="message" aria-live="polite"></div>
+ <div class="hint">尋花模式必須先由手機啟動模擬定位，才可透過網頁新增花點。停止行走與恢復真實 GPS 是不同指令；道路服務故障時不會改走直線。遊戲大花的官方即時座標尚未取得。</div>
+</section>
+</div>
+</main>
+<script type="module" src="/controller.js"></script>
+</body>
+</html>
