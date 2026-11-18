@@ -8,6 +8,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.location.Criteria
 import android.location.Location
 import android.location.LocationManager
@@ -630,6 +631,13 @@ class MockLocationService : Service() {
         LocationStatus.phase.value = WalkPhase.IDLE
         LocationStatus.mode.value = null
         LocationStatus.display.value = "真實定位"
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        // Refit the existing overlay after portrait/landscape changes.
+        // This never restarts GPS walking or creates a new overlay.
+        floatingControls?.onScreenChanged()
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
