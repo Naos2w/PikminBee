@@ -1,6 +1,7 @@
 package com.naos.pikminbee.data
 
 import android.content.Context
+import com.naos.pikminbee.BuildConfig
 import com.naos.pikminbee.domain.Coordinate
 import com.naos.pikminbee.domain.WalkMode
 import org.json.JSONArray
@@ -46,15 +47,28 @@ class AppPreferences(private val context: Context) {
         SavedRouteState.initialize(readSavedRoutes())
     }
 
-    fun provider(): MapProvider =
+    fun provider(): MapProvider = MapBasemapPolicy.resolveProvider(
         enumValues<MapProvider>().firstOrNull { it.name == prefs.getString("provider", "") }
-            ?: MapProvider.OPEN_FREE_MAP
+            ?: MapProvider.OPEN_FREE_MAP,
+        BuildConfig.HAS_GOOGLE_MAPS_KEY,
+    )
 
     fun appearance(): MapAppearance =
         enumValues<MapAppearance>().firstOrNull { it.name == prefs.getString("appearance", "") }
             ?: MapAppearance.SYSTEM
 
-    fun setProvider(provider: MapProvider) { prefs.edit().putString("provider", provider.name).apply() }
+    fun freeMapStyle(): FreeMapStyle =
+        enumValues<FreeMapStyle>().firstOrNull { it.name == prefs.getString("free_map_style", "") }
+            ?: FreeMapStyle.AUTO
+
+    fun setFreeMapStyle(style: FreeMapStyle) {
+        prefs.edit().putString("free_map_style", style.name).apply()
+    }
+
+    fun setProvider(provider: MapProvider) {
+        val resolved = MapBasemapPolicy.resolveProvider(provider, BuildConfig.HAS_GOOGLE_MAPS_KEY)
+        prefs.edit().putString("provider", resolved.name).apply()
+    }
     fun setAppearance(appearance: MapAppearance) { prefs.edit().putString("appearance", appearance.name).apply() }
 
     fun places(): List<SavedPlace> = runCatching {

@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
@@ -69,6 +70,8 @@ import com.naos.pikminbee.flower.FlowerJsonCodec
 import com.naos.pikminbee.flower.FlowerImport
 import com.naos.pikminbee.data.MapAppearance
 import com.naos.pikminbee.data.MapProvider
+import com.naos.pikminbee.data.FreeMapStyle
+import com.naos.pikminbee.data.MapBasemapPolicy
 import com.naos.pikminbee.data.RouteDraftState
 import com.naos.pikminbee.data.SavedRouteState
 import com.naos.pikminbee.data.SavedRoute
@@ -136,6 +139,7 @@ private fun PikminBeeScreen() {
     val checkpoint by CheckpointStatus.last.collectAsState()
     val systemDark = androidx.compose.foundation.isSystemInDarkTheme()
     var provider by remember { mutableStateOf(prefs.provider()) }
+    var freeMapStyle by remember { mutableStateOf(prefs.freeMapStyle()) }
     var appearance by remember { mutableStateOf(prefs.appearance()) }
     val dark = when (appearance) {
         MapAppearance.SYSTEM -> systemDark
@@ -368,6 +372,7 @@ private fun PikminBeeScreen() {
                 road = displayedRoad,
                 previewRoad = tab == ToolTab.FLOWERS && !activeFlowerWalk &&
                     flowerRoadPreview.isNotEmpty(),
+                freeMapStyle = freeMapStyle,
                 cameraRequest = cameraRequest,
                 mapExplore = mapExplore,
                 onCameraFailure = { message = it },
@@ -496,20 +501,43 @@ private fun PikminBeeScreen() {
                         }
 
                         Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                            listOf(
-                                MapProvider.OPEN_FREE_MAP to "OpenFreeMap",
-                                MapProvider.GOOGLE_MAPS to "Google Maps"
-                            ).forEach { (p, label) ->
-                                FilterChip(
-                                    selected = provider == p,
-                                    onClick = {
-                                        provider = p
-                                        prefs.setProvider(p)
-                                        if (p == MapProvider.GOOGLE_MAPS && !BuildConfig.HAS_GOOGLE_MAPS_KEY)
-                                            message = "Google Maps 需要先設定 API Key"
-                                    },
-                                    label = { Text(label, fontSize = 12.sp) },
-                                )
+                            MapBasemapPolicy.availableProviders(BuildConfig.HAS_GOOGLE_MAPS_KEY)
+                                .forEach { p ->
+                                    FilterChip(
+                                        selected = provider == p,
+                                        onClick = {
+                                            provider = p
+                                            prefs.setProvider(p)
+                                        },
+                                        label = {
+                                            Text(
+                                                if (p == MapProvider.OPEN_FREE_MAP)
+                                                    "OpenFreeMap · 免 Key" else "Google Maps",
+                                                fontSize = 12.sp,
+                                            )
+                                        },
+                                    )
+                                }
+                        }
+                        if (provider == MapProvider.OPEN_FREE_MAP) {
+                            Text(
+                                "免費公開底圖 · 不需要 Google API Key · 需網路連線",
+                                color = muted, fontSize = 11.sp,
+                            )
+                            Row(
+                                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(7.dp),
+                            ) {
+                                FreeMapStyle.entries.forEach { option ->
+                                    FilterChip(
+                                        selected = freeMapStyle == option,
+                                        onClick = {
+                                            freeMapStyle = option
+                                            prefs.setFreeMapStyle(option)
+                                        },
+                                        label = { Text(option.label, fontSize = 12.sp) },
+                                    )
+                                }
                             }
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {

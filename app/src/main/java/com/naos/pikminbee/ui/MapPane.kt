@@ -28,6 +28,8 @@ import com.google.android.gms.maps.model.LatLngBounds as GoogleLatLngBounds
 import com.naos.pikminbee.domain.MapCameraGeometry
 import com.naos.pikminbee.BuildConfig
 import com.naos.pikminbee.data.MapProvider
+import com.naos.pikminbee.data.FreeMapStyle
+import com.naos.pikminbee.data.MapBasemapPolicy
 import com.naos.pikminbee.domain.Coordinate
 import com.naos.pikminbee.flower.FlowerSpot
 import com.naos.pikminbee.flower.FlowerEvidence
@@ -41,9 +43,6 @@ import org.maplibre.android.annotations.MarkerOptions as LibreMarkerOptions
 import org.maplibre.android.annotations.PolylineOptions as LibrePolylineOptions
 import org.maplibre.android.geometry.LatLngBounds as LibreLatLngBounds
 import org.maplibre.android.camera.CameraUpdateFactory as LibreCameraUpdateFactory
-
-private const val LIBERTY = "https://tiles.openfreemap.org/styles/liberty"
-private const val DARK_STYLE = "https://tiles.openfreemap.org/styles/dark"
 
 /** An explicit, one-shot camera instruction. Live GPS updates never move the camera. */
 data class MapCameraRequest(
@@ -62,6 +61,7 @@ fun LocationMap(
     road: List<Coordinate>,
     previewRoad: Boolean,
     flowerSpots: List<FlowerSpot>,
+    freeMapStyle: FreeMapStyle = FreeMapStyle.AUTO,
     cameraRequest: MapCameraRequest? = null,
     mapExplore: Boolean = false,
     onCameraFailure: (String) -> Unit = {},
@@ -72,12 +72,15 @@ fun LocationMap(
 ) {
     when (provider) {
         MapProvider.OPEN_FREE_MAP -> OpenFreeMapPane(dark, selected, start, stops, road, previewRoad, flowerSpots,
-            cameraRequest, mapExplore, onCameraFailure, onPick, onFlowerPick, onStopPick, modifier)
+            freeMapStyle, cameraRequest, mapExplore, onCameraFailure,
+            onPick, onFlowerPick, onStopPick, modifier)
         MapProvider.GOOGLE_MAPS -> if (BuildConfig.HAS_GOOGLE_MAPS_KEY) {
             GoogleMapsPane(dark, selected, start, stops, road, previewRoad, flowerSpots,
                 cameraRequest, mapExplore, onCameraFailure, onPick, onFlowerPick, onStopPick, modifier)
         } else {
-            Box(modifier) { Text("Google Maps 尚未設定 API Key，請先在 secrets.properties 填寫設定。") }
+            OpenFreeMapPane(dark, selected, start, stops, road, previewRoad, flowerSpots,
+                freeMapStyle, cameraRequest, mapExplore, onCameraFailure,
+                onPick, onFlowerPick, onStopPick, modifier)
         }
     }
 }
@@ -86,7 +89,7 @@ fun LocationMap(
 private fun OpenFreeMapPane(
     dark: Boolean, selected: Coordinate, start: Coordinate?, stops: List<Coordinate>,
     road: List<Coordinate>, previewRoad: Boolean, flowerSpots: List<FlowerSpot>,
-    cameraRequest: MapCameraRequest?, mapExplore: Boolean,
+    freeMapStyle: FreeMapStyle, cameraRequest: MapCameraRequest?, mapExplore: Boolean,
     onCameraFailure: (String) -> Unit,
     onPick: (Coordinate) -> Unit, onFlowerPick: (FlowerSpot) -> Unit,
     onStopPick: ((Int) -> Unit)?, modifier: Modifier,
@@ -163,8 +166,10 @@ private fun OpenFreeMapPane(
             view.onDestroy()
         }
     }
-    LaunchedEffect(map, dark) {
-        map?.setStyle(Style.Builder().fromUri(if (dark) DARK_STYLE else LIBERTY)) {
+    LaunchedEffect(map, dark, freeMapStyle) {
+        map?.setStyle(Style.Builder().fromUri(
+            MapBasemapPolicy.openFreeMapStyleUrl(freeMapStyle, dark)
+        )) {
             styleVersion++
         }
     }

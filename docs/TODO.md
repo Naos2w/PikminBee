@@ -6,7 +6,7 @@
 - [x] Minimal CI and branch policy documentation.
 - [x] Initial Compose map-first UI with iOS-27-inspired frosted controls (compiled; visual/UAT verification pending).
 - [x] OpenFreeMap map integration + light/dark/system styles (compiled; device rendering pending).
-- [x] Official Google Maps SDK provider, gated on untracked user API key (no key configured yet).
+- [x] Keyless OpenFreeMap as the default and required map provider. Bright / Positron / Liberty / Dark styles and safe fallback from previously saved Google preference are implemented; Google Maps SDK appears only with a configured restricted key. No undocumented Google tiles. [ ] Phone map-style and tile attribution UAT. See [MAP-BASEMAPS.md](MAP-BASEMAPS.md).
 - [x] Latitude/longitude input and map-point teleport via explicit Android mock-location service (device test pending).
 - [x] Basic on-device favourites with SharedPreferences/JSON (migrate to Room before v1.0).
 - [ ] On-device build, screenshot and permission flow UAT.
