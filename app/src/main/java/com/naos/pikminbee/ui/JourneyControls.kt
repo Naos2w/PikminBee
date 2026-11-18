@@ -32,6 +32,8 @@ import com.naos.pikminbee.domain.Coordinate
 import com.naos.pikminbee.domain.FlowerMapDraft
 import com.naos.pikminbee.domain.WalkMode
 import com.naos.pikminbee.domain.WalkPhase
+import com.naos.pikminbee.domain.WalkSpeedPreset
+import com.naos.pikminbee.data.WalkSpeedState
 import com.naos.pikminbee.domain.WalkingGeometry
 import com.naos.pikminbee.location.MockLocationService
 import com.naos.pikminbee.route.ValhallaPlanner
@@ -48,6 +50,8 @@ fun JourneyControls(
     origin: Coordinate?,
     activeMode: WalkMode?,
     phase: WalkPhase,
+    speedPreset: WalkSpeedPreset,
+    onSpeedSelected: (WalkSpeedPreset) -> Unit,
     foreground: Color,
     muted: Color,
     onUndo: () -> Unit,
@@ -60,7 +64,6 @@ fun JourneyControls(
     val coroutineScope = rememberCoroutineScope()
     val flower = mode == WalkMode.FLOWERS
     val active = activeMode == mode
-    var speed by remember { mutableStateOf(1.4) }
     var loop by remember { mutableStateOf(flower) }
     var planning by remember { mutableStateOf(false) }
     var requestRevision by remember { mutableIntStateOf(0) }
@@ -113,7 +116,8 @@ fun JourneyControls(
                 if (startWalking) {
                     ContextCompat.startForegroundService(
                         context, MockLocationService.routeIntent(
-                            context, geometry, speed, mode, loop = flower && loop
+                            context, geometry, WalkSpeedState.selected.value.metresPerSecond,
+                            mode, loop = flower && loop
                         ),
                     )
                     onMessage("道路路線已取得，開始移動（${geometry.size} 個節點）")
@@ -141,20 +145,28 @@ fun JourneyControls(
         )
         Text("已加入 ${stops.size} 個路點 · 起點 ${origin?.label() ?: "尚未設定"}",
             color = muted, fontSize = 12.sp)
-        Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-            listOf(1.0, 1.4, 2.0).forEach { s ->
+        Text("速度預設（可於行走中調整）", color = muted, fontSize = 12.sp)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+            WalkSpeedPreset.entries.forEach { option ->
                 FilterChip(
-                    selected = speed == s,
-                    onClick = { speed = s },
-                    label = { Text("${s} m/s", fontSize = 12.sp) }
+                    selected = speedPreset == option,
+                    onClick = { onSpeedSelected(option) },
+                    modifier = Modifier.weight(1f),
+                    label = {
+                        Text(
+                            "${option.label}\n${option.kilometresPerHour} km/h",
+                            fontSize = 11.sp,
+                            lineHeight = 15.sp,
+                        )
+                    },
                 )
             }
-            if (flower) FilterChip(
-                selected = loop,
-                onClick = { loop = !loop },
-                label = { Text("循環", fontSize = 12.sp) }
-            )
         }
+        if (flower) FilterChip(
+            selected = loop,
+            onClick = { loop = !loop },
+            label = { Text("循環路線", fontSize = 12.sp) },
+        )
 
         if (flower) {
             OutlinedButton(

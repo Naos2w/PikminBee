@@ -12,12 +12,14 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import com.naos.pikminbee.domain.WalkMode
 import com.naos.pikminbee.domain.WalkPhase
+import com.naos.pikminbee.domain.WalkSpeedPreset
 import kotlin.math.abs
 
 /** Overlay owned by the GPS foreground service, not a second independent location engine. */
 class FloatingControls(
     private val context: Context,
     private val sendAction: (String) -> Unit,
+    private val onSpeedSelected: (WalkSpeedPreset) -> Unit,
     private val openMap: () -> Unit,
 ) {
     companion object {
@@ -37,6 +39,7 @@ class FloatingControls(
     private var stopAction: TextView? = null
     private var flowerAction: TextView? = null
     private var flowerSummary: TextView? = null
+    private val speedButtons = linkedMapOf<WalkSpeedPreset, TextView>()
     private var params: WindowManager.LayoutParams? = null
     private var expanded = false
 
@@ -84,12 +87,30 @@ class FloatingControls(
             contentDescription = "從目前模擬位置沿已儲存尋花路點開始循環道路行走"
         }
         actions.addView(startFlowers)
-        val summary = action("已儲存 0/14 點 · 循環 · 1.4 m/s") { }.apply {
+        val summary = action("尋花草稿 0/14 點 · 循環") { }.apply {
             textSize = 11f
             setOnClickListener(null)
             contentDescription = "尋花草稿狀態"
         }
         actions.addView(summary)
+        val speedHeading = action("行走速度（行走中也可調整）") { }.apply {
+            textSize = 11f
+            setOnClickListener(null)
+        }
+        actions.addView(speedHeading)
+        val speedRow = LinearLayout(context)
+        WalkSpeedPreset.entries.forEach { preset ->
+            val button = action("${preset.label}\n${preset.kilometresPerHour} km/h") {
+                onSpeedSelected(preset)
+            }.apply {
+                textSize = 12f
+                minWidth = dp(86)
+                contentDescription = "速度：${preset.display}"
+            }
+            speedButtons[preset] = button
+            speedRow.addView(button)
+        }
+        actions.addView(speedRow)
         val row1 = LinearLayout(context)
         val pause = action("暫停") { sendAction(if (pauseAction?.text == "繼續") RESUME else PAUSE) }
         val stop = action("停止行走") { sendAction(STOP_WALK) }
@@ -173,6 +194,7 @@ class FloatingControls(
         phase: WalkPhase,
         mode: WalkMode?,
         flowerStops: Int,
+        speedPreset: WalkSpeedPreset,
         planningFlowers: Boolean,
         status: String,
     ) {
@@ -185,15 +207,29 @@ class FloatingControls(
         val canStartFlower = !walking && !planningFlowers && flowerStops in 1..14
         flowerAction?.isEnabled = canStartFlower
         flowerAction?.alpha = if (canStartFlower) 1f else .4f
-        flowerSummary?.text = "尋花草稿 ${flowerStops}/14 點 · 循環 · 1.4 m/s"
+        flowerSummary?.text = "尋花草稿 ${flowerStops}/14 點 · 循環 · ${speedPreset.display}"
+        speedButtons.forEach { (option, button) ->
+            val selected = option == speedPreset
+            if (button.tag != selected) {
+                button.tag = selected
+                button.background = GradientDrawable().apply {
+                    cornerRadius = dp(12).toFloat()
+                    setColor(if (selected) Color.rgb(151, 95, 22) else Color.TRANSPARENT)
+                    setStroke(dp(1), if (selected) Color.rgb(242, 185, 78) else Color.GRAY)
+                }
+                button.contentDescription = "速度：${option.display}" +
+                    if (selected) "，目前選擇" else ""
+            }
+        }
 
         stopAction?.text = if (planningFlowers) "取消規劃" else "停止行走"
         stopAction?.isEnabled = walking || planningFlowers
         stopAction?.alpha = if (walking || planningFlowers) 1f else .4f
         stateLabel?.text = when {
             planningFlowers -> "正在查詢步行道路 · 尚未移動"
-            mode == WalkMode.FLOWERS && phase == WalkPhase.MOVING -> "尋花巡迴中"
-            phase == WalkPhase.MOVING -> "道路步行中"
+            mode == WalkMode.FLOWERS && phase == WalkPhase.MOVING ->
+                "尋花巡迴中 · ${speedPreset.kilometresPerHour} km/h"
+            phase == WalkPhase.MOVING -> "道路步行中 · ${speedPreset.kilometresPerHour} km/h"
             mode == WalkMode.FLOWERS && phase == WalkPhase.PAUSED -> "尋花已暫停"
             phase == WalkPhase.PAUSED -> "已暫停"
             status.startsWith("尋花") || status.startsWith("道路查詢失敗") -> status.take(55)
@@ -211,6 +247,7 @@ class FloatingControls(
         stopAction = null
         flowerAction = null
         flowerSummary = null
+        speedButtons.clear()
         params = null
         expanded = false
     }

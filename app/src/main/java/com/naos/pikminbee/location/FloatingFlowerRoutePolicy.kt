@@ -9,7 +9,7 @@ import com.naos.pikminbee.domain.WalkPhase
  * This prepares anchors; it never changes the mock location or makes network calls.
  */
 object FloatingFlowerRoutePolicy {
-    const val SPEED_METRES_PER_SECOND = 1.4
+    // Speed comes from the shared persisted WalkSpeedState when the route starts.
 
     data class Decision(
         val anchors: List<Coordinate> = emptyList(),

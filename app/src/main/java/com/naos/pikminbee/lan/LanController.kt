@@ -5,6 +5,8 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import androidx.core.content.ContextCompat
 import com.naos.pikminbee.data.AppPreferences
+import com.naos.pikminbee.data.WalkSpeedState
+import com.naos.pikminbee.domain.WalkSpeedPreset
 import com.naos.pikminbee.domain.Coordinate
 import com.naos.pikminbee.domain.WalkMode
 import com.naos.pikminbee.domain.WalkPhase
@@ -188,15 +190,24 @@ class LanController(private val context: Context) {
                 savePoints(mode, if (req.path.endsWith("undo")) current.dropLast(1) else emptyList())
                 accepted("路點已更新")
             }
+            "/api/speed" -> {
+                val json = parse(req.body) ?: return error(400, "JSON 無效")
+                val preset = WalkSpeedPreset.entries.firstOrNull {
+                    it.name == json.optString("speedPreset")
+                } ?: return error(400, "不支援的速度預設")
+                prefs.setWalkSpeedPreset(preset)
+                context.startService(MockLocationService.speedIntent(context, preset))
+                accepted("速度已設定：${preset.display}")
+            }
             "/api/route/start" -> {
                 val json = parse(req.body) ?: return error(400, "JSON 無效")
                 val mode = mode(json.optString("mode")) ?: return error(400, "模式無效")
                 val start = LocationStatus.selected.value
                     ?: return error(409, "請先在手機啟動模擬定位並加入路點")
                 val loop = json.optBoolean("loop", false)
-                val speed = json.optDouble("speed", 1.4)
-                if (!speed.isFinite() || speed !in setOf(1.0, 1.4, 2.0))
-                    return error(400, "步行速度僅支援 1.0、1.4、2.0 m/s")
+                val preset = WalkSpeedPreset.entries.firstOrNull {
+                    it.name == json.optString("speedPreset")
+                } ?: return error(400, "不支援的速度預設；請選 0.8、1.4 或 10.8 km/h")
                 val anchors = try {
                     LanRouteDraftPolicy.anchors(mode, start, points(mode), loop)
                 } catch (e: IllegalArgumentException) {
@@ -204,10 +215,14 @@ class LanController(private val context: Context) {
                 }
                 if (!planning.compareAndSet(false, true))
                     return error(409, "正在規劃另一條路線")
+                prefs.setWalkSpeedPreset(preset)
                 scope.launch {
                     try {
                         val route = ValhallaPlanner.plan(anchors)
-                        context.startService(MockLocationService.routeIntent(context, route, speed, mode, loop))
+                        context.startService(MockLocationService.routeIntent(
+                            context, route, WalkSpeedState.selected.value.metresPerSecond,
+                            mode, loop,
+                        ))
                     } catch (e: Exception) {
                         LanStatus.display.value = LanStatus.display.value.copy(
                             note = "道路規劃失敗：${e.message ?: "路線不可用"}")
@@ -253,6 +268,7 @@ class LanController(private val context: Context) {
             .put("phase", LocationStatus.phase.value.name)
             .put("mode", LocationStatus.mode.value?.name)
             .put("planning", planning.get())
+            .put("speedPreset", WalkSpeedState.selected.value.name)
             .put("routeStops", coordinates(prefs.routeDraft()))
             .put("flowerStops", coordinates(prefs.flowerDraft()))
             .put("geometry", coordinates(path))

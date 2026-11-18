@@ -71,7 +71,7 @@ button:disabled{opacity:.42;cursor:not-allowed}button:focus-visible,input:focus-
  <h2>多點道路／尋花</h2>
  <div class="row"><button id="mode-route" class="mode-active">多點路徑</button><button id="mode-flowers">手動尋花</button></div>
  <div class="inline">
-  <div><label for="speed">步行速度</label><select id="speed"><option value="1">1.0 m/s</option><option value="1.4" selected>1.4 m/s</option><option value="2">2.0 m/s</option></select></div>
+  <div><label for="speed">速度預設（km/h，可即時切換）</label><select id="speed"><option value="SLOW">慢走 0.8 km/h</option><option value="WALK" selected>走路 1.4 km/h（預設）</option><option value="FAST">快走 10.8 km/h</option></select></div>
   <div><label for="loop">循環路線</label><select id="loop"><option value="false">不循環</option><option value="true">循環</option></select></div>
  </div>
  <div id="pointcount" class="muted" aria-live="polite">0 / 15 個路點</div>

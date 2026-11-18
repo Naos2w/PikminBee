@@ -43,6 +43,6 @@ class FloatingFlowerRoutePolicyTest {
         val d = FloatingFlowerRoutePolicy.prepare(true, WalkPhase.PARKED, origin, listOf(one))
         assertTrue(d.allowed)
         assertEquals(listOf(origin, one, origin), d.anchors)
-        assertEquals(1.4, FloatingFlowerRoutePolicy.SPEED_METRES_PER_SECOND, 0.001)
+        // Speed is selected in the App/overlay rather than hard-coded in the route policy.
     }
 }
