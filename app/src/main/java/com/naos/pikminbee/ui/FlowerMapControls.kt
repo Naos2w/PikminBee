@@ -90,7 +90,10 @@ fun FlowerMapControls(
                     onClick = if (editing != null) onReplaceStop else onAddSelected,
                     enabled = start != null && (editing != null || stops.size < 14),
                     modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF9F5E0C)),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF9F5E0C),
+                        contentColor = Color.White,
+                    ),
                 ) { Text(if (editing != null) "替換第 ${editing + 1} 點" else "加入尋花路線", fontSize = 12.sp) }
                 OutlinedButton(
                     onClick = onUseAsStart, enabled = !usingMockStart && editing == null,
