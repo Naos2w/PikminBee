@@ -100,6 +100,7 @@ import com.naos.pikminbee.location.CheckpointStatus
 import com.naos.pikminbee.location.SessionJournal
 import com.naos.pikminbee.location.MockLocationService
 import com.naos.pikminbee.ui.LocationMap
+import com.naos.pikminbee.ui.rememberDeviceLocation
 import com.naos.pikminbee.ui.MapCameraRequest
 import com.naos.pikminbee.ui.JourneyControls
 import com.naos.pikminbee.ui.RouteLibraryPanel
@@ -173,6 +174,7 @@ private fun PikminBeeScreen() {
     var mapExplore by remember { mutableStateOf(false) }
     var cameraSerial by remember { mutableIntStateOf(0) }
     var cameraRequest by remember { mutableStateOf<MapCameraRequest?>(null) }
+    var initiallyFocusedOnPhone by remember { mutableStateOf(false) }
     val controlsScroll = rememberScrollState()
     var latitudeText by remember { mutableStateOf(selected.latitude.toString()) }
     var longitudeText by remember { mutableStateOf(selected.longitude.toString()) }
@@ -210,10 +212,26 @@ private fun PikminBeeScreen() {
             (flowerPick != null || editingFlowerStopIndex != null)) controlsScroll.animateScrollTo(0)
     }
 
+    var phoneLocationRefresh by remember { mutableIntStateOf(0) }
     val requestLocation = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
+        phoneLocationRefresh++
         message = if (granted) "已取得定位權限，可以再次點選瞬移" else "請先授予精確定位權限"
+    }
+    val phonePosition by rememberDeviceLocation(phoneLocationRefresh)
+    val overlaySettings = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        if (Settings.canDrawOverlays(context)) {
+            runCatching {
+                context.startService(MockLocationService.command(
+                    context, MockLocationService.ACTION_SHOW_OVERLAY))
+            }.onFailure { message = "無法開啟懸浮蜜蜂：${it.message}" }
+            message = "懸浮權限已授予，正在顯示蜜蜂控制"
+        } else {
+            message = "尚未授權顯示在其他應用程式上層，可稍後再開啟"
+        }
     }
 
     var importMode by remember { mutableStateOf(WalkMode.ROUTE) }
@@ -374,6 +392,15 @@ private fun PikminBeeScreen() {
             message = "路線跨越國際換日線，暫先聚焦起點；可手動縮放地圖"
         }
     }
+    // Focus the first available actual fix once; do not chase GPS updates
+    // or interrupt subsequent user-driven map exploration.
+    LaunchedEffect(mockPosition, phonePosition) {
+        val firstFix = mockPosition ?: phonePosition
+        if (!initiallyFocusedOnPhone && firstFix != null) {
+            initiallyFocusedOnPhone = true
+            moveMapCamera(MapCameraGeometry.fitPoints(listOf(firstFix)))
+        }
+    }
     fun fitCurrentRoute() {
         val target = when (tab) {
             ToolTab.FLOWERS -> MapCameraGeometry.forRoute(
@@ -414,6 +441,11 @@ private fun PikminBeeScreen() {
         if (virtual != null) {
             focusMapPoint(virtual)
             message = "已移至目前模擬位置，沒有瞬移"
+            return
+        }
+        if (phonePosition != null) {
+            focusMapPoint(phonePosition!!)
+            message = "已移至手機目前位置，沒有瞬移"
             return
         }
         if (ContextCompat.checkSelfPermission(
@@ -465,6 +497,7 @@ private fun PikminBeeScreen() {
                 initial = !prefs.setupCompleted(),
                 onFinish = {
                     prefs.setSetupCompleted(true)
+                    phoneLocationRefresh++
                     activePage = BeePage.MAP
                 },
                 onExit = { activePage = BeePage.MAP },
@@ -495,20 +528,24 @@ private fun PikminBeeScreen() {
                 onPermissions = { activePage = BeePage.PERMISSIONS },
                 onOverlay = {
                     when {
-                        mockPosition == null ->
-                            message = "請先啟動模擬定位，才能開啟懸浮控制"
+                        overlayVisible -> runCatching {
+                            context.startService(MockLocationService.command(
+                                context, MockLocationService.ACTION_HIDE_OVERLAY))
+                            message = "正在關閉懸浮蜜蜂"
+                        }.onFailure { message = "無法關閉懸浮蜜蜂：${it.message}" }
                         !Settings.canDrawOverlays(context) -> {
-                            context.startActivity(Intent(
-                                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                                Uri.parse("package:" + context.packageName),
-                            ))
-                            message = "授予懸浮窗權限後，回 App 再點一次"
+                            message = "需要「顯示在其他應用程式上層」權限，返回後將自動開啟"
+                            val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                Uri.parse("package:${context.packageName}"))
+                            runCatching { overlaySettings.launch(intent) }.onFailure {
+                                message = "無法開啟系統懸浮權限頁面，請由應用程式設定授權"
+                            }
                         }
-                        else -> context.startService(MockLocationService.command(
-                            context,
-                            if (overlayVisible) MockLocationService.ACTION_HIDE_OVERLAY
-                            else MockLocationService.ACTION_SHOW_OVERLAY,
-                        ))
+                        else -> runCatching {
+                            context.startService(MockLocationService.command(
+                                context, MockLocationService.ACTION_SHOW_OVERLAY))
+                            message = "正在顯示懸浮蜜蜂，點擊圖示可展開控制"
+                        }.onFailure { message = "無法開啟懸浮蜜蜂：${it.message}" }
                     }
                 },
                 onToggleWifi = { showWifiPanel = !showWifiPanel },
@@ -516,6 +553,7 @@ private fun PikminBeeScreen() {
                     requestLocation.launch(Manifest.permission.ACCESS_FINE_LOCATION)
                 },
                 onMessage = { message = it },
+                statusMessage = message,
                 onBack = { activePage = BeePage.MAP },
             )
             BeePage.MAP -> MapFirstShell(
@@ -548,6 +586,8 @@ private fun PikminBeeScreen() {
             LocationMap(
                 provider = provider, dark = dark,
                 selected = selected,
+                current = mockPosition ?: phonePosition,
+                currentIsMock = mockPosition != null,
                 start = if (tab == ToolTab.FLOWERS) mockPosition ?: flowerStart else null,
                 stops = when (tab) {
                     ToolTab.ROUTE -> roadStops
@@ -608,6 +648,14 @@ private fun PikminBeeScreen() {
             )
                 },
                 modeContent = {
+                    Text(
+                        when {
+                            mockPosition != null -> "🐝 目前模擬位置 · ${mockPosition!!.label()}"
+                            phonePosition != null -> "● 手機目前位置 · ${phonePosition!!.label()}"
+                            else -> "● 目前位置尚未取得，請確認 Android 定位權限"
+                        },
+                        color = muted, fontSize = 12.sp,
+                    )
                     if (tab == ToolTab.ROUTE) {
                         OutlinedButton(
                             onClick = {

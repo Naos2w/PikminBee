@@ -5,11 +5,11 @@
 - [x] Preserve the fixed UAT signer and monotonic Android `versionCode` independently of the visible version name. First signed build with the new policy still requires promotion to `staging` and an explicit manual package request; do not publish automatically.
 
 ## Approved POCO UI preview — November 18, 2026
-- [ ] Implement the approved light and dark Liquid Glass design, with light / dark / follow-system switch, readable text, compact map controls and accessible contrast; screenshot preview alone is not implementation evidence.
-- [ ] Repair the in-app 「開啟懸浮控制」 action: check overlay permission, guide to system settings when missing and confirm the bee overlay actually appears and can expand; do not require an active mock route merely to show controls.
-- [ ] Investigate why `com.naos.pikminbee.uat` does not appear as an eligible mock-location App on POCO; verify the installed manifest and Android system selection list on-device.
-- [ ] Distinguish ordered road waypoints with 1 → 2 → 3 markers, start/end and travel direction rather than identical red pins; show a separate current-position indicator.
-- [ ] First-launch permission guide must always offer a visible 「稍後設定／略過」 map-only path; no false assertion that mock GPS works before required permissions pass.
+- [x] Source: retained light / dark / system appearance and updated the glass-like translucent controls, gradients, drawer text contrast and theme-aware overlay. Exact preview parity and visual readability remain **POCO UAT pending** (no native backdrop blur on live map tiles).
+- [x] Source: 「開啟懸浮控制」 now checks system overlay permission, launches system settings when missing, attempts to show on return and no longer requires a mock GPS session. Confirm real HyperOS popup and background longevity on POCO.
+- [x] Source: added debug/UAT-only `ACCESS_MOCK_LOCATION` manifest marker; verified `aapt dump permissions` lists it in the built DEV APK. Actual HyperOS UAT picker visibility still requires device verification.
+- [x] Source: ordered green / blue / red waypoint number icons for MapLibre and Google Maps, map sequence labels and independent phone blue-dot / virtual bee marker. POCO visual and map-marker touch interaction tests pending.
+- [x] Source: permission guide now shows a top-row 「先略過」 action that enters map-only mode without claiming mock GPS eligibility; the explicit permission checks still gate actual mock location.
 - [ ] POCO device acceptance for themes, overlays, GPS, route previews and accessibility; screenshots and source tests alone are not acceptance.
 - [x] Source: road route preview shows the planned pedestrian distance and estimated duration, recalculated when walking speed changes; no straight-line estimate or extra routing request on speed toggle. Local Android unit tests + lint passed; POCO on-device UAT is still required.
 

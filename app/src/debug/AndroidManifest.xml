@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- Debug/UAT only: this signature-level request is an Android Settings
+         eligibility marker, not a permission grant. The user must explicitly
+         select PikminBee in Developer options to enable the mock-location app-op. -->
+    <!-- Windows lint can misclassify a backslash src\\debug path as production.
+         Suppress only this expected debug-only mock-location declaration. -->
+    <uses-permission android:name="android.permission.ACCESS_MOCK_LOCATION"
+        tools:ignore="MockLocation" />
+</manifest>

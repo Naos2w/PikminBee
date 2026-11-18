@@ -81,11 +81,14 @@ fun JourneyControls(
                 if (WalkingGeometry.distanceMeters(last(), stop) > 1.0) add(stop)
             }
         }
+    val canPlan = origin?.let { start ->
+        runCatching { requestedPoints(start).size >= 2 }.getOrDefault(false)
+    } ?: false
 
     fun previewOrStart(startWalking: Boolean) {
         if (planning) return
         val start = origin ?: run {
-            onMessage("請先在地圖選位置，並設為尋花起點")
+            onMessage(if (flower) "請先在地圖設為尋花起點" else "請先選取路徑起點")
             return
         }
         if (startWalking && ContextCompat.checkSelfPermission(
@@ -93,6 +96,10 @@ fun JourneyControls(
             ) != PackageManager.PERMISSION_GRANTED
         ) {
             onAskLocation()
+            return
+        }
+        if (startWalking && !BeePermissions.inspect(context).selectedMockApp) {
+            onMessage("請先在 Android 開發人員選項選取 PikminBee 作為模擬位置 App")
             return
         }
         val points = try { requestedPoints(start) } catch (e: IllegalArgumentException) {
@@ -144,6 +151,12 @@ fun JourneyControls(
         )
         Text("已加入 ${stops.size} 個路點 · 起點 ${origin?.label() ?: "尚未設定"}",
             color = muted, fontSize = 12.sp)
+        if (!flower && stops.isNotEmpty()) {
+            Text("路徑順序  " + stops.indices.joinToString("  →  ") { "${it + 1}" },
+                color = foreground, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Text("綠色 1 為起點 · 藍色為途經點 · 紅色為終點",
+                color = muted, fontSize = 12.sp)
+        }
         Text("本次行走速度（個人預設請至共用設定）", color = muted, fontSize = 12.sp)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
             WalkSpeedPreset.entries.forEach { option ->
@@ -171,7 +184,7 @@ fun JourneyControls(
         run {
             OutlinedButton(
                 onClick = { previewOrStart(startWalking = false) },
-                enabled = !planning && stops.isNotEmpty() && origin != null &&
+                enabled = !planning && canPlan &&
                     (!active || phase !in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)),
                 modifier = Modifier.fillMaxWidth().height(46.dp),
             ) { Text(if (planning) "道路規劃中…" else "先預覽步行道路（不移動）", fontSize = 12.sp) }
@@ -190,7 +203,7 @@ fun JourneyControls(
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Button(
                 onClick = { previewOrStart(startWalking = true) },
-                enabled = !planning && stops.isNotEmpty() && origin != null &&
+                enabled = !planning && canPlan &&
                     (!active || phase !in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)),
                 modifier = Modifier.weight(1.3f).height(46.dp),
                 colors = ButtonDefaults.buttonColors(
