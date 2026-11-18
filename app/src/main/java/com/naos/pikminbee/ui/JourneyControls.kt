@@ -205,7 +205,10 @@ fun JourneyControls(
                 enabled = !planning && stops.isNotEmpty() && origin != null &&
                     (!active || phase !in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)),
                 modifier = Modifier.weight(1.3f).height(46.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF9F5E0C)),
+                colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF9F5E0C),
+                        contentColor = Color.White,
+                    ),
             ) { Text(if (planning) "規劃中…" else "開始行走", fontSize = 12.sp) }
 
             OutlinedButton(
