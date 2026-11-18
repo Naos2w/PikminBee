@@ -1,5 +1,9 @@
 # PikminBee TODO
 
+## Version numbering policy (owner decision, November 18, 2026)
+- [x] Configure UAT display versions starting at `0.1.1`; on a **new** UAT cycle increment minor and reset patch to 1 (`0.2.1`, `0.3.1`). DEV increments patch within the current minor (`0.1.2-dev`, `0.1.3-dev`, then `0.2.2-dev`).
+- [x] Preserve the fixed UAT signer and monotonic Android `versionCode` independently of the visible version name. First signed build with the new policy still requires promotion to `staging` and an explicit manual package request; do not publish automatically.
+
 ## Approved POCO UI preview — November 18, 2026
 - [ ] Implement the approved light and dark Liquid Glass design, with light / dark / follow-system switch, readable text, compact map controls and accessible contrast; screenshot preview alone is not implementation evidence.
 - [ ] Repair the in-app 「開啟懸浮控制」 action: check overlay permission, guide to system settings when missing and confirm the bee overlay actually appears and can expand; do not require an active mock route merely to show controls.

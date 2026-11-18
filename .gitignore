@@ -17,6 +17,9 @@ secrets.properties
 *.p12
 .env*
 !*.example
+# Python versioning helper cache
+__pycache__/
+*.py[cod]
 # Windows
 Thumbs.db
 Desktop.ini
