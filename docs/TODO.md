@@ -1,5 +1,17 @@
 # PikminBee TODO
 
+## v0.3 map-first POCO UAT — November 18, 2026
+- [x] Map-first home: native MapLibre map as the main interaction area, with a top coordinate-only paste/copy bar, a current-location camera button and mode navigation in a hamburger drawer.
+- [x] Explicit coordinate parsing; tap the map or paste GPS coordinates to select a point without teleport. Route waypoints require explicit confirmation; no geocoding or additional map API.
+- [x] Context-specific collapsible bottom sheet for teleport / pedestrian route / flowers / favourites; saved route library is centralised under favourites.
+- [x] Shared settings page: map provider/style, light/dark appearance, walking defaults, floating bee and Wi-Fi. Live speed controls remain in active travel modes.
+- [x] First-launch sequential permission guide with actual Android permission/status checks and a map-only escape; optional features never block map use.
+- [x] Liquid Glass-inspired high-contrast, near-black native control surfaces without GPU-heavy continuous blur above tiles.
+- [x] Dedicated signed UAT application ID com.naos.pikminbee.uat, fixed GitHub Actions secrets, cert fingerprint gate and monotonically increasing test versionCode. This package coexists with the old debug app but has distinct private storage.
+- [ ] Validate the new map-first UI, permissions, route actions and sustained mock GPS function on POCO. See [MAP-FIRST-UAT.md](MAP-FIRST-UAT.md).
+- [ ] Run full source/CI validation, promote develop → staging and manually upload a new fixed-signer UAT APK. **main remains unchanged.**
+
+
 ## First POCO UI UAT — contrast / usability follow-up (2026-11-18)
 - [x] Reproduced visually from user-provided dark/light POCO screenshots: dark text on dark cards, unreadable unselected map-style chips, GPS coordinate fields and text buttons. Root cause was a user-selected dark appearance with a default light Material 3 colour scheme.
 - [x] Unified dark/light Material 3 colour scheme with WCAG AA 4.5:1 source tests for normal content and selected chips, denser high-opacity cards, explicit primary-button text colour.

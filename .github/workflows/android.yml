@@ -45,13 +45,44 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - name: Verify source (no APK packaging)
         run: ./gradlew :app:testDebugUnitTest :app:lintDebug --no-daemon --console=plain
-      - name: Package test APK only when explicitly requested
+      - name: Restore private, fixed UAT signing key
         if: github.event_name == 'workflow_dispatch' && inputs.package_apk == true
-        run: ./gradlew :app:assembleDebug --no-daemon --console=plain
+        env:
+          UAT_KEYSTORE_BASE64: ${{ secrets.PIKMINBEE_UAT_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$UAT_KEYSTORE_BASE64" ]; then
+            echo "Missing private UAT keystore. Refusing a rotating debug signature."
+            exit 1
+          fi
+          printf '%s' "$UAT_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/pikminbee-uat.p12"
+          echo "PIKMINBEE_UAT_KEYSTORE_FILE=$RUNNER_TEMP/pikminbee-uat.p12" >> "$GITHUB_ENV"
+      - name: Build fixed-signer UAT APK only when explicitly requested
+        if: github.event_name == 'workflow_dispatch' && inputs.package_apk == true
+        env:
+          PIKMINBEE_UAT: 'true'
+          PIKMINBEE_UAT_SIGN_PASSWORD: ${{ secrets.PIKMINBEE_UAT_SIGN_PASSWORD }}
+        run: |
+          if [ -z "$PIKMINBEE_UAT_SIGN_PASSWORD" ]; then
+            echo "Missing private UAT signing password. Refusing an unsigned build."
+            exit 1
+          fi
+          ./gradlew :app:assembleDebug --no-daemon --console=plain
+      - name: Verify UAT package identity and certificate
+        if: github.event_name == 'workflow_dispatch' && inputs.package_apk == true
+        run: |
+          APK="$(find app/build/outputs/apk/debug -maxdepth 1 -name '*.apk' | head -n 1)"
+          [ -n "$APK" ] && [ -s "$APK" ] || exit 1
+          TOOL="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
+          AAPT="$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -n 1)"
+          [ -n "$TOOL" ] && [ -n "$AAPT" ] || exit 1
+          # Public fingerprint pin: fail closed if the private UAT key is rotated.
+          "$TOOL" verify --print-certs "$APK" | grep -F 'Signer #1 certificate SHA-256 digest: 7a34ec161ae557f0c2db222b54696e0ef574bd3f95d135e6597a7bff7e96f807'
+          "$AAPT" dump badging "$APK" | grep "package: name='com.naos.pikminbee.uat'"
+          sha256sum "$APK"
       - name: Upload manually requested UAT APK
         if: github.event_name == 'workflow_dispatch' && inputs.package_apk == true
         uses: actions/upload-artifact@v4
         with:
-          name: PikminBee-UAT-debug
+          name: PikminBee-UAT-stable-signed
           path: app/build/outputs/apk/debug/*.apk
-          retention-days: 3
+          retention-days: 7

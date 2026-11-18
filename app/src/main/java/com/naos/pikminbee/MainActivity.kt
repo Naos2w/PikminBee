@@ -109,6 +109,9 @@ import com.naos.pikminbee.ui.FlowerMapPick
 import com.naos.pikminbee.ui.FlowerVisionPanel
 import com.naos.pikminbee.ui.WifiControlPanel
 import com.naos.pikminbee.ui.BackgroundSessionPanel
+import com.naos.pikminbee.ui.MapFirstShell
+import com.naos.pikminbee.ui.BeeSettingsScreen
+import com.naos.pikminbee.ui.BeePermissionWizard
 import com.naos.pikminbee.ui.PikminBeeThemeColors
 
 private val navy = Color(0xFF18263A)
@@ -122,6 +125,8 @@ class MainActivity : ComponentActivity() {
         setContent { PikminBeeScreen() }
     }
 }
+
+private enum class BeePage { MAP, SETTINGS, PERMISSIONS }
 
 private enum class ToolTab(val label: String) {
     TELEPORT("瞬移"), ROUTE("路徑"), FLOWERS("尋花"), SAVED("收藏")
@@ -150,7 +155,6 @@ private fun PikminBeeScreen() {
     var provider by remember { mutableStateOf(prefs.provider()) }
     var freeMapStyle by remember { mutableStateOf(prefs.freeMapStyle()) }
     var appearance by remember { mutableStateOf(prefs.appearance()) }
-    var showMapSettings by remember { mutableStateOf(false) }
     val dark = when (appearance) {
         MapAppearance.SYSTEM -> systemDark
         MapAppearance.LIGHT -> false
@@ -384,16 +388,162 @@ private fun PikminBeeScreen() {
         mapExplore = true
         moveMapCamera(MapCameraGeometry.fitPoints(listOf(point)))
     }
-    BackHandler(enabled = mapExplore) { mapExplore = false }
+
+    var activePage by remember {
+        mutableStateOf(if (prefs.setupCompleted()) BeePage.MAP else BeePage.PERMISSIONS)
+    }
+    var coordinateInput by remember { mutableStateOf(selected.label()) }
+    LaunchedEffect(selected) { coordinateInput = selected.label() }
+    fun applyCoordinateInput() {
+        val parsed = Coordinate.parseCombined(coordinateInput)
+        if (parsed == null) {
+            message = "請輸入經緯度，例如 25.0330, 121.5654"
+            return
+        }
+        selected = parsed
+        if (tab == ToolTab.FLOWERS) flowerPick = FlowerMapPick(parsed)
+        message = "已選取 " + parsed.label() + " · 不會自動瞬移"
+        focusMapPoint(parsed)
+    }
+    fun goToCurrentMapPosition() {
+        val virtual = mockPosition
+        if (virtual != null) {
+            focusMapPoint(virtual)
+            message = "已移至目前模擬位置，沒有瞬移"
+            return
+        }
+        if (ContextCompat.checkSelfPermission(
+                context, Manifest.permission.ACCESS_FINE_LOCATION
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            activePage = BeePage.PERMISSIONS
+            message = "需要精確定位權限，請在權限檢查頁設定"
+            return
+        }
+        try {
+            val lm = context.getSystemService(android.location.LocationManager::class.java)
+            val gps = android.location.LocationManager.GPS_PROVIDER
+            val network = android.location.LocationManager.NETWORK_PROVIDER
+            val providerName = if (lm.isProviderEnabled(gps)) gps else network
+            val cached = lm.getLastKnownLocation(providerName)
+            if (cached != null && cached.time > System.currentTimeMillis() - 300_000L) {
+                focusMapPoint(Coordinate(cached.latitude, cached.longitude))
+                message = "已移至最近的手機位置，沒有瞬移"
+            } else if (android.os.Build.VERSION.SDK_INT >= 30) {
+                lm.getCurrentLocation(providerName, null, context.mainExecutor) { location ->
+                    if (location == null) {
+                        message = "暫時無法取得手機位置，請檢查定位服務"
+                    } else {
+                        runCatching { Coordinate(location.latitude, location.longitude) }
+                            .onSuccess {
+                                focusMapPoint(it)
+                                message = "已移至手機目前位置，沒有瞬移"
+                            }.onFailure { message = "手機位置座標無效" }
+                    }
+                }
+                message = "正在取得手機目前位置…"
+            } else {
+                message = "尚無可用的手機位置，請先在地圖選取座標"
+            }
+        } catch (error: Exception) {
+            message = "取得位置失敗：" + (error.message ?: "請檢查系統定位")
+        }
+    }
+    BackHandler(enabled = activePage != BeePage.MAP || mapExplore) {
+        if (activePage != BeePage.MAP) activePage = BeePage.MAP
+        else mapExplore = false
+    }
 
     MaterialTheme(colorScheme = PikminBeeThemeColors.forDarkMode(dark)) {
-        Box(Modifier.fillMaxSize().background(if (dark) Color(0xFF091321) else Color(0xFFF4F7FC))) {
+        when (activePage) {
+            BeePage.PERMISSIONS -> BeePermissionWizard(
+                dark = dark,
+                initial = !prefs.setupCompleted(),
+                onFinish = {
+                    prefs.setSetupCompleted(true)
+                    activePage = BeePage.MAP
+                },
+                onExit = { activePage = BeePage.MAP },
+            )
+            BeePage.SETTINGS -> BeeSettingsScreen(
+                dark = dark,
+                provider = provider,
+                freeMapStyle = freeMapStyle,
+                appearance = appearance,
+                defaultSpeed = defaultSpeedPreset,
+                overlayVisible = overlayVisible,
+                mockActive = mockPosition != null,
+                showWifiPanel = showWifiPanel,
+                checkpoint = checkpoint,
+                onProvider = {
+                    provider = it
+                    prefs.setProvider(it)
+                },
+                onFreeMapStyle = {
+                    freeMapStyle = it
+                    prefs.setFreeMapStyle(it)
+                },
+                onAppearance = {
+                    appearance = it
+                    prefs.setAppearance(it)
+                },
+                onDefaultSpeed = ::setDefaultWalkSpeed,
+                onPermissions = { activePage = BeePage.PERMISSIONS },
+                onOverlay = {
+                    when {
+                        mockPosition == null ->
+                            message = "請先啟動模擬定位，才能開啟懸浮控制"
+                        !Settings.canDrawOverlays(context) -> {
+                            context.startActivity(Intent(
+                                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                Uri.parse("package:" + context.packageName),
+                            ))
+                            message = "授予懸浮窗權限後，回 App 再點一次"
+                        }
+                        else -> context.startService(MockLocationService.command(
+                            context,
+                            if (overlayVisible) MockLocationService.ACTION_HIDE_OVERLAY
+                            else MockLocationService.ACTION_SHOW_OVERLAY,
+                        ))
+                    }
+                },
+                onToggleWifi = { showWifiPanel = !showWifiPanel },
+                onAskLocation = {
+                    requestLocation.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+                },
+                onMessage = { message = it },
+                onBack = { activePage = BeePage.MAP },
+            )
+            BeePage.MAP -> MapFirstShell(
+                dark = dark,
+                modeIndex = tab.ordinal,
+                modeTitle = tab.label,
+                message = message,
+                coordinateInput = coordinateInput,
+                onCoordinateChange = { coordinateInput = it },
+                onCoordinateApply = ::applyCoordinateInput,
+                onCoordinateCopy = {
+                    val clipboard = context.getSystemService(
+                        android.content.ClipboardManager::class.java,
+                    )
+                    clipboard.setPrimaryClip(android.content.ClipData.newPlainText(
+                        "PikminBee coordinate", selected.label(),
+                    ))
+                    message = "已複製目前選取經緯度"
+                },
+                onCurrentLocation = ::goToCurrentMapPosition,
+                onMode = { index ->
+                    tab = ToolTab.entries[index]
+                    mapExplore = false
+                },
+                onSettings = { activePage = BeePage.SETTINGS },
+                onPermissions = { activePage = BeePage.PERMISSIONS },
+                mapExplore = mapExplore,
+                onCloseExplore = { mapExplore = false },
+                mapContent = {
             LocationMap(
                 provider = provider, dark = dark,
-                selected = if (tab == ToolTab.FLOWERS) selected else mockPosition ?: when (tab) {
-                    ToolTab.ROUTE -> roadStops.firstOrNull() ?: selected
-                    else -> selected
-                },
+                selected = selected,
                 start = if (tab == ToolTab.FLOWERS) mockPosition ?: flowerStart else null,
                 stops = when (tab) {
                     ToolTab.ROUTE -> roadStops
@@ -414,10 +564,8 @@ private fun PikminBeeScreen() {
                     if (mapExplore) mapExplore = false
                     when (tab) {
                         ToolTab.ROUTE -> {
-                            if (roadStops.size < 15) {
-                                prefs.saveRouteDraft(roadStops + point)
-                                message = "已新增路點 ${roadStops.size + 1} · 請繼續點選地圖"
-                            } else message = "最多只能加入 15 個路點"
+                            selected = point
+                            message = "已選取經緯度，按「加入路點」才會新增至路線"
                         }
                         ToolTab.FLOWERS -> {
                             selected = point
@@ -451,247 +599,32 @@ private fun PikminBeeScreen() {
                 } else null,
                 modifier = Modifier.fillMaxSize()
             )
-
-            Column(
-                Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.SpaceBetween,
-            ) {
-                if (mapExplore) {
-                    FrostedCard(dark, Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                            Row(
-                                Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Column {
-                                    Text("地圖檢視", fontWeight = FontWeight.Bold, color = foreground)
-                                    Text(
-                                        if (tab == ToolTab.FLOWERS) "尋花路點 ${flowerStops.size} 個"
-                                        else if (tab == ToolTab.ROUTE) "道路路點 ${roadStops.size} 個"
-                                        else "自由瀏覽地圖",
-                                        color = muted, fontSize = 12.sp,
-                                    )
+                },
+                modeContent = {
+                    if (tab == ToolTab.ROUTE) {
+                        OutlinedButton(
+                            onClick = {
+                                if (roadStops.size >= 15) {
+                                    message = "最多 15 個道路路點"
+                                } else {
+                                    prefs.saveRouteDraft(roadStops + selected)
+                                    message = "已新增第 " + (roadStops.size + 1) + " 個路點"
                                 }
-                                TextButton(onClick = { mapExplore = false }) {
-                                    Text("返回操作", fontSize = 12.sp)
-                                }
-                            }
-                            Row(
-                                Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            ) {
-                                OutlinedButton(
-                                    onClick = ::fitCurrentRoute,
-                                    modifier = Modifier.weight(1f).height(48.dp),
-                                ) { Text("整條路線", fontSize = 11.sp) }
-                                OutlinedButton(
-                                    onClick = {
-                                        val origin = when (tab) {
-                                            ToolTab.FLOWERS -> mockPosition ?: flowerStart ?: selected
-                                            ToolTab.ROUTE -> mockPosition ?: roadStops.firstOrNull() ?: selected
-                                            else -> selected
-                                        }
-                                        focusMapPoint(origin)
-                                    },
-                                    modifier = Modifier.weight(1f).height(48.dp),
-                                ) { Text("起點", fontSize = 11.sp) }
-                                OutlinedButton(
-                                    onClick = { focusMapPoint(selected) },
-                                    modifier = Modifier.weight(1f).height(48.dp),
-                                ) { Text("選點", fontSize = 11.sp) }
-                            }
-                        }
-                    }
-                    FrostedCard(dark, Modifier.fillMaxWidth()) {
-                        Text(message, Modifier.padding(12.dp), color = muted,
-                            fontSize = 12.sp, maxLines = 2)
-                    }
-                } else {
-                FrostedCard(dark, Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Row(
-                            Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column {
-                                Text("PikminBee", fontSize = 23.sp, fontWeight = FontWeight.Bold, color = foreground)
-                                Text("尋花採蜜 · $mockStatus", fontSize = 12.sp, color = muted)
-                            }
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text("測試版", fontSize = 11.sp, color = honey,
-                                    fontWeight = FontWeight.SemiBold)
-                                TextButton(onClick = ::fitCurrentRoute) {
-                                    Text("全螢幕地圖", fontSize = 12.sp)
-                                }
-                            }
-                        }
-
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    "底圖：" + if (provider == MapProvider.OPEN_FREE_MAP)
-                                        "OpenFreeMap · ${freeMapStyle.label}" else "Google Maps",
-                                    color = foreground, fontSize = 12.sp,
-                                )
-                                Text(
-                                    "介面：" + when (appearance) {
-                                        MapAppearance.SYSTEM -> "跟隨系統"
-                                        MapAppearance.LIGHT -> "淺色"
-                                        MapAppearance.DARK -> "深色"
-                                    },
-                                    color = muted, fontSize = 11.sp,
-                                )
-                            }
-                            TextButton(onClick = { showMapSettings = !showMapSettings }) {
-                                Text(
-                                    if (showMapSettings) "收起地圖設定" else "調整地圖設定",
-                                    fontSize = 12.sp,
-                                )
-                            }
-                        }
-                        if (showMapSettings) {
-                            Text("底圖來源", color = foreground, fontSize = 12.sp)
-                            if (BuildConfig.HAS_GOOGLE_MAPS_KEY) {
-                                Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                                    MapBasemapPolicy.availableProviders(true).forEach { p ->
-                                        FilterChip(
-                                            selected = provider == p,
-                                            onClick = {
-                                                provider = p
-                                                prefs.setProvider(p)
-                                            },
-                                            label = {
-                                                Text(
-                                                    if (p == MapProvider.OPEN_FREE_MAP)
-                                                        "OpenFreeMap" else "Google Maps",
-                                                    fontSize = 12.sp,
-                                                )
-                                            },
-                                        )
-                                    }
-                                }
-                            } else {
-                                Text("OpenFreeMap · 免 Google Key", color = muted, fontSize = 12.sp)
-                            }
-                            if (provider == MapProvider.OPEN_FREE_MAP) {
-                                Text(
-                                    "地圖樣式（需網路連線）",
-                                    color = foreground, fontSize = 12.sp,
-                                )
-                                androidx.compose.foundation.layout.FlowRow(
-                                    Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(7.dp),
-                                    verticalArrangement = Arrangement.spacedBy(0.dp),
-                                    maxItemsInEachRow = 3,
-                                ) {
-                                    FreeMapStyle.entries.forEach { option ->
-                                        FilterChip(
-                                            selected = freeMapStyle == option,
-                                            onClick = {
-                                                freeMapStyle = option
-                                                prefs.setFreeMapStyle(option)
-                                            },
-                                            label = { Text(option.label, fontSize = 12.sp) },
-                                        )
-                                    }
-                                }
-                            }
-                            Text("介面主題", color = foreground, fontSize = 12.sp)
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                listOf(
-                                    MapAppearance.SYSTEM to "自動",
-                                    MapAppearance.LIGHT to "淺色",
-                                    MapAppearance.DARK to "深色",
-                                ).forEach { (option, label) ->
-                                    FilterChip(
-                                        selected = appearance == option,
-                                        onClick = {
-                                            appearance = option
-                                            prefs.setAppearance(option)
-                                        },
-                                        label = { Text(label, fontSize = 12.sp) },
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                FrostedCard(dark, Modifier.fillMaxWidth()) {
-                    Column(
-                        Modifier.fillMaxWidth().heightIn(max = 520.dp)
-                            .verticalScroll(controlsScroll).padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                            ToolTab.entries.forEach { option ->
-                                Box(
-                                    modifier = Modifier.weight(1f).height(48.dp)
-                                        .background(
-                                            if (tab == option) honey else Color.Transparent,
-                                            RoundedCornerShape(16.dp)
-                                        )
-                                        .selectable(
-                                            selected = tab == option,
-                                            role = Role.Tab,
-                                            onClick = { tab = option },
-                                        )
-                                        .semantics {
-                                            stateDescription = if (tab == option) "已選擇" else "未選擇"
-                                        },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        option.label,
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = if (tab == option) Color.White else foreground
-                                    )
-                                }
-                            }
-                        }
-
-                        Text(
-                            message,
-                            color = muted,
-                            fontSize = 12.sp,
-                            maxLines = 2,
-                            modifier = Modifier.fillMaxWidth().semantics {
-                                liveRegion = LiveRegionMode.Polite
                             },
-                        )
+                            modifier = Modifier.fillMaxWidth().height(48.dp),
+                        ) { Text("＋ 加入地圖所選路點") }
+                    }
                         when (tab) {
                             ToolTab.TELEPORT -> {
                                 Text("瞬移到指定位置", fontWeight = FontWeight.Bold, color = foreground)
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    OutlinedTextField(
-                                        value = latitudeText, onValueChange = { latitudeText = it.take(22) },
-                                        label = { Text("緯度 Latitude") }, singleLine = true,
-                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    OutlinedTextField(
-                                        value = longitudeText, onValueChange = { longitudeText = it.take(22) },
-                                        label = { Text("經度 Longitude") }, singleLine = true,
-                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                }
+                                Text("選取：" + selected.label(), color = muted, fontSize = 13.sp)
+                                Text("上方座標列可貼上經緯度；點地圖只會選取，不會自動瞬移。",
+                                    color = muted, fontSize = 12.sp)
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Button(
                                         onClick = {
-                                            val coordinate = Coordinate.parse(latitudeText, longitudeText)
+                                            val coordinate = selected
                                             when {
-                                                coordinate == null -> message = "經緯度格式不正確"
                                                 ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION)
                                                     != PackageManager.PERMISSION_GRANTED -> requestLocation.launch(Manifest.permission.ACCESS_FINE_LOCATION)
                                                 else -> {
@@ -756,6 +689,31 @@ private fun PikminBeeScreen() {
                                         }
                                     }
                                 }
+                                Text("收藏的路線", fontWeight = FontWeight.SemiBold, color = foreground)
+                                listOf(WalkMode.ROUTE, WalkMode.FLOWERS).forEach { kind ->
+                                    RouteLibraryPanel(
+                                        mode = kind,
+                                        draft = if (kind == WalkMode.FLOWERS) flowerStops else roadStops,
+                                        routes = savedRoutes.filter { it.mode == kind },
+                                        foreground = foreground, muted = muted,
+                                        onSave = { name ->
+                                            saveRoute(name, kind,
+                                                if (kind == WalkMode.FLOWERS) flowerStops else roadStops)
+                                        },
+                                        onRename = ::renameRoute,
+                                        onLoad = ::loadRoute,
+                                        onExport = { route ->
+                                            exportRouteId = route.id
+                                            exportGpx.launch(route.fileName())
+                                        },
+                                        onDelete = ::deleteRoute,
+                                        onImport = {
+                                            importMode = kind
+                                            importGpx.launch(arrayOf(
+                                                "application/gpx+xml", "application/xml", "text/xml", "*/*"))
+                                        },
+                                    )
+                                }
                             }
                             ToolTab.ROUTE -> {
                                 JourneyControls(
@@ -765,32 +723,12 @@ private fun PikminBeeScreen() {
                                     activeMode = walkMode,
                                     phase = walkPhase,
                                     speedPreset = speedPreset,
-                                    defaultSpeedPreset = defaultSpeedPreset,
                                     onSpeedSelected = ::chooseWalkSpeed,
-                                    onSetDefaultSpeed = ::setDefaultWalkSpeed,
                                     foreground = foreground, muted = muted,
                                     onUndo = { prefs.saveRouteDraft(roadStops.dropLast(1)) },
                                     onClear = { prefs.saveRouteDraft(emptyList()) },
                                     onMessage = { message = it },
                                     onAskLocation = { requestLocation.launch(Manifest.permission.ACCESS_FINE_LOCATION) },
-                                )
-                                RouteLibraryPanel(
-                                    mode = WalkMode.ROUTE, draft = roadStops,
-                                    routes = savedRoutes.filter { it.mode == WalkMode.ROUTE },
-                                    foreground = foreground, muted = muted,
-                                    onSave = { name -> saveRoute(name, WalkMode.ROUTE, roadStops) },
-                                    onRename = ::renameRoute,
-                                    onLoad = ::loadRoute,
-                                    onExport = { route ->
-                                        exportRouteId = route.id
-                                        exportGpx.launch(route.fileName())
-                                    },
-                                    onDelete = ::deleteRoute,
-                                    onImport = {
-                                        importMode = WalkMode.ROUTE
-                                        importGpx.launch(arrayOf("application/gpx+xml", "application/xml",
-                                            "text/xml", "*/*"))
-                                    },
                                 )
                             }
                             ToolTab.FLOWERS -> {
@@ -900,9 +838,7 @@ private fun PikminBeeScreen() {
                                     activeMode = walkMode,
                                     phase = walkPhase,
                                     speedPreset = speedPreset,
-                                    defaultSpeedPreset = defaultSpeedPreset,
                                     onSpeedSelected = ::chooseWalkSpeed,
-                                    onSetDefaultSpeed = ::setDefaultWalkSpeed,
                                     foreground = foreground, muted = muted,
                                     onUndo = { prefs.saveFlowerDraft(flowerStops.dropLast(1)) },
                                     onClear = { prefs.saveFlowerDraft(emptyList()) },
@@ -980,24 +916,6 @@ private fun PikminBeeScreen() {
                                         exportFlowers.launch("PikminBee-flowers.geojson")
                                     },
                                 )
-                                RouteLibraryPanel(
-                                    mode = WalkMode.FLOWERS, draft = flowerStops,
-                                    routes = savedRoutes.filter { it.mode == WalkMode.FLOWERS },
-                                    foreground = foreground, muted = muted,
-                                    onSave = { name -> saveRoute(name, WalkMode.FLOWERS, flowerStops) },
-                                    onRename = ::renameRoute,
-                                    onLoad = ::loadRoute,
-                                    onExport = { route ->
-                                        exportRouteId = route.id
-                                        exportGpx.launch(route.fileName())
-                                    },
-                                    onDelete = ::deleteRoute,
-                                    onImport = {
-                                        importMode = WalkMode.FLOWERS
-                                        importGpx.launch(arrayOf("application/gpx+xml", "application/xml",
-                                            "text/xml", "*/*"))
-                                    },
-                                )
                                 FlowerVisionPanel(
                                     foreground = foreground,
                                     muted = muted,
@@ -1005,48 +923,8 @@ private fun PikminBeeScreen() {
                                 )
                             }
                         }
-                        TextButton(onClick = {
-                            when {
-                                mockPosition == null -> message = "請先啟動模擬定位，再開啟懸浮控制"
-                                !Settings.canDrawOverlays(context) -> {
-                                    context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                                        Uri.parse("package:" + context.packageName)))
-                                    message = "請授予懸浮顯示權限，返回後再點一次"
-                                }
-                                else -> {
-                                    val action = if (overlayVisible) MockLocationService.ACTION_HIDE_OVERLAY
-                                    else MockLocationService.ACTION_SHOW_OVERLAY
-                                    context.startService(MockLocationService.command(context, action))
-                                }
-                            }
-                        }) {
-                            Text(if (overlayVisible) "🐝 隱藏懸浮控制" else "🐝 開啟懸浮控制",
-                                fontSize = 13.sp)
-                        }
-                        TextButton(onClick = { showWifiPanel = !showWifiPanel }) {
-                            Text(if (showWifiPanel) "收起 Wi-Fi 遠端控制" else "Wi-Fi 遠端控制",
-                                fontSize = 13.sp)
-                        }
-                        if (showWifiPanel) WifiControlPanel(
-                            isMockActive = mockPosition != null,
-                            foreground = foreground,
-                            muted = muted,
-                            onMessage = { message = it },
-                        )
-                        BackgroundSessionPanel(
-                            isMockActive = mockPosition != null,
-                            checkpoint = checkpoint,
-                            foreground = foreground,
-                            muted = muted,
-                            onMessage = { message = it },
-                            onAskLocationPermission = {
-                                requestLocation.launch(Manifest.permission.ACCESS_FINE_LOCATION)
-                            },
-                        )
-                    }
-                }
-                } // mapExplore: full map vs editor
-            }
+                },
+            )
         }
         pendingSimplifiedGpx?.let { candidate ->
             AlertDialog(
