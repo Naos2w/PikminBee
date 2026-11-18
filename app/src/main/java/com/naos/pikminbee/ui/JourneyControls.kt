@@ -51,9 +51,7 @@ fun JourneyControls(
     activeMode: WalkMode?,
     phase: WalkPhase,
     speedPreset: WalkSpeedPreset,
-    defaultSpeedPreset: WalkSpeedPreset,
     onSpeedSelected: (WalkSpeedPreset) -> Unit,
-    onSetDefaultSpeed: (WalkSpeedPreset) -> Unit,
     foreground: Color,
     muted: Color,
     onUndo: () -> Unit,
@@ -147,7 +145,7 @@ fun JourneyControls(
         )
         Text("已加入 ${stops.size} 個路點 · 起點 ${origin?.label() ?: "尚未設定"}",
             color = muted, fontSize = 12.sp)
-        Text("速度預設（可於行走中調整）", color = muted, fontSize = 12.sp)
+        Text("本次行走速度（個人預設請至共用設定）", color = muted, fontSize = 12.sp)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
             WalkSpeedPreset.entries.forEach { option ->
                 FilterChip(
@@ -164,20 +162,7 @@ fun JourneyControls(
                 )
             }
         }
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Text(
-                "下次啟動預設：${defaultSpeedPreset.display}",
-                color = muted, fontSize = 12.sp,
-                modifier = Modifier.weight(1f),
-            )
-            TextButton(
-                onClick = { onSetDefaultSpeed(speedPreset) },
-                enabled = speedPreset != defaultSpeedPreset,
-            ) { Text("設為預設", fontSize = 12.sp) }
-        }
+
         if (flower) FilterChip(
             selected = loop,
             onClick = { loop = !loop },

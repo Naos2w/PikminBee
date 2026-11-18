@@ -15,7 +15,7 @@
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@drawable/ic_pikminbee"
         android:usesCleartextTraffic="false"
-        android:label="PikminBee"
+        android:label="${appDisplayName}"
         android:theme="@style/Theme.PikminBee"
         android:supportsRtl="true">
         <meta-data android:name="com.google.android.geo.API_KEY"

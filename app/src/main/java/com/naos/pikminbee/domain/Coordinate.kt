@@ -11,5 +11,12 @@ data class Coordinate(val latitude: Double, val longitude: Double) {
     companion object {
         fun parse(latitude: String, longitude: String): Coordinate? =
             runCatching { Coordinate(latitude.trim().toDouble(), longitude.trim().toDouble()) }.getOrNull()
+
+        /** Only GPS coordinates are accepted; never forward text to any geocoding API. */
+        fun parseCombined(text: String): Coordinate? {
+            val parts = text.trim().split(Regex("[,，\\s]+")).filter(String::isNotBlank)
+            if (parts.size != 2) return null
+            return parse(parts[0], parts[1])
+        }
     }
 }
