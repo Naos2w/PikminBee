@@ -14,6 +14,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -53,6 +54,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -103,11 +109,12 @@ import com.naos.pikminbee.ui.FlowerMapPick
 import com.naos.pikminbee.ui.FlowerVisionPanel
 import com.naos.pikminbee.ui.WifiControlPanel
 import com.naos.pikminbee.ui.BackgroundSessionPanel
+import com.naos.pikminbee.ui.PikminBeeThemeColors
 
 private val navy = Color(0xFF18263A)
 private val honey = Color(0xFF9F5E0C)
-private val lightGlass = Color.White.copy(alpha = 0.91f)
-private val darkGlass = Color(0xFF1E2B3C).copy(alpha = 0.91f)
+private val lightGlass = Color.White.copy(alpha = 0.975f)
+private val darkGlass = Color(0xFF1E2B3C).copy(alpha = 0.985f)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -143,6 +150,7 @@ private fun PikminBeeScreen() {
     var provider by remember { mutableStateOf(prefs.provider()) }
     var freeMapStyle by remember { mutableStateOf(prefs.freeMapStyle()) }
     var appearance by remember { mutableStateOf(prefs.appearance()) }
+    var showMapSettings by remember { mutableStateOf(false) }
     val dark = when (appearance) {
         MapAppearance.SYSTEM -> systemDark
         MapAppearance.LIGHT -> false
@@ -164,6 +172,7 @@ private fun PikminBeeScreen() {
     var latitudeText by remember { mutableStateOf(selected.latitude.toString()) }
     var longitudeText by remember { mutableStateOf(selected.longitude.toString()) }
     var tab by remember { mutableStateOf(ToolTab.TELEPORT) }
+    LaunchedEffect(tab) { controlsScroll.scrollTo(0) }
     var showWifiPanel by remember { mutableStateOf(false) }
     var places by remember { mutableStateOf(prefs.places()) }
     var message by remember { mutableStateOf("地圖點一下就能選擇位置") }
@@ -377,7 +386,7 @@ private fun PikminBeeScreen() {
     }
     BackHandler(enabled = mapExplore) { mapExplore = false }
 
-    MaterialTheme {
+    MaterialTheme(colorScheme = PikminBeeThemeColors.forDarkMode(dark)) {
         Box(Modifier.fillMaxSize().background(if (dark) Color(0xFF091321) else Color(0xFFF4F7FC))) {
             LocationMap(
                 provider = provider, dark = dark,
@@ -514,68 +523,104 @@ private fun PikminBeeScreen() {
                                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Text("DEV", fontSize = 11.sp, color = honey,
+                                Text("測試版", fontSize = 11.sp, color = honey,
                                     fontWeight = FontWeight.SemiBold)
                                 TextButton(onClick = ::fitCurrentRoute) {
-                                    Text("地圖檢視", fontSize = 12.sp)
+                                    Text("全螢幕地圖", fontSize = 12.sp)
                                 }
                             }
                         }
 
-                        Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                            MapBasemapPolicy.availableProviders(BuildConfig.HAS_GOOGLE_MAPS_KEY)
-                                .forEach { p ->
-                                    FilterChip(
-                                        selected = provider == p,
-                                        onClick = {
-                                            provider = p
-                                            prefs.setProvider(p)
-                                        },
-                                        label = {
-                                            Text(
-                                                if (p == MapProvider.OPEN_FREE_MAP)
-                                                    "OpenFreeMap · 免 Key" else "Google Maps",
-                                                fontSize = 12.sp,
-                                            )
-                                        },
-                                    )
-                                }
-                        }
-                        if (provider == MapProvider.OPEN_FREE_MAP) {
-                            Text(
-                                "免費公開底圖 · 不需要 Google API Key · 需網路連線",
-                                color = muted, fontSize = 11.sp,
-                            )
-                            Row(
-                                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(7.dp),
-                            ) {
-                                FreeMapStyle.entries.forEach { option ->
-                                    FilterChip(
-                                        selected = freeMapStyle == option,
-                                        onClick = {
-                                            freeMapStyle = option
-                                            prefs.setFreeMapStyle(option)
-                                        },
-                                        label = { Text(option.label, fontSize = 12.sp) },
-                                    )
-                                }
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    "底圖：" + if (provider == MapProvider.OPEN_FREE_MAP)
+                                        "OpenFreeMap · ${freeMapStyle.label}" else "Google Maps",
+                                    color = foreground, fontSize = 12.sp,
+                                )
+                                Text(
+                                    "介面：" + when (appearance) {
+                                        MapAppearance.SYSTEM -> "跟隨系統"
+                                        MapAppearance.LIGHT -> "淺色"
+                                        MapAppearance.DARK -> "深色"
+                                    },
+                                    color = muted, fontSize = 11.sp,
+                                )
+                            }
+                            TextButton(onClick = { showMapSettings = !showMapSettings }) {
+                                Text(
+                                    if (showMapSettings) "收起地圖設定" else "調整地圖設定",
+                                    fontSize = 12.sp,
+                                )
                             }
                         }
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            listOf(
-                                MapAppearance.SYSTEM to "自動",
-                                MapAppearance.LIGHT to "淺色",
-                                MapAppearance.DARK to "深色",
-                            ).forEach { (option, label) ->
-                                FilterChip(
-                                    selected = appearance == option,
-                                    onClick = {
-                                        appearance = option
-                                        prefs.setAppearance(option)
-                                    },
-                                    label = { Text(label, fontSize = 12.sp) },
+                        if (showMapSettings) {
+                            Text("底圖來源", color = foreground, fontSize = 12.sp)
+                            if (BuildConfig.HAS_GOOGLE_MAPS_KEY) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                                    MapBasemapPolicy.availableProviders(true).forEach { p ->
+                                        FilterChip(
+                                            selected = provider == p,
+                                            onClick = {
+                                                provider = p
+                                                prefs.setProvider(p)
+                                            },
+                                            label = {
+                                                Text(
+                                                    if (p == MapProvider.OPEN_FREE_MAP)
+                                                        "OpenFreeMap" else "Google Maps",
+                                                    fontSize = 12.sp,
+                                                )
+                                            },
+                                        )
+                                    }
+                                }
+                            } else {
+                                Text("OpenFreeMap · 免 Google Key", color = muted, fontSize = 12.sp)
+                            }
+                            if (provider == MapProvider.OPEN_FREE_MAP) {
+                                Text(
+                                    "地圖樣式（需網路連線）",
+                                    color = foreground, fontSize = 12.sp,
                                 )
+                                androidx.compose.foundation.layout.FlowRow(
+                                    Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                                    verticalArrangement = Arrangement.spacedBy(0.dp),
+                                    maxItemsInEachRow = 3,
+                                ) {
+                                    FreeMapStyle.entries.forEach { option ->
+                                        FilterChip(
+                                            selected = freeMapStyle == option,
+                                            onClick = {
+                                                freeMapStyle = option
+                                                prefs.setFreeMapStyle(option)
+                                            },
+                                            label = { Text(option.label, fontSize = 12.sp) },
+                                        )
+                                    }
+                                }
+                            }
+                            Text("介面主題", color = foreground, fontSize = 12.sp)
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                listOf(
+                                    MapAppearance.SYSTEM to "自動",
+                                    MapAppearance.LIGHT to "淺色",
+                                    MapAppearance.DARK to "深色",
+                                ).forEach { (option, label) ->
+                                    FilterChip(
+                                        selected = appearance == option,
+                                        onClick = {
+                                            appearance = option
+                                            prefs.setAppearance(option)
+                                        },
+                                        label = { Text(label, fontSize = 12.sp) },
+                                    )
+                                }
                             }
                         }
                     }
@@ -590,12 +635,19 @@ private fun PikminBeeScreen() {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                             ToolTab.entries.forEach { option ->
                                 Box(
-                                    modifier = Modifier.weight(1f).height(45.dp)
+                                    modifier = Modifier.weight(1f).height(48.dp)
                                         .background(
                                             if (tab == option) honey else Color.Transparent,
                                             RoundedCornerShape(16.dp)
                                         )
-                                        .clickable { tab = option },
+                                        .selectable(
+                                            selected = tab == option,
+                                            role = Role.Tab,
+                                            onClick = { tab = option },
+                                        )
+                                        .semantics {
+                                            stateDescription = if (tab == option) "已選擇" else "未選擇"
+                                        },
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Text(
@@ -608,6 +660,15 @@ private fun PikminBeeScreen() {
                             }
                         }
 
+                        Text(
+                            message,
+                            color = muted,
+                            fontSize = 12.sp,
+                            maxLines = 2,
+                            modifier = Modifier.fillMaxWidth().semantics {
+                                liveRegion = LiveRegionMode.Polite
+                            },
+                        )
                         when (tab) {
                             ToolTab.TELEPORT -> {
                                 Text("瞬移到指定位置", fontWeight = FontWeight.Bold, color = foreground)
@@ -643,13 +704,16 @@ private fun PikminBeeScreen() {
                                             }
                                         },
                                         modifier = Modifier.weight(1f).height(52.dp),
-                                        colors = ButtonDefaults.buttonColors(containerColor = honey)
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = honey, contentColor = Color.White,
+                                        )
                                     ) { Text("瞬移並停留") }
                                     OutlinedButton(
                                         onClick = {
                                             runCatching { context.startService(MockLocationService.stopIntent(context)) }
                                             message = "正在恢復真實定位"
                                         },
+                                        enabled = mockPosition != null,
                                         modifier = Modifier.weight(.9f).height(52.dp),
                                     ) { Text("恢復真實 GPS") }
                                 }
@@ -979,7 +1043,6 @@ private fun PikminBeeScreen() {
                                 requestLocation.launch(Manifest.permission.ACCESS_FINE_LOCATION)
                             },
                         )
-                        Text(message, fontSize = 12.sp, color = muted, maxLines = 2)
                     }
                 }
                 } // mapExplore: full map vs editor

@@ -1,5 +1,12 @@
 # PikminBee TODO
 
+## First POCO UI UAT — contrast / usability follow-up (2026-11-18)
+- [x] Reproduced visually from user-provided dark/light POCO screenshots: dark text on dark cards, unreadable unselected map-style chips, GPS coordinate fields and text buttons. Root cause was a user-selected dark appearance with a default light Material 3 colour scheme.
+- [x] Unified dark/light Material 3 colour scheme with WCAG AA 4.5:1 source tests for normal content and selected chips, denser high-opacity cards, explicit primary-button text colour.
+- [x] Prefer a compact header with collapsed map provider/style/theme settings, wrapped style chips, 48dp selected tabs and visible in-context operation messages.
+- [ ] Reinstall a **new staging UAT APK** and visually verify with the user on POCO: dark/light/system appearance, all four tabs, map controls, font scaling, keyboard, touch targets and notifications. Keep [UAT Issue #26](https://github.com/Naos2w/PikminBee/issues/26) open until device evidence confirms.
+- [ ] Source tests and GitHub CI do not constitute real-device screenshot acceptance.
+
 ## v0.1 — Foundation (first milestone)
 - [x] PikminBee branding: original bee icon and a nectar-collecting exploration concept, without game assets.
 - [x] Independent Android project under `personal/PikminBee`.
