@@ -2,6 +2,16 @@
 
 Three long-lived branches, because UAT is explicitly a separate release gate:
 
+## DEV / UAT semantic versions
+
+- **First UAT:** `0.1.1` (display version exactly, without an `-uat` suffix; Android app label remains PikminBee UAT).
+- **Each DEV progression:** increment only the third number: `0.1.2-dev` → `0.1.3-dev` → `0.1.4-dev`. The `-dev` suffix identifies the local DEV package; the numeric version is `0.1.2`, `0.1.3`, etc.
+- **Each new UAT cycle:** increment the second number and reset the third to 1: `0.1.1` → `0.2.1` → `0.3.1`. The next DEV number is automatically reset to `0.2.2-dev`, `0.3.2-dev`, etc.
+- Edit `gradle.properties` only through `python scripts/bump_version.py dev` for a new DEV revision, or `python scripts/bump_version.py uat` **when approving the next UAT cycle**. Run `python scripts/bump_version.py check` to inspect/validate without changing files. Commit the version change through the ordinary PR workflow; **merging a PR does not itself publish or promote an APK**.
+- DEV `versionCode` is encoded from `X.Y.Z`. Signed UAT `versionCode` is generated from the monotonically increasing GitHub Actions workflow run number, **must be higher than the previously distributed 1051**, and is deliberately separate from the visible semantic version. This allows upgrading the existing UAT installation even if its older displayed name was `0.3.0-dev-uat`.
+- Do not automatically bump semantic versions on routine source verification or CI reruns; only increase them when cutting a new DEV or UAT revision. Rebuilding the same UAT is allowed with an increased install `versionCode` while keeping the same visible `X.Y.Z`.
+
+
 | Base branch | Allowed PR head | Merge method | Intended use |
 |---|---|---|---|
 | `develop` | `feature/*`, `fix/*`, `chore/*` | Squash only | DEV |

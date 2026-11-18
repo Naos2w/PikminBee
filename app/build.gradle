@@ -10,6 +10,25 @@ if (secretsFile.exists()) {
 }
 def mapsKey = secrets.getProperty('GOOGLE_MAPS_API_KEY', '')
 
+// Visible semantic versions are separate from Android installation versionCodes.
+// Use scripts/bump_version.py dev|uat to advance each channel.
+def devVersion = providers.gradleProperty('pikminbeeDevVersion').orNull
+def uatVersion = providers.gradleProperty('pikminbeeUatVersion').orNull
+def semanticVersion = ~/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
+if (devVersion == null || !(devVersion ==~ semanticVersion) ||
+    uatVersion == null || !(uatVersion ==~ semanticVersion)) {
+    throw new GradleException('DEV and UAT versions must be X.Y.Z in gradle.properties')
+}
+def devParts = devVersion.tokenize('.').collect { it.toInteger() }
+def uatParts = uatVersion.tokenize('.').collect { it.toInteger() }
+if (devParts[0] != uatParts[0] || devParts[1] != uatParts[1] ||
+    devParts[2] <= uatParts[2]) {
+    throw new GradleException('DEV must be a later patch than UAT in the same minor release')
+}
+if (devParts.any { it >= 1000 }) {
+    throw new GradleException('Version components must be below 1000 for DEV versionCode')
+}
+
 // This separate, debug-only UAT package can coexist with older personal builds.
 // Its signing key comes from private GitHub Actions secrets, never from source.
 def isUat = System.getenv('PIKMINBEE_UAT') == 'true'
@@ -18,6 +37,17 @@ def uatStorePassword = System.getenv('PIKMINBEE_UAT_SIGN_PASSWORD')
 if (isUat && (!uatStoreFile || !uatStorePassword)) {
     throw new GradleException('UAT signing secrets are missing; refusing a rotating debug key')
 }
+// A fixed-signer UAT build shipped at versionCode 1051. The monotonically
+// increasing GitHub workflow run number must remain above that installation.
+def runNumber = System.getenv('GITHUB_RUN_NUMBER')
+if (isUat && !(runNumber ==~ /[1-9]\d*/)) {
+    throw new GradleException('Signed UAT builds require a positive GITHUB_RUN_NUMBER')
+}
+def uatInstallCode = isUat ? 1000L + runNumber.toLong() : 0L
+if (isUat && (uatInstallCode <= 1051L || uatInstallCode > 2100000000L)) {
+    throw new GradleException('UAT versionCode must exceed shipped 1051 and fit Android limits')
+}
+def devInstallCode = devParts[0] * 1_000_000 + devParts[1] * 1_000 + devParts[2]
 
 android {
     namespace 'com.naos.pikminbee'
@@ -27,8 +57,8 @@ android {
         applicationId 'com.naos.pikminbee'
         minSdk 28
         targetSdk 36
-        versionCode isUat ? 1000 + (System.getenv('GITHUB_RUN_NUMBER') ?: '1').toInteger() : 2
-        versionName '0.3.0-dev'
+        versionCode isUat ? uatInstallCode.toInteger() : devInstallCode
+        versionName isUat ? uatVersion : devVersion + "-dev"
         manifestPlaceholders = [
             googleMapsKey: mapsKey,
             appDisplayName: isUat ? 'PikminBee UAT' : 'PikminBee',
@@ -62,7 +92,6 @@ android {
         debug {
             if (isUat) {
                 applicationIdSuffix '.uat'
-                versionNameSuffix '-uat'
                 signingConfig signingConfigs.uat
             }
         }
