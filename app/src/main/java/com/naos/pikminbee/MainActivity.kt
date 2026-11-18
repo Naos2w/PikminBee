@@ -169,6 +169,7 @@ private fun PikminBeeScreen() {
     // A recorded flower is never silently treated as the route's starting point.
     var flowerStart by remember { mutableStateOf<Coordinate?>(null) }
     var flowerRoadPreview by remember { mutableStateOf(emptyList<Coordinate>()) }
+    var routeRoadPreview by remember { mutableStateOf(emptyList<Coordinate>()) }
     var mapExplore by remember { mutableStateOf(false) }
     var cameraSerial by remember { mutableIntStateOf(0) }
     var cameraRequest by remember { mutableStateOf<MapCameraRequest?>(null) }
@@ -196,6 +197,9 @@ private fun PikminBeeScreen() {
     val overlayVisible by LocationStatus.overlayVisible.collectAsState()
     LaunchedEffect(flowerStops, flowerStart, mockPosition) {
         flowerRoadPreview = emptyList()
+    }
+    LaunchedEffect(roadStops, mockPosition) {
+        routeRoadPreview = emptyList()
     }
     LaunchedEffect(flowerStops) {
         // Any draft mutation invalidates the previous marker index.
@@ -340,7 +344,7 @@ private fun PikminBeeScreen() {
         walkPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)
     val displayedRoad = when (tab) {
         ToolTab.FLOWERS -> if (activeFlowerWalk) roadLine else flowerRoadPreview
-        ToolTab.ROUTE -> if (activeRouteWalk) roadLine else emptyList()
+        ToolTab.ROUTE -> if (activeRouteWalk) roadLine else routeRoadPreview
         else -> emptyList()
     }
     fun chooseWalkSpeed(next: WalkSpeedPreset) {
@@ -551,8 +555,11 @@ private fun PikminBeeScreen() {
                     else -> emptyList()
                 },
                 road = displayedRoad,
-                previewRoad = tab == ToolTab.FLOWERS && !activeFlowerWalk &&
-                    flowerRoadPreview.isNotEmpty(),
+                previewRoad = when (tab) {
+                    ToolTab.FLOWERS -> !activeFlowerWalk && flowerRoadPreview.isNotEmpty()
+                    ToolTab.ROUTE -> !activeRouteWalk && routeRoadPreview.isNotEmpty()
+                    else -> false
+                },
                 freeMapStyle = freeMapStyle,
                 cameraRequest = cameraRequest,
                 mapExplore = mapExplore,
@@ -729,6 +736,15 @@ private fun PikminBeeScreen() {
                                     onClear = { prefs.saveRouteDraft(emptyList()) },
                                     onMessage = { message = it },
                                     onAskLocation = { requestLocation.launch(Manifest.permission.ACCESS_FINE_LOCATION) },
+                                    onPreviewRoad = { geometry ->
+                                        routeRoadPreview = geometry
+                                        if (geometry.size >= 2) {
+                                            moveMapCamera(MapCameraGeometry.forRoute(
+                                                mockPosition ?: roadStops.firstOrNull() ?: selected,
+                                                roadStops, geometry,
+                                            ))
+                                        }
+                                    },
                                 )
                             }
                             ToolTab.FLOWERS -> {

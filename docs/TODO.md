@@ -1,5 +1,17 @@
 # PikminBee TODO
 
+## Approved POCO UI preview — November 18, 2026
+- [ ] Implement the approved light and dark Liquid Glass design, with light / dark / follow-system switch, readable text, compact map controls and accessible contrast; screenshot preview alone is not implementation evidence.
+- [ ] Repair the in-app 「開啟懸浮控制」 action: check overlay permission, guide to system settings when missing and confirm the bee overlay actually appears and can expand; do not require an active mock route merely to show controls.
+- [ ] Investigate why `com.naos.pikminbee.uat` does not appear as an eligible mock-location App on POCO; verify the installed manifest and Android system selection list on-device.
+- [ ] Distinguish ordered road waypoints with 1 → 2 → 3 markers, start/end and travel direction rather than identical red pins; show a separate current-position indicator.
+- [ ] First-launch permission guide must always offer a visible 「稍後設定／略過」 map-only path; no false assertion that mock GPS works before required permissions pass.
+- [ ] POCO device acceptance for themes, overlays, GPS, route previews and accessibility; screenshots and source tests alone are not acceptance.
+- [x] Source: road route preview shows the planned pedestrian distance and estimated duration, recalculated when walking speed changes; no straight-line estimate or extra routing request on speed toggle. Local Android unit tests + lint passed; POCO on-device UAT is still required.
+
+## Next-phase enhancement — resting behaviour
+- [ ] Research Locwarp-like automatic rest/break options and their relation to existing manual pause/resume. Decide trigger, duration, restart and persistence rules in the next phase; do not include resting time in the present ETA or silently change route playback.
+
 ## v0.3 map-first POCO UAT — November 18, 2026
 - [x] Map-first home: native MapLibre map as the main interaction area, with a top coordinate-only paste/copy bar, a current-location camera button and mode navigation in a hamburger drawer.
 - [x] Explicit coordinate parsing; tap the map or paste GPS coordinates to select a point without teleport. Route waypoints require explicit confirmation; no geocoding or additional map API.
