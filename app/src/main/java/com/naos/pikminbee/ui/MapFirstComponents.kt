@@ -23,6 +23,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -40,14 +41,14 @@ fun MapGlass(dark: Boolean, modifier: Modifier = Modifier, content: @Composable 
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(25.dp),
-        color = if (dark) Color(0xF0181B25) else Color(0xF6FFFFFF),
+        color = if (dark) Color(0xC521334D) else Color(0xD8F7FAFF),
         contentColor = if (dark) Color(0xFFF5F7FF) else Color(0xFF1B2536),
-        border = BorderStroke(
-            1.dp,
-            if (dark) Color(0x8099A6BD) else Color(0xD1CBD3E2),
-        ),
-        shadowElevation = 8.dp,
-        tonalElevation = 2.dp,
+        border = BorderStroke(1.2.dp, Brush.linearGradient(
+            if (dark) listOf(Color(0xDAFFFFFF), Color(0x559FC9FF), Color(0x95FFFFFF))
+            else listOf(Color.White, Color(0xA7B8D3FF), Color(0xFFFFFFFF)),
+        )),
+        shadowElevation = 14.dp,
+        tonalElevation = 0.dp,
         content = content,
     )
 }
@@ -121,8 +122,8 @@ fun CurrentLocationMapButton(
         modifier = modifier.size(54.dp).semantics {
             contentDescription = "地圖移至目前位置，不會瞬移"
         },
-        containerColor = if (dark) Color(0xED171B27) else Color(0xF4FFFFFF),
-        contentColor = if (dark) Color(0xFFE6CBFF) else Color(0xFF53417B),
+        containerColor = if (dark) Color(0xD02B4165) else Color(0xDEF5F9FF),
+        contentColor = if (dark) Color(0xFFD4E8FF) else Color(0xFF3265B7),
     ) { Text("◎", fontSize = 29.sp, fontWeight = FontWeight.Bold) }
 }
 

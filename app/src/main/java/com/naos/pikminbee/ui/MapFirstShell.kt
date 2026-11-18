@@ -66,7 +66,9 @@ fun MapFirstShell(
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val sheet = rememberBottomSheetScaffoldState()
     val scope = rememberCoroutineScope()
-    val darkGlass = Color(0xF51A1C25)
+    val darkGlass = Color(0xD11D2D49)
+    val foreground = if (dark) Color(0xFFF0F6FF) else Color(0xFF1B2A45)
+    val muted = if (dark) Color(0xFFC4D5ED) else Color(0xFF526884)
     val maxSheetBodyDp = (LocalConfiguration.current.screenHeightDp - 190).coerceIn(175, 540)
     val labels = listOf("瞬移", "路徑", "尋花", "收藏")
     LaunchedEffect(modeIndex) { sheet.bottomSheetState.partialExpand() }
@@ -77,19 +79,23 @@ fun MapFirstShell(
         drawerContent = {
             ModalDrawerSheet(
                 modifier = Modifier.width(282.dp),
-                drawerContainerColor = if (dark) Color(0xFF141720) else Color(0xFFFAFAFD),
+                drawerContainerColor = if (dark) Color(0xE71B2B48) else Color(0xEEF4F8FF),
             ) {
                 Column(
                     Modifier.padding(horizontal = 12.dp, vertical = 20.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    Text("PikminBee", fontWeight = FontWeight.Bold, fontSize = 24.sp,
-                        modifier = Modifier.padding(12.dp))
-                    Text("操作模式", fontSize = 12.sp,
+                    Text("🐝 PikminBee", fontWeight = FontWeight.Bold, fontSize = 24.sp,
+                        color = foreground, modifier = Modifier.padding(12.dp))
+                    Text("操作模式", fontSize = 12.sp, color = muted,
                         modifier = Modifier.padding(start = 12.dp, bottom = 9.dp))
                     labels.forEachIndexed { index, title ->
                         NavigationDrawerItem(
-                            label = { Text(title) },
+                            label = { Text(title, color = foreground) },
+                            icon = {
+                                Text(listOf("⌖", "①→②", "✿", "☆")[index], color = if (modeIndex == index)
+                                    Color(0xFF8AB6FF) else muted, fontSize = 16.sp)
+                            },
                             selected = modeIndex == index,
                             onClick = {
                                 onMode(index)
@@ -99,7 +105,7 @@ fun MapFirstShell(
                     }
                     HorizontalDivider(Modifier.padding(vertical = 10.dp))
                     NavigationDrawerItem(
-                        label = { Text("⚙ 共用設定") },
+                        label = { Text("⚙ 共用設定", color = foreground) },
                         selected = false,
                         onClick = {
                             onSettings()
@@ -107,7 +113,7 @@ fun MapFirstShell(
                         },
                     )
                     NavigationDrawerItem(
-                        label = { Text("✓ 權限檢查") },
+                        label = { Text("✓ 權限檢查", color = foreground) },
                         selected = false,
                         onClick = {
                             onPermissions()
@@ -116,7 +122,7 @@ fun MapFirstShell(
                     )
                     Text(
                         "點地圖或貼上經緯度只會選擇位置，不會自動瞬移。",
-                        fontSize = 12.sp,
+                        color = muted, fontSize = 12.sp,
                         modifier = Modifier.padding(12.dp),
                     )
                 }
@@ -134,7 +140,7 @@ fun MapFirstShell(
                     scaffoldState = sheet,
                     containerColor = Color.Transparent,
                     sheetPeekHeight = 98.dp,
-                    sheetContainerColor = if (dark) darkGlass else Color(0xF7FFFFFF),
+                    sheetContainerColor = if (dark) darkGlass else Color(0xDBF7FAFF),
                     sheetContentColor = if (dark) Color(0xFFF4F7FF) else Color(0xFF172538),
                     sheetShape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
                     sheetDragHandle = {

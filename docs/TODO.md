@@ -4,6 +4,18 @@
 - [x] Configure UAT display versions starting at `0.1.1`; on a **new** UAT cycle increment minor and reset patch to 1 (`0.2.1`, `0.3.1`). DEV increments patch within the current minor (`0.1.2-dev`, `0.1.3-dev`, then `0.2.2-dev`).
 - [x] Preserve the fixed UAT signer and monotonic Android `versionCode` independently of the visible version name. First signed build with the new policy still requires promotion to `staging` and an explicit manual package request; do not publish automatically.
 
+## Approved POCO UI preview — November 18, 2026
+- [x] Source: retained light / dark / system appearance and updated the glass-like translucent controls, gradients, drawer text contrast and theme-aware overlay. Exact preview parity and visual readability remain **POCO UAT pending** (no native backdrop blur on live map tiles).
+- [x] Source: 「開啟懸浮控制」 now checks system overlay permission, launches system settings when missing, attempts to show on return and no longer requires a mock GPS session. Confirm real HyperOS popup and background longevity on POCO.
+- [x] Source: added debug/UAT-only `ACCESS_MOCK_LOCATION` manifest marker; verified `aapt dump permissions` lists it in the built DEV APK. Actual HyperOS UAT picker visibility still requires device verification.
+- [x] Source: ordered green / blue / red waypoint number icons for MapLibre and Google Maps, map sequence labels and independent phone blue-dot / virtual bee marker. POCO visual and map-marker touch interaction tests pending.
+- [x] Source: permission guide now shows a top-row 「先略過」 action that enters map-only mode without claiming mock GPS eligibility; the explicit permission checks still gate actual mock location.
+- [ ] POCO device acceptance for themes, overlays, GPS, route previews and accessibility; screenshots and source tests alone are not acceptance.
+- [x] Source: road route preview shows the planned pedestrian distance and estimated duration, recalculated when walking speed changes; no straight-line estimate or extra routing request on speed toggle. Local Android unit tests + lint passed; POCO on-device UAT is still required.
+
+## Next-phase enhancement — resting behaviour
+- [ ] Research Locwarp-like automatic rest/break options and their relation to existing manual pause/resume. Decide trigger, duration, restart and persistence rules in the next phase; do not include resting time in the present ETA or silently change route playback.
+
 ## v0.3 map-first POCO UAT — November 18, 2026
 - [x] Map-first home: native MapLibre map as the main interaction area, with a top coordinate-only paste/copy bar, a current-location camera button and mode navigation in a hamburger drawer.
 - [x] Explicit coordinate parsing; tap the map or paste GPS coordinates to select a point without teleport. Route waypoints require explicit confirmation; no geocoding or additional map API.
