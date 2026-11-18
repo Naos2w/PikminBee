@@ -10,6 +10,15 @@ if (secretsFile.exists()) {
 }
 def mapsKey = secrets.getProperty('GOOGLE_MAPS_API_KEY', '')
 
+// This separate, debug-only UAT package can coexist with older personal builds.
+// Its signing key comes from private GitHub Actions secrets, never from source.
+def isUat = System.getenv('PIKMINBEE_UAT') == 'true'
+def uatStoreFile = System.getenv('PIKMINBEE_UAT_KEYSTORE_FILE')
+def uatStorePassword = System.getenv('PIKMINBEE_UAT_SIGN_PASSWORD')
+if (isUat && (!uatStoreFile || !uatStorePassword)) {
+    throw new GradleException('UAT signing secrets are missing; refusing a rotating debug key')
+}
+
 android {
     namespace 'com.naos.pikminbee'
     compileSdk 37
@@ -18,9 +27,12 @@ android {
         applicationId 'com.naos.pikminbee'
         minSdk 28
         targetSdk 36
-        versionCode 2
-        versionName '0.2.0-dev'
-        manifestPlaceholders = [googleMapsKey: mapsKey]
+        versionCode isUat ? 1000 + (System.getenv('GITHUB_RUN_NUMBER') ?: '1').toInteger() : 2
+        versionName '0.3.0-dev'
+        manifestPlaceholders = [
+            googleMapsKey: mapsKey,
+            appDisplayName: isUat ? 'PikminBee UAT' : 'PikminBee',
+        ]
         buildConfigField 'boolean', 'HAS_GOOGLE_MAPS_KEY', mapsKey.isBlank() ? 'false' : 'true'
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
     }
@@ -35,8 +47,25 @@ android {
         targetCompatibility JavaVersion.VERSION_17
     }
 
+    signingConfigs {
+        if (isUat) {
+            uat {
+                storeFile file(uatStoreFile)
+                storePassword uatStorePassword
+                keyAlias 'pikminbee-uat'
+                keyPassword uatStorePassword
+            }
+        }
+    }
+
     buildTypes {
-        debug { }
+        debug {
+            if (isUat) {
+                applicationIdSuffix '.uat'
+                versionNameSuffix '-uat'
+                signingConfig signingConfigs.uat
+            }
+        }
         release {
             minifyEnabled false
         }

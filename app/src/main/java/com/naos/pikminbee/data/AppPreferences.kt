@@ -70,6 +70,13 @@ class AppPreferences(private val context: Context) {
         ))
     }
 
+    /** The first-launch wizard never requests permissions automatically. */
+    fun setupCompleted(): Boolean = prefs.getBoolean("setup_completed", false)
+
+    fun setSetupCompleted(done: Boolean) {
+        prefs.edit().putBoolean("setup_completed", done).apply()
+    }
+
     fun walkSpeedPreset(): WalkSpeedPreset = WalkSpeedState.selected.value
     fun defaultWalkSpeedPreset(): WalkSpeedPreset = WalkSpeedState.preferred.value
 
