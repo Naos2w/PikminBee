@@ -3,17 +3,20 @@ package com.naos.pikminbee.ui
 import android.content.Context
 import android.graphics.Color
 import android.graphics.PixelFormat
+import android.os.Build
 import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import com.naos.pikminbee.domain.WalkMode
 import com.naos.pikminbee.domain.WalkPhase
 import com.naos.pikminbee.domain.WalkSpeedPreset
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 /** Overlay owned by the GPS foreground service, not a second independent location engine. */
 class FloatingControls(
@@ -34,7 +37,7 @@ class FloatingControls(
 
     private val windows = context.getSystemService(WindowManager::class.java)
     private var root: LinearLayout? = null
-    private var panel: LinearLayout? = null
+    private var panel: ScrollView? = null
     private var stateLabel: TextView? = null
     private var pauseAction: TextView? = null
     private var stopAction: TextView? = null
@@ -45,8 +48,80 @@ class FloatingControls(
     private var currentSpeed: WalkSpeedPreset = WalkSpeedPreset.DEFAULT
     private var params: WindowManager.LayoutParams? = null
     private var expanded = false
+    private val placementPrefs = context.getSharedPreferences(
+        "pikminbee_floating_placement", Context.MODE_PRIVATE
+    )
+    private val density: Float get() = context.resources.displayMetrics.density
 
-    private fun dp(value: Int): Int = (context.resources.displayMetrics.density * value).toInt()
+    private fun dp(value: Int): Int = (density * value).toInt()
+
+    private fun screenSize(): Pair<Int, Int> {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val bounds = windows.currentWindowMetrics.bounds
+            if (bounds.width() > 0 && bounds.height() > 0)
+                return bounds.width() to bounds.height()
+        }
+        val metrics = context.resources.displayMetrics
+        return metrics.widthPixels to metrics.heightPixels
+    }
+
+    private fun savePlacement(layout: WindowManager.LayoutParams) {
+        placementPrefs.edit()
+            .putInt("x_from_right_dp", (layout.x / density).roundToInt())
+            .putInt("y_from_top_dp", (layout.y / density).roundToInt())
+            .apply()
+    }
+
+    private fun bounded(viewWidth: Int, viewHeight: Int, proposed: OverlayPlacement): OverlayPlacement {
+        val (width, height) = screenSize()
+        return proposed.clamp(
+            screenWidth = width, screenHeight = height,
+            panelWidth = viewWidth.coerceAtLeast(0), panelHeight = viewHeight.coerceAtLeast(0),
+            horizontalMargin = dp(10), topMargin = dp(36), bottomMargin = dp(28),
+        )
+    }
+
+    private fun keepVisible(view: View, layout: WindowManager.LayoutParams) {
+        if (view.width <= 0 || view.height <= 0) return
+        val now = OverlayPlacement(layout.x, layout.y)
+        val adjusted = bounded(view.width, view.height, now)
+        if (adjusted != now) {
+            layout.x = adjusted.x
+            layout.y = adjusted.y
+            runCatching { windows.updateViewLayout(view, layout) }
+            savePlacement(layout)
+        }
+    }
+
+    private fun fitExpandedPanelToScreen() {
+        val scroll = panel ?: return
+        val child = scroll.getChildAt(0) ?: return
+        val (width, height) = screenSize()
+        val availableWidth = (width - dp(20)).coerceAtLeast(dp(120))
+        val availableHeight = (height - dp(36) - dp(28) - dp(72)).coerceAtLeast(dp(100))
+        child.measure(
+            View.MeasureSpec.makeMeasureSpec(availableWidth, View.MeasureSpec.AT_MOST),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+        )
+        val targetHeight = child.measuredHeight.coerceAtMost(availableHeight)
+        val current = scroll.layoutParams as? LinearLayout.LayoutParams ?: return
+        if (current.height != targetHeight) {
+            current.height = targetHeight
+            scroll.layoutParams = current
+        }
+    }
+
+    /** Called on orientation change; never creates a service or resumes walking. */
+    fun onScreenChanged() {
+        params?.let { placement ->
+            root?.let { view ->
+                view.post {
+                    if (expanded) fitExpandedPanelToScreen()
+                    keepVisible(view, placement)
+                }
+            }
+        }
+    }
 
     private fun glass() = GradientDrawable().apply {
         cornerRadius = dp(22).toFloat()
@@ -80,7 +155,6 @@ class FloatingControls(
         container.addView(bee)
         val actions = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            visibility = View.GONE
         }
         val description = action("PikminBee · 原地停留") { }
         description.setOnClickListener(null)
@@ -134,7 +208,17 @@ class FloatingControls(
         val row3 = LinearLayout(context)
         row3.addView(action("恢復真實 GPS") { sendAction(RESTORE_REAL) })
         actions.addView(row3)
-        container.addView(actions)
+        val scroll = ScrollView(context).apply {
+            visibility = View.GONE
+            isVerticalScrollBarEnabled = true
+            isFillViewport = false
+            addView(actions)
+        }
+        container.addView(scroll)
+        val stored = OverlayPlacement.fromStoredDp(
+            placementPrefs.getInt("x_from_right_dp", OverlayPlacement.DEFAULT_X_DP),
+            placementPrefs.getInt("y_from_top_dp", OverlayPlacement.DEFAULT_Y_DP),
+        )
         val layout = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -143,8 +227,11 @@ class FloatingControls(
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.END
-            x = dp(18)
-            y = dp(250)
+            x = dp(stored.x)
+            y = dp(stored.y)
+        }
+        container.addOnLayoutChangeListener { view, _, _, _, _, _, _, _, _ ->
+            keepVisible(view, layout)
         }
 
         var startX = 0
@@ -167,24 +254,35 @@ class FloatingControls(
                     val dy = event.rawY - initialY
                     if (abs(dx) > dp(8) || abs(dy) > dp(8)) moved = true
                     if (moved) {
-                        layout.x = (startX - dx).toInt().coerceAtLeast(0)
-                        layout.y = (startY + dy).toInt().coerceAtLeast(0)
+                        val next = bounded(
+                            container.width, container.height,
+                            OverlayPlacement((startX - dx).toInt(), (startY + dy).toInt()),
+                        )
+                        layout.x = next.x
+                        layout.y = next.y
                         runCatching { windows.updateViewLayout(container, layout) }
                     }
                     true
                 }
                 MotionEvent.ACTION_UP -> {
-                    if (moved) true else {
+                    if (moved) {
+                        savePlacement(layout)
+                        true
+                    } else {
                         view.performClick()
                         true
                     }
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    if (moved) savePlacement(layout)
+                    true
                 }
                 else -> false
             }
         }
         windows.addView(container, layout)
         root = container
-        panel = actions
+        panel = scroll
         stateLabel = description
         pauseAction = pause
         stopAction = stop
@@ -193,12 +291,19 @@ class FloatingControls(
         defaultSpeedAction = setDefault
         params = layout
         expanded = false
+        container.post { keepVisible(container, layout) }
     }
 
     private fun toggleExpanded() {
         expanded = !expanded
+        if (expanded) fitExpandedPanelToScreen()
         panel?.visibility = if (expanded) View.VISIBLE else View.GONE
-        params?.let { params -> root?.let { windows.updateViewLayout(it, params) } }
+        params?.let { placement ->
+            root?.let { view ->
+                runCatching { windows.updateViewLayout(view, placement) }
+                view.post { keepVisible(view, placement) }
+            }
+        }
     }
 
     fun update(

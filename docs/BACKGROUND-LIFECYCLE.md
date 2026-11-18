@@ -20,6 +20,13 @@
 - 服務被 Android 回收後，**仍只可恢復最後的原地位置**；不會自動重跑尋花、恢復浮窗或重開 Wi-Fi。路點草稿存在 App 資料，並非會自動執行的排程。
 - 真正的操作手感、懸浮窗版面、失敗提示和 Android／HyperOS 背景限制，仍須 POCO 實機 UAT 驗證，程式碼通過測試不表示實機已通過。
 
+## 懸浮蜜蜂位置記憶與小螢幕操作（DEV 原始碼功能）
+
+- 使用者拖曳 🐝 後，PikminBee 把懸浮窗**距螢幕右邊及上方的偏移量（dp）**保存於 App 私有 SharedPreferences；下一次明確開啟浮窗時還原，無須每次重新擺放。儲存的是視窗位置，**不是 GPS 座標**。
+- 視窗拖曳、展開與收合會檢查螢幕可用尺寸並限制位置，避免從左右邊界或底部跑出操作範圍。展開的操作區可垂直捲動；螢幕旋轉後會重新量測面板高度與可見位置。
+- 當螢幕比面板本身還小，無法保證所有內容同時顯示；使用可捲動操作區保留按鈕可用性。POCO 真實解析度、系統狀態列與手勢導覽安全區仍需 UAT。
+- 此功能**不會繞過 Android force-stop、清除多工或背景啟動限制**；只在使用者允許懸浮視窗且已啟用模擬定位時，沿用現有手動開啟行為。
+
 ## Checkpoint details
 
 - Only the **last virtual WGS84 coordinate and timestamp** are stored in private app preferences; no route geometry, flower details, browser token or Wi-Fi PIN are in the checkpoint.

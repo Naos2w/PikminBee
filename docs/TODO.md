@@ -24,6 +24,8 @@
 - [x] Foreground GPS service + notification actions (pause/resume/stop/restore), 5-second last-coordinate journal and safe START_STICKY null-Intent recovery as PARKED; [ ] on-device lifecycle/restart UAT.
 - [x] In-app HyperOS/POCO background guidance, standard Android app settings link and user-triggered permission flow; force-stop/reboot limitations documented in [BACKGROUND-LIFECYCLE.md](BACKGROUND-LIFECYCLE.md). [ ] POCO/UAT verification.
 
+- [x] Draggable bee overlay placement is persisted in private App preferences and clamped to the visible viewport when moved, expanded, or reopened. [x] The expanded control panel scrolls on smaller screens, with display-orientation reflow. [ ] Real POCO window insets, orientation and drag/restore UAT; no guarantee of background survival after force-stop.
+
 ## v0.4 — LAN browser controller
 - [x] Opt-in private-Wi-Fi IPv4 HTTP endpoint (off by default, bound only to Wi-Fi IP); [ ] POCO network UAT.
 - [x] Six-digit PIN + on-phone device approval, memory-only expiring sessions, IP binding, Origin/Host checks, rate limits and Wi-Fi-loss shutdown; [ ] security and cross-device UAT.
