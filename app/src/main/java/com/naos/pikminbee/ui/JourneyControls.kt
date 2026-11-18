@@ -14,6 +14,8 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -27,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.naos.pikminbee.domain.Coordinate
+import com.naos.pikminbee.domain.FlowerMapDraft
 import com.naos.pikminbee.domain.WalkMode
 import com.naos.pikminbee.domain.WalkPhase
 import com.naos.pikminbee.domain.WalkingGeometry
@@ -42,7 +45,7 @@ import kotlinx.coroutines.launch
 fun JourneyControls(
     mode: WalkMode,
     stops: List<Coordinate>,
-    origin: Coordinate,
+    origin: Coordinate?,
     activeMode: WalkMode?,
     phase: WalkPhase,
     foreground: Color,
@@ -51,6 +54,7 @@ fun JourneyControls(
     onClear: () -> Unit,
     onMessage: (String) -> Unit,
     onAskLocation: () -> Unit,
+    onPreviewRoad: (List<Coordinate>) -> Unit = {},
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -59,6 +63,70 @@ fun JourneyControls(
     var speed by remember { mutableStateOf(1.4) }
     var loop by remember { mutableStateOf(flower) }
     var planning by remember { mutableStateOf(false) }
+    var requestRevision by remember { mutableIntStateOf(0) }
+    var previewDistance by remember { mutableStateOf<Double?>(null) }
+    LaunchedEffect(stops, origin, loop, mode) {
+        requestRevision++
+        previewDistance = null
+        if (flower) onPreviewRoad(emptyList())
+    }
+    fun requestedPoints(start: Coordinate): List<Coordinate> =
+        if (flower) FlowerMapDraft.routePoints(start, stops, loop) else buildList {
+            add(start)
+            stops.forEach { stop ->
+                if (WalkingGeometry.distanceMeters(last(), stop) > 1.0) add(stop)
+            }
+        }
+
+    fun previewOrStart(startWalking: Boolean) {
+        if (planning) return
+        val start = origin ?: run {
+            onMessage("請先在地圖選位置，並設為尋花起點")
+            return
+        }
+        if (startWalking && ContextCompat.checkSelfPermission(
+                context, Manifest.permission.ACCESS_FINE_LOCATION
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            onAskLocation()
+            return
+        }
+        val points = try { requestedPoints(start) } catch (e: IllegalArgumentException) {
+            onMessage(e.message ?: "路點不正確")
+            return
+        }
+        if (points.size !in 2..16) {
+            onMessage("請選取不同於起點的路點")
+            return
+        }
+        val revision = requestRevision
+        planning = true
+        onMessage("正在查詢步行道路，失敗不會改成直線行走")
+        coroutineScope.launch {
+            try {
+                val geometry = ValhallaPlanner.plan(points)
+                if (revision != requestRevision) return@launch
+                if (flower) {
+                    onPreviewRoad(geometry)
+                    previewDistance = WalkingGeometry.lengthMeters(geometry)
+                }
+                if (startWalking) {
+                    ContextCompat.startForegroundService(
+                        context, MockLocationService.routeIntent(
+                            context, geometry, speed, mode, loop = flower && loop
+                        ),
+                    )
+                    onMessage("道路路線已取得，開始移動（${geometry.size} 個節點）")
+                } else {
+                    onMessage("已在地圖預覽步行道路，尚未開始移動")
+                }
+            } catch (e: Exception) {
+                onMessage(e.message ?: "規劃步行道路失敗")
+            } finally {
+                planning = false
+            }
+        }
+    }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
@@ -67,11 +135,11 @@ fun JourneyControls(
             color = foreground,
         )
         Text(
-            if (flower) "在地圖依序標記花點，沿步行道路巡迴。遊戲大花自動發現尚待資料驗證。"
+            if (flower) "地圖先選點並確認加入，預覽道路後再開始；花點來源不代表遊戲即時狀態。"
             else "在地圖依序點選目的地，開始後才查詢行人道路，避免浪費路線服務。",
             color = muted, fontSize = 12.sp
         )
-        Text("已加入 ${stops.size} 個路點 · 起點 ${origin.label()}",
+        Text("已加入 ${stops.size} 個路點 · 起點 ${origin?.label() ?: "尚未設定"}",
             color = muted, fontSize = 12.sp)
         Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
             listOf(1.0, 1.4, 2.0).forEach { s ->
@@ -88,43 +156,26 @@ fun JourneyControls(
             )
         }
 
+        if (flower) {
+            OutlinedButton(
+                onClick = { previewOrStart(startWalking = false) },
+                enabled = !planning && stops.isNotEmpty() && origin != null &&
+                    (!active || phase !in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)),
+                modifier = Modifier.fillMaxWidth().height(46.dp),
+            ) { Text(if (planning) "道路規劃中…" else "先預覽步行道路（不移動）", fontSize = 12.sp) }
+            previewDistance?.let { metres ->
+                Text(
+                    "預覽步行路線約 " + "%.0f".format(java.util.Locale.US, metres) +
+                        " 公尺 · 目前未因此開始行走",
+                    color = muted, fontSize = 12.sp,
+                )
+            }
+        }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Button(
-                onClick = {
-                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION)
-                        != PackageManager.PERMISSION_GRANTED) {
-                        onAskLocation()
-                    } else {
-                        val points = buildList {
-                            add(origin)
-                            stops.forEach { point ->
-                                if (WalkingGeometry.distanceMeters(last(), point) > 1.0) add(point)
-                            }
-                            if (flower && loop && WalkingGeometry.distanceMeters(last(), origin) > 1.0) add(origin)
-                        }
-                        if (points.size !in 2..16) {
-                            onMessage("請至少選取一個不同地點；循環模式最多 14 個花點")
-                        } else {
-                            planning = true
-                            onMessage("正在查詢步行道路，路線失敗不會改成直線行走")
-                            coroutineScope.launch {
-                                try {
-                                    val geometry = ValhallaPlanner.plan(points)
-                                    ContextCompat.startForegroundService(
-                                        context, MockLocationService.routeIntent(context, geometry, speed, mode,
-                                            loop = flower && loop)
-                                    )
-                                    onMessage("已取得步行道路，開始移動（${geometry.size} 個節點）")
-                                } catch (e: Exception) {
-                                    onMessage(e.message ?: "規劃步行道路失敗")
-                                } finally {
-                                    planning = false
-                                }
-                            }
-                        }
-                    }
-                },
-                enabled = !planning && stops.isNotEmpty(),
+                onClick = { previewOrStart(startWalking = true) },
+                enabled = !planning && stops.isNotEmpty() && origin != null &&
+                    (!active || phase !in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)),
                 modifier = Modifier.weight(1.3f).height(46.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF9F5E0C)),
             ) { Text(if (planning) "規劃中…" else "開始行走", fontSize = 12.sp) }
