@@ -69,7 +69,7 @@ fun BeeSettingsScreen(
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = onBack) { Text("‹ 返回地圖") }
-            Text("共用設定", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = foreground)
+            Text("設定", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = foreground)
             Text("UAT", color = muted, fontSize = 11.sp)
         }
         MapGlass(dark, Modifier.fillMaxWidth()) {
@@ -177,6 +177,7 @@ fun BeeSettingsScreen(
                 )
             }
         }
+        HealthConnectSettings(dark = dark, onMessage = onMessage)
         Text("PikminBee UAT · 僅使用者明確操作才會啟動模擬定位",
             fontSize = 12.sp, color = muted)
     }

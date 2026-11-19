@@ -9,8 +9,18 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import android.view.inputmethod.InputMethodManager
+import android.os.Handler
+import android.os.Looper
+import com.naos.pikminbee.health.PhysicalStepsStatus
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.EditText
+import android.text.InputType
+import com.naos.pikminbee.location.OverlayMapSelection
+import com.naos.pikminbee.health.EstimatedWalkStatus
+import com.naos.pikminbee.domain.Coordinate
+import com.naos.pikminbee.data.SavedRouteState
 import android.widget.TextView
 import com.naos.pikminbee.data.AppPreferences
 import com.naos.pikminbee.data.MapAppearance
@@ -25,8 +35,10 @@ import kotlin.math.roundToInt
 class FloatingControls(
     private val context: Context,
     private val sendAction: (String) -> Unit,
+    private val onTeleport: (Coordinate) -> Unit,
+    private val onStartRoute: () -> Unit,
+    private val onOpenSettings: () -> Unit,
     private val onSpeedSelected: (WalkSpeedPreset) -> Unit,
-    private val onSetDefaultSpeed: (WalkSpeedPreset) -> Unit,
     private val openMap: () -> Unit,
 ) {
     companion object {
@@ -38,16 +50,40 @@ class FloatingControls(
         const val HIDE = "hide"
     }
 
+    private enum class Mode(val display: String, val symbol: String) {
+        TELEPORT("瞬移", "⌖"), ROUTE("路徑", "①→②"),
+        FLOWERS("尋花", "✿"), SAVED("收藏", "☆")
+    }
+    private var selectedMode = Mode.ROUTE
+    private var modeContent: LinearLayout? = null
+    private var modeTabs: LinearLayout? = null
+    private var stepsSummary: TextView? = null
+
+    private fun showMessage(text: String) {
+        stateLabel?.text = text
+    }
+
     private val windows = context.getSystemService(WindowManager::class.java)
+    private val stepsHandler = Handler(Looper.getMainLooper())
+    private val stepRefresh = object : Runnable {
+        override fun run() {
+            updateStepSummary()
+            if (root != null) stepsHandler.postDelayed(this, 5_000L)
+        }
+    }
+    private fun updateStepSummary() {
+        val virtualSteps = EstimatedWalkStatus.state.value.estimatedSteps
+        val physical = PhysicalStepsStatus.state.value
+        stepsSummary?.text = if (physical.tracking || physical.todaySteps > 0) {
+            "⌁ 虛擬估算 $virtualSteps 步  ·  本機實際感測 ${physical.todaySteps} 步｜♡ HC 在設定"
+        } else "⌁ 虛擬估算 $virtualSteps 步 · ♡ Health Connect 在設定"
+    }
     private var root: LinearLayout? = null
     private var panel: ScrollView? = null
     private var stateLabel: TextView? = null
     private var pauseAction: TextView? = null
     private var stopAction: TextView? = null
-    private var flowerAction: TextView? = null
-    private var flowerSummary: TextView? = null
     private val speedButtons = linkedMapOf<WalkSpeedPreset, TextView>()
-    private var defaultSpeedAction: TextView? = null
     private var currentSpeed: WalkSpeedPreset = WalkSpeedPreset.DEFAULT
     private var params: WindowManager.LayoutParams? = null
     private var expanded = false
@@ -143,6 +179,13 @@ class FloatingControls(
 
     private fun action(label: String, click: () -> Unit): TextView = TextView(context).apply {
         text = label
+        background = GradientDrawable().apply {
+            cornerRadius = dp(13).toFloat()
+            setColor(if (isDark()) Color.argb(168, 48, 77, 113)
+                else Color.argb(205, 244, 250, 255))
+            setStroke(dp(1), if (isDark()) Color.argb(130, 193, 219, 247)
+                else Color.argb(230, 255, 255, 255))
+        }
         textSize = 14f
         setTextColor(if (isDark()) Color.rgb(241, 247, 255) else Color.rgb(29, 48, 78))
         gravity = Gravity.CENTER
@@ -150,6 +193,189 @@ class FloatingControls(
         minHeight = dp(48)
         setPadding(dp(9), dp(7), dp(9), dp(7))
         setOnClickListener { click() }
+    }
+
+
+    /** All four tabs are independent of whichever walking mode is currently active. */
+    private fun refreshTabs() {
+        val bar = modeTabs ?: return
+        bar.removeAllViews()
+        Mode.entries.forEach { mode ->
+            val tab = action("${mode.symbol}\n${mode.display}") {
+                selectedMode = mode
+                refreshTabs()
+                renderMode()
+            }.apply {
+                minWidth = dp(74)
+                minHeight = dp(56)
+                textSize = 12f
+                background = GradientDrawable().apply {
+                    cornerRadius = dp(12).toFloat()
+                    setColor(if (mode == selectedMode) Color.rgb(55, 118, 199)
+                        else if (isDark()) Color.rgb(43, 66, 98) else Color.rgb(233, 242, 254))
+                }
+                if (mode == selectedMode) setTextColor(Color.WHITE)
+                contentDescription = "懸浮切換到" + mode.display
+            }
+            bar.addView(tab, LinearLayout.LayoutParams(0, dp(48), 1f))
+        }
+    }
+
+    private fun renderMode() {
+        val content = modeContent ?: return
+        content.removeAllViews()
+        val prefs = AppPreferences(context)
+        fun heading(name: String) {
+            content.addView(action(name) { }.apply {
+                textSize = 12f
+                setOnClickListener(null)
+            })
+        }
+        fun line(vararg views: View) {
+            val row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+            views.forEach { row.addView(it,
+                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)) }
+            content.addView(row)
+        }
+        fun pointFromMap(): Coordinate? = OverlayMapSelection.picked.value
+        when (selectedMode) {
+            Mode.TELEPORT -> {
+                heading("⌖ 輸入座標／選擇位置，只有按瞬移才會改變 GPS")
+                val input = EditText(context).apply {
+                    textSize = 12f
+                    inputType = InputType.TYPE_CLASS_TEXT
+                    setSingleLine(true)
+                    hint = "25.033000, 121.565400"
+                    setTextColor(if (isDark()) Color.WHITE else Color.rgb(30, 51, 79))
+                    setHintTextColor(Color.GRAY)
+                    setText(pointFromMap()?.label() ?: "")
+                    setPadding(dp(10), dp(5), dp(10), dp(5))
+                }
+                content.addView(input)
+                line(
+                    action("選取座標") {
+                        val coordinate = Coordinate.parseCombined(input.text.toString())
+                        if (coordinate != null) {
+                            OverlayMapSelection.picked.value = coordinate
+                            showMessage("已選取座標；尚未瞬移")
+                        } else showMessage("座標格式錯誤，請輸入緯度, 經度")
+                    },
+                    action("瞬移") {
+                        val point = Coordinate.parseCombined(input.text.toString())
+                            ?: pointFromMap()
+                        if (point == null) showMessage("請先提供有效的座標")
+                        else onTeleport(point)
+                    },
+                )
+                content.addView(action("☆ 收藏所選位置") {
+                    val point = Coordinate.parseCombined(input.text.toString()) ?: pointFromMap()
+                    if (point == null) showMessage("尚無選取位置")
+                    else {
+                        prefs.addPlace("浮窗收藏 " + (prefs.places().size + 1), point)
+                        showMessage("已新增收藏位置")
+                    }
+                })
+            }
+            Mode.ROUTE, Mode.FLOWERS -> {
+                val mode = if (selectedMode == Mode.ROUTE) WalkMode.ROUTE else WalkMode.FLOWERS
+                val stops = if (mode == WalkMode.ROUTE) prefs.routeDraft() else prefs.flowerDraft()
+                heading("從目前位置起步 · 不會跳到第一個路點")
+                heading("路點順序 · " + stops.size + " 個目的地")
+                content.addView(action("● 起點：" +
+                    (com.naos.pikminbee.location.LocationStatus.selected.value
+                        ?: OverlayMapSelection.deviceFix.value)?.label().orEmpty()
+                ) { }.apply { setOnClickListener(null); textSize = 11f })
+                stops.forEachIndexed { index, point ->
+                    line(
+                        action((index + 1).toString() + ". " + point.label()) {
+                            OverlayMapSelection.picked.value = point
+                        }.apply { textSize = 10f },
+                        action("↑") {
+                            if (index > 0) {
+                                val next = stops.toMutableList()
+                                val old = next.removeAt(index)
+                                next.add(index - 1, old)
+                                if (mode == WalkMode.ROUTE) prefs.saveRouteDraft(next)
+                                else prefs.saveFlowerDraft(next)
+                                renderMode()
+                            }
+                        }.apply { minWidth = dp(30) },
+                        action("×") {
+                            val next = stops.filterIndexed { i, _ -> i != index }
+                            if (mode == WalkMode.ROUTE) prefs.saveRouteDraft(next)
+                            else prefs.saveFlowerDraft(next)
+                            renderMode()
+                        }.apply { minWidth = dp(30) },
+                    )
+                }
+                line(
+                    action("＋ 加入選取路點") {
+                        val point = pointFromMap()
+                        if (point == null) showMessage("請先在地圖選取路點")
+                        else if (stops.size >= 14) showMessage("最多新增 14 個路點")
+                        else {
+                            val next = stops + point
+                            if (mode == WalkMode.ROUTE) prefs.saveRouteDraft(next)
+                            else prefs.saveFlowerDraft(next)
+                            renderMode()
+                        }
+                    },
+                    action("↶ 復原") {
+                        if (stops.isNotEmpty()) {
+                            if (mode == WalkMode.ROUTE) prefs.saveRouteDraft(stops.dropLast(1))
+                            else prefs.saveFlowerDraft(stops.dropLast(1))
+                            renderMode()
+                        }
+                    },
+                )
+                line(
+                    action("▶ 開始" + selectedMode.display) { onStartRouteOrFlowers(mode) },
+                    action("☆ 收藏路線") {
+                        if (stops.isEmpty()) showMessage("請先新增路點")
+                        else runCatching {
+                            prefs.addSavedRoute("浮窗" + selectedMode.display, mode, stops)
+                        }.onSuccess { showMessage("路線已收藏") }
+                            .onFailure { showMessage("儲存失敗：" + it.message) }
+                    },
+                )
+            }
+            Mode.SAVED -> {
+                heading("☆ 收藏地點 · 在浮窗直接操作")
+                prefs.places().take(10).forEach { place ->
+                    line(
+                        action(place.name) {
+                            OverlayMapSelection.picked.value = place.coordinate
+                            selectedMode = Mode.TELEPORT
+                            refreshTabs()
+                            renderMode()
+                        },
+                        action("瞬移") { onTeleport(place.coordinate) },
+                    )
+                }
+                heading("收藏路線")
+                prefs.savedRoutes().take(10).forEach { saved ->
+                    line(
+                        action(saved.name) {
+                            prefs.loadSavedRouteIntoDraft(saved)
+                            selectedMode = if (saved.mode == WalkMode.FLOWERS) Mode.FLOWERS
+                                else Mode.ROUTE
+                            refreshTabs()
+                            renderMode()
+                        },
+                        action("開始") {
+                            prefs.loadSavedRouteIntoDraft(saved)
+                            onStartRouteOrFlowers(saved.mode)
+                        },
+                    )
+                }
+            }
+        }
+        panel?.post { if (expanded) fitExpandedPanelToScreen() }
+    }
+
+    private fun onStartRouteOrFlowers(mode: WalkMode) {
+        if (mode == WalkMode.ROUTE) onStartRoute()
+        else sendAction(START_FLOWERS)
     }
 
     fun show() {
@@ -168,20 +394,23 @@ class FloatingControls(
         val actions = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
         }
-        val description = action("PikminBee · 原地停留") { }
+        val modeBar = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+        }
+        val modePanel = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        actions.addView(modeBar)
+        actions.addView(modePanel)
+        modeTabs = modeBar
+        modeContent = modePanel
+        refreshTabs()
+        renderMode()
+        val description = action("全功能控制中心 · 待機") { }
         description.setOnClickListener(null)
         description.textSize = 11f
-        actions.addView(description)
-        val startFlowers = action("🌸 開始尋花") { sendAction(START_FLOWERS) }.apply {
-            contentDescription = "從目前模擬位置沿已儲存尋花路點開始循環道路行走"
-        }
-        actions.addView(startFlowers)
-        val summary = action("尋花草稿 0/14 點 · 循環") { }.apply {
-            textSize = 11f
-            setOnClickListener(null)
-            contentDescription = "尋花草稿狀態"
-        }
-        actions.addView(summary)
+        description.minHeight = dp(37)
+        actions.addView(description, 0)
         val speedHeading = action("行走速度（行走中也可調整）") { }.apply {
             textSize = 11f
             setOnClickListener(null)
@@ -200,19 +429,18 @@ class FloatingControls(
             speedRow.addView(button)
         }
         actions.addView(speedRow)
-        val setDefault = action("設為下次啟動預設") {
-            onSetDefaultSpeed(currentSpeed)
-        }.apply {
-            textSize = 12f
-            contentDescription = "將目前選取速度設為個人預設"
+        val steps = action("⌁ 模擬行走估算 0 步 · 非真實感測") { onOpenSettings() }.apply {
+            textSize = 11f
+            contentDescription = "估算步數，Health Connect 設定請至主 App"
         }
-        actions.addView(setDefault)
+        stepsSummary = steps
         val row1 = LinearLayout(context)
         val pause = action("暫停") { sendAction(if (pauseAction?.text == "繼續") RESUME else PAUSE) }
         val stop = action("停止行走") { sendAction(STOP_WALK) }
         row1.addView(pause)
         row1.addView(stop)
         actions.addView(row1)
+        actions.addView(steps)
         val row2 = LinearLayout(context)
         row2.addView(action("地圖") { openMap() })
         row2.addView(action("隱藏") { sendAction(HIDE) })
@@ -220,6 +448,7 @@ class FloatingControls(
         val row3 = LinearLayout(context)
         row3.addView(action("恢復真實 GPS") { sendAction(RESTORE_REAL) })
         actions.addView(row3)
+        actions.addView(action("♡ Health Connect 與其他設定請到主 App") { onOpenSettings() })
         val scroll = ScrollView(context).apply {
             visibility = View.GONE
             isVerticalScrollBarEnabled = true
@@ -235,9 +464,11 @@ class FloatingControls(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
             PixelFormat.TRANSLUCENT
         ).apply {
+            softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
             gravity = Gravity.TOP or Gravity.END
             x = dp(stored.x)
             y = dp(stored.y)
@@ -298,20 +529,28 @@ class FloatingControls(
         stateLabel = description
         pauseAction = pause
         stopAction = stop
-        flowerAction = startFlowers
-        flowerSummary = summary
-        defaultSpeedAction = setDefault
         params = layout
         expanded = false
+        stepsHandler.removeCallbacks(stepRefresh)
+        stepsHandler.post(stepRefresh)
         container.post { keepVisible(container, layout) }
     }
 
     private fun toggleExpanded() {
         expanded = !expanded
-        if (expanded) fitExpandedPanelToScreen()
         panel?.visibility = if (expanded) View.VISIBLE else View.GONE
         params?.let { placement ->
+            placement.width = if (expanded) (screenSize().first - dp(24)).coerceAtLeast(dp(220))
+                else WindowManager.LayoutParams.WRAP_CONTENT
+            if (expanded) fitExpandedPanelToScreen()
+            placement.flags = if (expanded)
+                placement.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv() or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+            else placement.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
             root?.let { view ->
+                if (!expanded) context.getSystemService(InputMethodManager::class.java)
+                    .hideSoftInputFromWindow(view.windowToken, 0)
                 runCatching { windows.updateViewLayout(view, placement) }
                 view.post { keepVisible(view, placement) }
             }
@@ -332,19 +571,7 @@ class FloatingControls(
         pauseAction?.isEnabled = walking
         pauseAction?.alpha = if (walking) 1.0f else 0.4f
 
-        flowerAction?.text = if (planningFlowers) "規劃尋花道路中…" else "🌸 開始尋花"
-        val canStartFlower = !walking && !planningFlowers && flowerStops in 1..14
-        flowerAction?.isEnabled = canStartFlower
-        flowerAction?.alpha = if (canStartFlower) 1f else .4f
-        flowerSummary?.text = "尋花草稿 ${flowerStops}/14 點 · 循環 · ${speedPreset.display}"
         currentSpeed = speedPreset
-        defaultSpeedAction?.apply {
-            text = "預設：${defaultSpeedPreset.display} · 設為目前速度"
-            isEnabled = speedPreset != defaultSpeedPreset
-            alpha = if (isEnabled) 1f else .45f
-            contentDescription = "目前預設 ${defaultSpeedPreset.display}。" +
-                if (isEnabled) "點此設為 ${speedPreset.display}" else "目前速度就是預設"
-        }
         speedButtons.forEach { (option, button) ->
             val selected = option == speedPreset
             if (button.tag != selected) {
@@ -364,6 +591,7 @@ class FloatingControls(
         stopAction?.text = if (planningFlowers) "取消規劃" else "停止行走"
         stopAction?.isEnabled = walking || planningFlowers
         stopAction?.alpha = if (walking || planningFlowers) 1f else .4f
+        updateStepSummary()
         stateLabel?.text = when {
             planningFlowers -> "正在查詢步行道路 · 尚未移動"
             mode == WalkMode.FLOWERS && phase == WalkPhase.MOVING ->
@@ -378,16 +606,17 @@ class FloatingControls(
     }
 
     fun dismiss() {
+        stepsHandler.removeCallbacks(stepRefresh)
         root?.let { runCatching { windows.removeView(it) } }
         root = null
         panel = null
         stateLabel = null
+        modeContent = null
+        modeTabs = null
+        stepsSummary = null
         pauseAction = null
         stopAction = null
-        flowerAction = null
-        flowerSummary = null
         speedButtons.clear()
-        defaultSpeedAction = null
         currentSpeed = WalkSpeedPreset.DEFAULT
         params = null
         expanded = false
