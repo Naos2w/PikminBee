@@ -87,6 +87,7 @@ import com.naos.pikminbee.gpx.GpxCodec
 import com.naos.pikminbee.gpx.GpxImport
 import com.naos.pikminbee.domain.Coordinate
 import com.naos.pikminbee.domain.MapCameraGeometry
+import com.naos.pikminbee.domain.RoutePointDraft
 import com.naos.pikminbee.domain.FlowerMapDraft
 import com.naos.pikminbee.domain.WalkMode
 import com.naos.pikminbee.domain.WalkPhase
@@ -184,6 +185,9 @@ private fun PikminBeeScreen() {
     var flowerStart by remember { mutableStateOf<Coordinate?>(null) }
     var flowerRoadPreview by remember { mutableStateOf(emptyList<Coordinate>()) }
     var routeRoadPreview by remember { mutableStateOf(emptyList<Coordinate>()) }
+    var routeEditingStopIndex by remember { mutableStateOf<Int?>(null) }
+    var routeStopActionIndex by remember { mutableStateOf<Int?>(null) }
+    var pendingTeleport by remember { mutableStateOf<Coordinate?>(null) }
     var mapExplore by remember { mutableStateOf(false) }
     var cameraSerial by remember { mutableIntStateOf(0) }
     var cameraRequest by remember { mutableStateOf<MapCameraRequest?>(null) }
@@ -230,7 +234,21 @@ private fun PikminBeeScreen() {
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         phoneLocationRefresh++
-        message = if (granted) "已取得定位權限，可以再次點選瞬移" else "請先授予精確定位權限"
+        val pending = pendingTeleport
+        pendingTeleport = null
+        if (granted && pending != null) {
+            runCatching {
+                ContextCompat.startForegroundService(
+                    context, MockLocationService.teleportIntent(context, pending))
+            }.onSuccess {
+                cameraSerial++
+                cameraRequest = MapCameraRequest(
+                    cameraSerial, MapCameraGeometry.fitPoints(listOf(pending)))
+                message = "已要求瞬移至 ${pending.label()}"
+            }.onFailure { message = "無法啟動瞬移：${it.message}" }
+        } else {
+            message = if (granted) "定位授權已取得" else "請先授予精確定位權限"
+        }
     }
     val phonePosition by rememberDeviceLocation(phoneLocationRefresh)
     LaunchedEffect(selected, selectionExplicit) {
@@ -428,7 +446,7 @@ private fun PikminBeeScreen() {
                 mockPosition ?: flowerStart, flowerStops, displayedRoad,
             )
             ToolTab.ROUTE -> MapCameraGeometry.forRoute(
-                mockPosition ?: roadStops.firstOrNull() ?: selected, roadStops, displayedRoad,
+                mockPosition ?: phonePosition, roadStops, displayedRoad,
             )
             else -> MapCameraGeometry.fitPoints(listOf(selected))
         }
@@ -453,17 +471,36 @@ private fun PikminBeeScreen() {
     }
     var coordinateInput by remember { mutableStateOf(selected.label()) }
     LaunchedEffect(selected) { coordinateInput = selected.label() }
+    fun teleportTo(coordinate: Coordinate) {
+        selected = coordinate
+        selectionExplicit = true
+        tab = ToolTab.TELEPORT
+        if (ContextCompat.checkSelfPermission(
+                context, Manifest.permission.ACCESS_FINE_LOCATION
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            pendingTeleport = coordinate
+            message = "請先授予精確定位權限，授權後才會執行瞬移"
+            requestLocation.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+            return
+        }
+        runCatching {
+            ContextCompat.startForegroundService(
+                context, MockLocationService.teleportIntent(context, coordinate))
+        }.onSuccess {
+            focusMapPoint(coordinate)
+            message = "已要求瞬移至 ${coordinate.label()}"
+        }.onFailure {
+            message = "瞬移失敗：${it.message}"
+        }
+    }
     fun applyCoordinateInput() {
         val parsed = Coordinate.parseCombined(coordinateInput)
         if (parsed == null) {
             message = "請輸入經緯度，例如 25.0330, 121.5654"
             return
         }
-        selected = parsed
-        selectionExplicit = true
-        if (tab == ToolTab.FLOWERS) flowerPick = FlowerMapPick(parsed)
-        message = "已選取 " + parsed.label() + " · 不會自動瞬移"
-        focusMapPoint(parsed)
+        teleportTo(parsed)
     }
     fun goToCurrentMapPosition() {
         val virtual = mockPosition
@@ -520,6 +557,40 @@ private fun PikminBeeScreen() {
     }
 
     MaterialTheme(colorScheme = PikminBeeThemeColors.forDarkMode(dark)) {
+        if (activePage == BeePage.MAP && tab == ToolTab.ROUTE) {
+            routeStopActionIndex?.let { index ->
+                AlertDialog(
+                    onDismissRequest = { routeStopActionIndex = null },
+                    title = { Text("第 ${index + 1} 點") },
+                    text = { Text("重新選擇位置，或從路徑中刪除此點。其餘路點會重新依序編號。") },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            routeStopActionIndex = null
+                            if (index in roadStops.indices &&
+                                walkPhase !in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)) {
+                                routeEditingStopIndex = index
+                                message = "請點地圖重新選擇第 ${index + 1} 點"
+                            } else message = "行走中不能修改路點，請先停止"
+                        }) { Text("重新選點") }
+                    },
+                    dismissButton = {
+                        Row {
+                            TextButton(onClick = { routeStopActionIndex = null }) { Text("取消") }
+                            TextButton(onClick = {
+                                routeStopActionIndex = null
+                                if (walkPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)) {
+                                    message = "行走中不能刪除路點，請先停止"
+                                } else {
+                                    prefs.saveRouteDraft(RoutePointDraft.remove(roadStops, index))
+                                    routeEditingStopIndex = null
+                                    message = "已刪除第 ${index + 1} 點；其餘路點已重新編號"
+                                }
+                            }) { Text("刪除") }
+                        }
+                    },
+                )
+            }
+        }
         when (activePage) {
             BeePage.PERMISSIONS -> BeePermissionWizard(
                 dark = dark,
@@ -552,6 +623,10 @@ private fun PikminBeeScreen() {
                 onAppearance = {
                     appearance = it
                     prefs.setAppearance(it)
+                    if (overlayVisible) runCatching {
+                        context.startService(MockLocationService.command(
+                            context, MockLocationService.ACTION_REFRESH_OVERLAY_APPEARANCE))
+                    }.onFailure { message = "已切換主題，浮窗更新失敗：${it.message}" }
                 },
                 onDefaultSpeed = ::setDefaultWalkSpeed,
                 onPermissions = { activePage = BeePage.PERMISSIONS },
@@ -589,22 +664,20 @@ private fun PikminBeeScreen() {
                 dark = dark,
                 modeIndex = tab.ordinal,
                 modeTitle = tab.label,
-                message = message,
+                message = if (tab == ToolTab.ROUTE)
+                    routeEditingStopIndex?.let { "請點地圖重選第 ${it + 1} 點" }
+                        ?: if (roadStops.size >= RoutePointDraft.MAX_STOPS)
+                            "已選滿 14 個路點 · 上滑可復原或刪除"
+                        else "下一點：第 ${roadStops.size + 1} 點 · 上滑復原或管理路點"
+                    else message,
                 coordinateInput = coordinateInput,
                 onCoordinateChange = { coordinateInput = it },
-                onCoordinateApply = ::applyCoordinateInput,
-                onCoordinateCopy = {
-                    val clipboard = context.getSystemService(
-                        android.content.ClipboardManager::class.java,
-                    )
-                    clipboard.setPrimaryClip(android.content.ClipData.newPlainText(
-                        "PikminBee coordinate", selected.label(),
-                    ))
-                    message = "已複製目前選取經緯度"
-                },
+                onCoordinateTeleport = ::applyCoordinateInput,
                 onCurrentLocation = ::goToCurrentMapPosition,
                 onMode = { index ->
                     tab = ToolTab.entries[index]
+                    routeEditingStopIndex = null
+                    routeStopActionIndex = null
                     mapExplore = false
                 },
                 onSettings = { activePage = BeePage.SETTINGS },
@@ -642,7 +715,35 @@ private fun PikminBeeScreen() {
                     when (tab) {
                         ToolTab.ROUTE -> {
                             selected = point
-                            message = "已選取經緯度，按「加入路點」才會新增至路線"
+                            if (walkPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)) {
+                                message = "行走中不可修改路點，請先停止行走"
+                            } else {
+                                val edit = RoutePointDraft.select(
+                                    roadStops, mockPosition ?: phonePosition, point,
+                                    routeEditingStopIndex,
+                                )
+                                when (edit.outcome) {
+                                    RoutePointDraft.Outcome.ADDED -> {
+                                        prefs.saveRouteDraft(edit.stops)
+                                        message = "已加入第 ${edit.index + 1} 點，請選第 ${edit.stops.size + 1} 點"
+                                    }
+                                    RoutePointDraft.Outcome.REPLACED -> {
+                                        prefs.saveRouteDraft(edit.stops)
+                                        routeEditingStopIndex = null
+                                        message = "已重新選擇第 ${edit.index + 1} 點"
+                                    }
+                                    RoutePointDraft.Outcome.DUPLICATE ->
+                                        message = "該位置已經是路點，請選擇其他位置"
+                                    RoutePointDraft.Outcome.TOO_CLOSE_TO_ORIGIN ->
+                                        message = "此位置太接近目前起點，請選擇其他位置"
+                                    RoutePointDraft.Outcome.FULL ->
+                                        message = "最多 14 個目的地"
+                                    RoutePointDraft.Outcome.INVALID_INDEX -> {
+                                        routeEditingStopIndex = null
+                                        message = "路點已變更，請重新點選"
+                                    }
+                                }
+                            }
                         }
                         ToolTab.FLOWERS -> {
                             selected = point
@@ -666,15 +767,24 @@ private fun PikminBeeScreen() {
                         "已選擇「${flower.name}」，可確認是否替換第 ${it + 1} 個路點"
                     } ?: "已選擇「${flower.name}」，可確認是否加入尋花路線"
                 },
-                onStopPick = if (tab == ToolTab.FLOWERS) { index: Int ->
-                    flowerStops.getOrNull(index)?.let { stop ->
-                        if (mapExplore) mapExplore = false
-                        selected = stop
-                        flowerPick = null
-                        editingFlowerStopIndex = index
-                        message = "已選擇第 ${index + 1} 個路點；點地圖挑選新位置或直接移除"
+                onStopPick = when (tab) {
+                    ToolTab.ROUTE -> { index: Int ->
+                        if (index in roadStops.indices) {
+                            routeStopActionIndex = index
+                            message = "已點選第 ${index + 1} 點，可刪除或重新選位置"
+                        }
                     }
-                } else null,
+                    ToolTab.FLOWERS -> { index: Int ->
+                        flowerStops.getOrNull(index)?.let { stop ->
+                            if (mapExplore) mapExplore = false
+                            selected = stop
+                            flowerPick = null
+                            editingFlowerStopIndex = index
+                            message = "已選擇第 ${index + 1} 個路點；點地圖挑選新位置或直接移除"
+                        }
+                    }
+                    else -> null
+                },
                 modifier = Modifier.fillMaxSize()
             )
                 },
@@ -688,17 +798,12 @@ private fun PikminBeeScreen() {
                         color = muted, fontSize = 12.sp,
                     )
                     if (tab == ToolTab.ROUTE) {
-                        OutlinedButton(
-                            onClick = {
-                                if (roadStops.size >= 15) {
-                                    message = "最多 15 個道路路點"
-                                } else {
-                                    prefs.saveRouteDraft(roadStops + selected)
-                                    message = "已新增第 " + (roadStops.size + 1) + " 個路點"
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth().height(48.dp),
-                        ) { Text("＋ 加入地圖所選路點") }
+                        Text(
+                            routeEditingStopIndex?.let {
+                                "點地圖重新選擇第 ${it + 1} 點；已存在的路點會保持原順序"
+                            } ?: "直接點地圖就新增第 ${roadStops.size + 1} 點，不需要再按新增",
+                            color = foreground, fontWeight = FontWeight.SemiBold,
+                        )
                     }
                         when (tab) {
                             ToolTab.TELEPORT -> {
@@ -805,21 +910,30 @@ private fun PikminBeeScreen() {
                                 JourneyControls(
                                     mode = WalkMode.ROUTE,
                                     stops = roadStops,
-                                    origin = mockPosition ?: roadStops.firstOrNull() ?: selected,
+                                    origin = mockPosition ?: phonePosition,
                                     activeMode = walkMode,
                                     phase = walkPhase,
                                     speedPreset = speedPreset,
                                     onSpeedSelected = ::chooseWalkSpeed,
                                     foreground = foreground, muted = muted,
-                                    onUndo = { prefs.saveRouteDraft(roadStops.dropLast(1)) },
-                                    onClear = { prefs.saveRouteDraft(emptyList()) },
+                                    onUndo = {
+                                        if (roadStops.isNotEmpty()) {
+                                            prefs.saveRouteDraft(RoutePointDraft.undo(roadStops))
+                                            routeEditingStopIndex = null
+                                            message = "已回到第 ${roadStops.size} 點，請點地圖重選"
+                                        }
+                                    },
+                                    onClear = {
+                                        prefs.saveRouteDraft(emptyList())
+                                        routeEditingStopIndex = null
+                                    },
                                     onMessage = { message = it },
                                     onAskLocation = { requestLocation.launch(Manifest.permission.ACCESS_FINE_LOCATION) },
                                     onPreviewRoad = { geometry ->
                                         routeRoadPreview = geometry
                                         if (geometry.size >= 2) {
                                             moveMapCamera(MapCameraGeometry.forRoute(
-                                                mockPosition ?: roadStops.firstOrNull() ?: selected,
+                                                mockPosition ?: phonePosition,
                                                 roadStops, geometry,
                                             ))
                                         }

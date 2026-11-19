@@ -71,6 +71,7 @@ class MockLocationService : Service() {
         const val ACTION_SET_SPEED = "com.naos.pikminbee.action.SET_WALK_SPEED"
         const val ACTION_SHOW_OVERLAY = "com.naos.pikminbee.action.SHOW_OVERLAY"
         const val ACTION_HIDE_OVERLAY = "com.naos.pikminbee.action.HIDE_OVERLAY"
+        const val ACTION_REFRESH_OVERLAY_APPEARANCE = "com.naos.pikminbee.action.REFRESH_OVERLAY_APPEARANCE"
         const val ACTION_ENABLE_LAN = "com.naos.pikminbee.action.ENABLE_LAN"
         const val ACTION_DISABLE_LAN = "com.naos.pikminbee.action.DISABLE_LAN"
         const val ACTION_APPROVE_LAN = "com.naos.pikminbee.action.APPROVE_LAN"
@@ -248,6 +249,11 @@ class MockLocationService : Service() {
             ACTION_DENY_LAN -> {
                 lanController?.denyPending()
                 return START_STICKY
+            }
+            ACTION_REFRESH_OVERLAY_APPEARANCE -> {
+                floatingControls?.refreshAppearance()
+                updateOverlay()
+                return if (providerActive) START_STICKY else START_NOT_STICKY
             }
             ACTION_SHOW_OVERLAY -> {
                 // Showing controls is independent of whether mock GPS is running.
@@ -741,6 +747,7 @@ class MockLocationService : Service() {
         super.onConfigurationChanged(newConfig)
         // Refit the existing overlay after portrait/landscape changes.
         // This never restarts GPS walking or creates a new overlay.
+        floatingControls?.refreshAppearance()
         floatingControls?.onScreenChanged()
     }
 
