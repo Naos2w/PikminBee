@@ -48,6 +48,7 @@ object EstimatedStepSessionCodec {
 }
 
 class EstimatedStepLedger(context: Context) {
+    companion object { private val transactionLock = Any() }
     private val prefs = context.getSharedPreferences("pikminbee_virtual_step_sessions", Context.MODE_PRIVATE)
 
     @Synchronized fun pending(): List<EstimatedStepSession> = all().filterNot { it.synced }
@@ -58,28 +59,36 @@ class EstimatedStepLedger(context: Context) {
     @Synchronized fun add(startMillis: Long, endMillis: Long, stepCount: Long):
         EstimatedStepSession? {
         if (stepCount <= 0L || endMillis <= startMillis) return null
+        return synchronized(transactionLock) {
         val next = EstimatedStepSession(
             UUID.randomUUID().toString(), startMillis, endMillis, stepCount)
         val previous = all()
-        check(previous.size < 500) { "待同步紀錄已達 500 筆，請先同步或整理資料" }
-        check(prefs.edit().putString("sessions", EstimatedStepSessionCodec.encode(previous + next))
+        val unsynced = previous.filterNot { it.synced }
+        check(unsynced.size < 500) { "待同步紀錄已達 500 筆，請先同步或整理資料" }
+        val recentSynced = previous.filter { it.synced }.takeLast(499 - unsynced.size)
+        check(prefs.edit().putString("sessions", EstimatedStepSessionCodec.encode(recentSynced + unsynced + next))
             .commit()) { "無法保存虛擬步數紀錄" }
-        return next
+        next
+        }
     }
 
     /** User can discard unexported virtual estimates without altering HC records. */
     @Synchronized fun discardPending() {
+        synchronized(transactionLock) {
         check(prefs.edit().putString("sessions", EstimatedStepSessionCodec.encode(
             all().filter { it.synced }
         )).commit()) { "無法清除尚未同步的虛擬步數" }
+        }
     }
 
     @Synchronized fun markSynced(id: String) {
+        synchronized(transactionLock) {
         val before = all()
         if (before.none { it.id == id && !it.synced }) return
         check(prefs.edit().putString("sessions", EstimatedStepSessionCodec.encode(
             before.map { if (it.id == id) it.copy(synced = true) else it }
         )).commit()) { "無法保存步數同步狀態" }
+        }
     }
 
     fun optIn(): Boolean = prefs.getBoolean("sync_virtual_estimates_to_hc", false)

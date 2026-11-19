@@ -5,7 +5,7 @@
 - [x] DEV v0.1.4 source: floating bee provides all four independent tabs (teleport, route, flowers, saved), waypoint edit/reorder, route launch from current device/virtual location, walking speed, pause/resume/stop/restore, and a link to main settings; tab changes never directly change GPS.
 - [x] DEV v0.1.4 source: walking-time virtual step accumulator, persistent session ledger, Health Connect WRITE_STEPS permission flow, manual-entry source classification, stable client IDs, explicit opt-in, opt-out and local pending-record deletion; WorkManager backs up permission-gated synchronization.
 - [ ] POCO acceptance: real overlay, background behaviour, keyboard on overlay, coordinate input, mode switching, route start, HC permission dialog/write/duplicate handling and screenshots; source tests do not prove physical-device function.
-- [ ] Track **real physical sensor steps** separately from virtual route estimates; detect existing sources and avoid writing duplicate hardware step counts. Real step sensor integration is not yet implemented.
+- [x] DEV 0.1.5 source: real physical steps can be read from Health Connect's supported on-device recording, or from Android TYPE_STEP_COUNTER via an opt-in foreground service on legacy devices. The two sources are tracked separately from virtual route estimates; duplicate legacy exports are disabled when native on-device HC recording is available. **POCO sensor and Health Connect acceptance still pending.**
 - [ ] Design parity: refine translucent glass backgrounds, spacing and icon assets against the OpenPencil screens, not screenshots alone; the first Android slice is not a pixel-perfect port.
 - [ ] Do not cut a new UAT APK or touch `main` without the standard develop -> staging checks.
 

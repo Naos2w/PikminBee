@@ -280,10 +280,6 @@ class MockLocationService : Service() {
                             onSpeedSelected = { preset ->
                                 startService(speedIntent(this, preset))
                             },
-                            onSetDefaultSpeed = { preset ->
-                                AppPreferences(this).setDefaultWalkSpeedPreset(preset)
-                                updateOverlay()
-                            },
                             openMap = {
                                 startActivity(Intent(this, MainActivity::class.java)
                                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))

@@ -20,8 +20,18 @@ settings, skippable permissions, Health Connect and related state screens.
 
 ## Steps and Health Connect
 
-- Distinguish **real sensor steps** from **virtual walking estimates**. Only the
-  latter are presently implemented. A GPS simulator is not a hardware step sensor.
+- Distinguish **real sensor steps** from **virtual walking estimates**. Both now have
+  separate DEV implementations. GPS simulation is **never** a hardware step sensor.
+- On Android 14+ with SDK Extension 20+ and Health Connect available, use the
+  Health Connect on-device step source behind explicit READ_STEPS consent. Its
+  aggregates may include other sources and should not be labelled sensor-only.
+- On older devices, offer user-started TYPE_STEP_COUNTER foreground tracking
+  after ACTIVITY_RECOGNITION permission. Show a notification and clear stop action;
+  record only steps observed while running. The feature cannot guarantee step
+  coverage after Android force-stop, process death, reboot or sensor unavailability.
+- Legacy sensor exports require separate user opt-in and WRITE_STEPS permission,
+  with stable source-specific IDs; do not export when native on-device HC capture
+  exists, avoiding writing an extra copy of the same hardware steps.
 - During the simulated moving phase, integrate travelled route distance divided by a
   configurable future stride length (current source constant: **0.72 metres per step**).
   Pauses, stops and teleports do not add distance or steps.
@@ -39,8 +49,9 @@ settings, skippable permissions, Health Connect and related state screens.
   queue does not delete previously exported health data.
 - Different apps/sensors can supply overlapping step data. Do **not** claim
   deduplicated total physical steps from this simulated tracker.
-- Real step sensor capture and any independent physical-step syncing are separate,
-  not yet implemented and must not be represented as completed.
+- Physical step capture and HC source selection are implemented in DEV 0.1.5
+  but **not** verified on POCO: real permission dialogs, live sensor values,
+  reboot/force-stop recovery and actual HC record identity all need device UAT.
 
 ## Acceptance requirements
 
