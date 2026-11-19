@@ -146,7 +146,7 @@ fun JourneyControls(
         )
         Text(
             if (flower) "地圖先選點並確認加入，預覽道路後再開始；花點來源不代表遊戲即時狀態。"
-            else "依順序新增路點，點選預覽後會依步行道路計算距離及時間，不會開始移動。",
+            else "點地圖立即新增下一個編號路點；按「上一步」可重選前一點，點地圖上的編號可刪除或改位置。",
             color = muted, fontSize = 12.sp
         )
         Text("已加入 ${stops.size} 個路點 · 起點 ${origin?.label() ?: "尚未設定"}",
@@ -154,10 +154,10 @@ fun JourneyControls(
         if (!flower && stops.isNotEmpty()) {
             Text("路徑順序  " + stops.indices.joinToString("  →  ") { "${it + 1}" },
                 color = foreground, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-            Text("綠色 1 為起點 · 藍色為途經點 · 紅色為終點",
+            Text("目前藍／橘色位置為起點 · 綠色 1 為第一目的地 · 紅色為終點",
                 color = muted, fontSize = 12.sp)
         }
-        Text("本次行走速度（個人預設請至共用設定）", color = muted, fontSize = 12.sp)
+        Text("本次行走速度（個人預設請至設定）", color = muted, fontSize = 12.sp)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
             WalkSpeedPreset.entries.forEach { option ->
                 FilterChip(
@@ -232,7 +232,7 @@ fun JourneyControls(
             ) { Text("停止", fontSize = 12.sp) }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            TextButton(onClick = onUndo, enabled = stops.isNotEmpty()) { Text("撤銷上一點") }
+            TextButton(onClick = onUndo, enabled = stops.isNotEmpty()) { Text("上一步 · 重選") }
             TextButton(onClick = {
                 if (active) {
                     context.startService(MockLocationService.command(context, MockLocationService.ACTION_CLEAR_ROUTE))

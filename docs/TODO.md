@@ -1,5 +1,18 @@
 # PikminBee TODO
 
+## UAT 0.2.1 — user-reported UI regressions (19 Nov 2026)
+- [x] DEV 0.2.3 source: remove edge-swipe `ModalNavigationDrawer` and always-mounted `BottomSheetScaffold`; keep native map visible with a compact bottom-only four-mode selector. Only the dedicated bottom handle may open a modal editor.
+- [x] DEV source: bottom mode rail switches **瞬移／路徑／尋花／收藏**, without a left-hand drawer; settings and permissions are inside the expanded sheet.
+- [x] DEV source: overlay actions no longer have a visible stroke on every row; replace with soft rounded action surfaces, spacing and unbordered group headings.
+- [x] DEV source: real position marker reduced from 58dp bitmap to 24dp with small blue centre; mock marker is a matching orange position dot (not a bee).
+- [x] DEV source: map tap in ROUTE immediately appends an ordered numbered destination; undo removes the last point for re-selection; tapping an existing numbered marker opens Delete/Re-pick; duplicate/near-origin/max-14 rules are tested.
+- [x] DEV source: top coordinate arrow and keyboard Go explicitly teleport to entered/map-selected position; remove copy and hamburger buttons; teleports remain permission-gated.
+- [x] DEV source: appearance changes immediately refresh existing overlay content and preserve tab/expanded state; Android configuration changes also refresh it.
+- [ ] **POCO real-device acceptance pending**: single finger pan, pinch zoom, edge swipe gesture conflicts, 1→2→3 map tap/undo/delete, coordinate teleport, 24dp blue/orange markers, light/dark overlay contrast and screenshot parity.
+- [ ] User review of updated OpenPencil design remains open; the old 12-screen V3 is a historical reference, not acceptance for these revised layouts.
+- [ ] Promotion to next UAT must use develop → staging CI + fixed-signer workflow; never infer that compilation means phone-side behaviour is verified.
+
+
 ## V3 approved OpenPencil design / current Android implementation
 - [x] Approved source-of-truth: `C:\Naos\02.Git\personal\design-previews\PikminBee-UI-V3-20261119.fig` (12 editable screens).
 - [x] DEV v0.1.4 source: floating bee provides all four independent tabs (teleport, route, flowers, saved), waypoint edit/reorder, route launch from current device/virtual location, walking speed, pause/resume/stop/restore, and a link to main settings; tab changes never directly change GPS.
