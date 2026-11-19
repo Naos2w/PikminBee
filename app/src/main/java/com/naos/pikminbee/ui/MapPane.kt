@@ -1,6 +1,7 @@
 package com.naos.pikminbee.ui
 
 import androidx.compose.foundation.layout.Box
+import android.graphics.Bitmap
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -71,19 +72,20 @@ fun LocationMap(
     onPick: (Coordinate) -> Unit,
     onFlowerPick: (FlowerSpot) -> Unit,
     onStopPick: ((Int) -> Unit)? = null,
+    onGlassSnapshot: (Bitmap?) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     when (provider) {
         MapProvider.OPEN_FREE_MAP -> OpenFreeMapPane(dark, selected, current, currentIsMock, start, stops, road, previewRoad, flowerSpots,
             freeMapStyle, cameraRequest, mapExplore, onCameraFailure,
-            onPick, onFlowerPick, onStopPick, modifier)
+            onPick, onFlowerPick, onStopPick, onGlassSnapshot, modifier)
         MapProvider.GOOGLE_MAPS -> if (BuildConfig.HAS_GOOGLE_MAPS_KEY) {
             GoogleMapsPane(dark, selected, current, currentIsMock, start, stops, road, previewRoad, flowerSpots,
-                cameraRequest, mapExplore, onCameraFailure, onPick, onFlowerPick, onStopPick, modifier)
+                cameraRequest, mapExplore, onCameraFailure, onPick, onFlowerPick, onStopPick, onGlassSnapshot, modifier)
         } else {
             OpenFreeMapPane(dark, selected, current, currentIsMock, start, stops, road, previewRoad, flowerSpots,
                 freeMapStyle, cameraRequest, mapExplore, onCameraFailure,
-                onPick, onFlowerPick, onStopPick, modifier)
+                onPick, onFlowerPick, onStopPick, onGlassSnapshot, modifier)
         }
     }
 }
@@ -96,7 +98,8 @@ private fun OpenFreeMapPane(
     freeMapStyle: FreeMapStyle, cameraRequest: MapCameraRequest?, mapExplore: Boolean,
     onCameraFailure: (String) -> Unit,
     onPick: (Coordinate) -> Unit, onFlowerPick: (FlowerSpot) -> Unit,
-    onStopPick: ((Int) -> Unit)?, modifier: Modifier,
+    onStopPick: ((Int) -> Unit)?,
+    onGlassSnapshot: (Bitmap?) -> Unit, modifier: Modifier,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -105,6 +108,7 @@ private fun OpenFreeMapPane(
     val latestOnStopPick by rememberUpdatedState(onStopPick)
     val latestStops by rememberUpdatedState(stops)
     val latestOnCameraFailure by rememberUpdatedState(onCameraFailure)
+    val latestGlassSnapshot by rememberUpdatedState(onGlassSnapshot)
     val view = remember(context) {
         MapLibre.getInstance(context)
         LibreMapView(context).apply { onCreate(null) }
@@ -163,6 +167,21 @@ private fun OpenFreeMapPane(
                     } else false
                 }
             }
+            // Snapshot map pixels only after the camera settles. The snapshot is
+            // sampled in the Naos glass AGSL material; do not capture Compose chrome.
+            ready.addOnCameraMoveStartedListener {
+                latestGlassSnapshot(null) // stale pixels must never be warped onto a moving map
+            }
+            ready.addOnCameraIdleListener {
+                if (view.width > 0 && view.height > 0 && map === ready) {
+                    runCatching {
+                        ready.snapshot { bitmap ->
+                            if (map === ready && view.isAttachedToWindow)
+                                latestGlassSnapshot(bitmap)
+                        }
+                    }.onFailure { latestGlassSnapshot(null) }
+                }
+            }
             ready.moveCamera(org.maplibre.android.camera.CameraUpdateFactory.newCameraPosition(
                 LibreCameraPosition.Builder()
                     .target(LibreLatLng(selected.latitude, selected.longitude)).zoom(14.5).build()
@@ -170,6 +189,7 @@ private fun OpenFreeMapPane(
         }
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
+            latestGlassSnapshot(null)
             map = null
             view.onPause()
             view.onStop()
@@ -304,7 +324,8 @@ private fun GoogleMapsPane(
     cameraRequest: MapCameraRequest?, mapExplore: Boolean,
     onCameraFailure: (String) -> Unit,
     onPick: (Coordinate) -> Unit, onFlowerPick: (FlowerSpot) -> Unit,
-    onStopPick: ((Int) -> Unit)?, modifier: Modifier,
+    onStopPick: ((Int) -> Unit)?,
+    onGlassSnapshot: (Bitmap?) -> Unit, modifier: Modifier,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -313,6 +334,7 @@ private fun GoogleMapsPane(
     val latestOnStopPick by rememberUpdatedState(onStopPick)
     val latestStops by rememberUpdatedState(stops)
     val latestOnCameraFailure by rememberUpdatedState(onCameraFailure)
+    val latestGlassSnapshot by rememberUpdatedState(onGlassSnapshot)
     val view = remember(context) { GoogleMapView(context).apply { onCreate(null) } }
     var map by remember { mutableStateOf<GoogleMap?>(null) }
     var currentMarker by remember { mutableStateOf<com.google.android.gms.maps.model.Marker?>(null) }
@@ -362,11 +384,23 @@ private fun GoogleMapsPane(
                     } else false
                 }
             }
+            ready.setOnCameraMoveStartedListener { latestGlassSnapshot(null) }
+            ready.setOnCameraIdleListener {
+                if (view.width > 0 && view.height > 0 && map === ready) {
+                    runCatching {
+                        ready.snapshot { bitmap ->
+                            if (map === ready && view.isAttachedToWindow)
+                                latestGlassSnapshot(bitmap)
+                        }
+                    }.onFailure { latestGlassSnapshot(null) }
+                }
+            }
             ready.moveCamera(CameraUpdateFactory.newLatLngZoom(
                 GoogleLatLng(selected.latitude, selected.longitude), 14.5f))
         }
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
+            latestGlassSnapshot(null)
             map = null
             view.onPause()
             view.onStop()
