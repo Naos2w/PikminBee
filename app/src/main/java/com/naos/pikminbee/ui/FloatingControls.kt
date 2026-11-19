@@ -2,6 +2,7 @@ package com.naos.pikminbee.ui
 
 import android.content.Context
 import android.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import android.graphics.PixelFormat
 import android.os.Build
 import android.graphics.drawable.GradientDrawable
@@ -52,14 +53,21 @@ class FloatingControls(
         const val HIDE = "hide"
     }
 
-    private enum class Mode(val display: String, val symbol: String) {
-        TELEPORT("瞬移", "⌖"), ROUTE("路徑", "①→②"),
-        FLOWERS("尋花", "✿"), SAVED("收藏", "☆")
+    private enum class Mode(val display: String) {
+        TELEPORT("瞬移"), ROUTE("路徑"), FLOWERS("尋花"), SAVED("收藏")
     }
-    private var selectedMode = Mode.ROUTE
+    private var selectedMode = Mode.TELEPORT
     private var modeContent: LinearLayout? = null
     private var modeTabs: LinearLayout? = null
     private var stepsSummary: TextView? = null
+    private var beeButton: TextView? = null
+    private var quickSummary: TextView? = null
+    private var quickPrimary: TextView? = null
+    private var quickSecondary: TextView? = null
+    private var advancedSection: LinearLayout? = null
+    private var advancedVisible: Boolean = false
+    private var lastPhase: WalkPhase = WalkPhase.IDLE
+    private var lastMode: WalkMode? = null
 
     private fun showMessage(text: String) {
         stateLabel?.text = text
@@ -139,7 +147,8 @@ class FloatingControls(
         val child = scroll.getChildAt(0) ?: return
         val (width, height) = screenSize()
         val availableWidth = (width - dp(20)).coerceAtLeast(dp(120))
-        val availableHeight = (height - dp(36) - dp(28) - dp(72)).coerceAtLeast(dp(100))
+        val availableHeight = (height - dp(36) - dp(28) - dp(72))
+            .coerceAtMost(dp(if (advancedVisible) 610 else 360)).coerceAtLeast(dp(100))
         child.measure(
             View.MeasureSpec.makeMeasureSpec(availableWidth, View.MeasureSpec.AT_MOST),
             View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
@@ -183,14 +192,14 @@ class FloatingControls(
         speedButtons.forEach { (option, button) ->
             val selected = option == currentSpeed
             button.tag = selected
-            button.setTextColor(if (selected) Color.WHITE else foreground)
+            button.setTextColor(if (selected) colors().onAccent.toArgb() else foreground)
             button.background = GradientDrawable().apply {
                 cornerRadius = dp(12).toFloat()
-                setColor(if (selected) Color.rgb(54, 116, 198)
-                    else if (isDark()) Color.argb(140, 81, 112, 151)
-                    else Color.argb(190, 232, 242, 255))
+                setColor(if (selected) colors().accent.toArgb()
+                    else colors().soft.toArgb())
             }
         }
+        refreshQuick()
         holder.invalidate()
     }
 
@@ -213,26 +222,28 @@ class FloatingControls(
             Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
     }
 
+    private fun colors(): NaosPalette = NaosDesignSystem.palette(
+        AppPreferences(context).naosThemeFamily(), isDark())
+
+    /** Cross-app overlays cannot sample another application's secure pixels. */
     private fun glass() = GradientDrawable().apply {
-        cornerRadius = dp(24).toFloat()
-        setColor(if (isDark()) Color.argb(220, 32, 52, 81)
-            else Color.argb(231, 242, 248, 255))
-        setStroke(dp(1), if (isDark()) Color.argb(180, 215, 235, 255)
-            else Color.argb(225, 255, 255, 255))
+        cornerRadius = dp(26).toFloat()
+        val p = colors()
+        setColor(p.surface.copy(alpha = if (isDark()) .91f else .88f).toArgb())
+        setStroke(dp(1), p.stroke.toArgb())
     }
 
     private fun softButtonBackground() = GradientDrawable().apply {
         cornerRadius = dp(14).toFloat()
-        setColor(if (isDark()) Color.argb(142, 81, 112, 151)
-            else Color.argb(198, 232, 242, 255))
-        // No stroke: the old outline on every row caused a wall of visible lines.
+        setColor(colors().soft.toArgb())
+        // No repeated strokes or glowing/neon borders.
     }
 
     private fun action(label: String, click: () -> Unit): TextView = TextView(context).apply {
         text = label
         background = softButtonBackground()
         textSize = 14f
-        setTextColor(if (isDark()) Color.rgb(241, 247, 255) else Color.rgb(29, 48, 78))
+        setTextColor(colors().ink.toArgb())
         gravity = Gravity.CENTER
         minWidth = dp(66)
         minHeight = dp(48)
@@ -241,28 +252,36 @@ class FloatingControls(
     }
 
 
-    /** All four tabs are independent of whichever walking mode is currently active. */
+    /** Four semantic vector tabs; no Unicode/emoji icon substitutions. */
     private fun refreshTabs() {
         val bar = modeTabs ?: return
         bar.removeAllViews()
-        Mode.entries.forEach { mode ->
-            val tab = action("${mode.symbol}\n${mode.display}") {
+        val palette = colors()
+        Mode.entries.forEachIndexed { index, mode ->
+            val selected = mode == selectedMode
+            val ink = if (selected) palette.onAccent.toArgb() else palette.ink.toArgb()
+            val tab = action(mode.display) {
                 selectedMode = mode
                 refreshTabs()
                 renderMode()
+                refreshQuick()
             }.apply {
                 minWidth = dp(74)
                 minHeight = dp(56)
                 textSize = 12f
+                setTextColor(ink)
+                compoundDrawablePadding = dp(3)
+                setCompoundDrawablesWithIntrinsicBounds(
+                    null, NaosOverlayModeIcon(index, ink, dp(22)), null, null)
                 background = GradientDrawable().apply {
-                    cornerRadius = dp(12).toFloat()
-                    setColor(if (mode == selectedMode) Color.rgb(55, 118, 199)
-                        else if (isDark()) Color.rgb(43, 66, 98) else Color.rgb(233, 242, 254))
+                    cornerRadius = dp(15).toFloat()
+                    setColor(if (selected) palette.accent.toArgb() else palette.soft.toArgb())
                 }
-                if (mode == selectedMode) setTextColor(Color.WHITE)
                 contentDescription = "懸浮切換到" + mode.display
             }
-            bar.addView(tab, LinearLayout.LayoutParams(0, dp(48), 1f))
+            bar.addView(tab, LinearLayout.LayoutParams(0, dp(58), 1f).apply {
+                marginEnd = dp(3)
+            })
         }
     }
 
@@ -448,6 +467,72 @@ class FloatingControls(
         else sendAction(START_FLOWERS)
     }
 
+    /** The first level of the overlay performs the primary action for each tab.
+     * Old full controls remain accessible as a second level when needed.
+     */
+    private fun performQuickAction() {
+        val walking = lastPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)
+        when (selectedMode) {
+            Mode.TELEPORT -> {
+                val picked = OverlayMapSelection.picked.value
+                if (picked == null) {
+                    showMessage("請先在地圖選擇位置，或展開詳細操作輸入經緯度")
+                    advancedVisible = true
+                    advancedSection?.visibility = View.VISIBLE
+                    panel?.post { fitExpandedPanelToScreen() }
+                } else onTeleport(picked)
+            }
+            Mode.ROUTE, Mode.FLOWERS -> {
+                val requested = if (selectedMode == Mode.ROUTE) WalkMode.ROUTE
+                    else WalkMode.FLOWERS
+                if (walking && lastMode == requested) {
+                    sendAction(if (lastPhase == WalkPhase.PAUSED) RESUME else PAUSE)
+                } else onStartRouteOrFlowers(requested)
+            }
+            Mode.SAVED -> {
+                advancedVisible = true
+                advancedSection?.visibility = View.VISIBLE
+                panel?.post { fitExpandedPanelToScreen() }
+            }
+        }
+    }
+
+    private fun refreshQuick() {
+        val prefs = AppPreferences(context)
+        val active = lastPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)
+        val requested = when (selectedMode) {
+            Mode.ROUTE -> WalkMode.ROUTE
+            Mode.FLOWERS -> WalkMode.FLOWERS
+            else -> null
+        }
+        val sameWalk = active && requested != null && lastMode == requested
+        quickSummary?.text = when (selectedMode) {
+            Mode.TELEPORT -> "瞬移 · " +
+                (OverlayMapSelection.picked.value?.let { "已選擇 ${it.label()}" }
+                    ?: "預設模式 · 請點地圖或輸入座標")
+            Mode.ROUTE -> "路徑 · ${prefs.routeDraft().size} 個目的地" +
+                if (sameWalk) (if (lastPhase == WalkPhase.PAUSED) " · 已暫停" else " · 行走中") else ""
+            Mode.FLOWERS -> "尋花 · ${prefs.flowerDraft().size} 個候選花點" +
+                if (sameWalk) " · 巡迴中" else ""
+            Mode.SAVED -> "收藏 · 地點與已儲存路線"
+        }
+        quickPrimary?.apply {
+            text = when {
+                sameWalk -> if (lastPhase == WalkPhase.PAUSED) "繼續" else "暫停"
+                selectedMode == Mode.TELEPORT -> "立即瞬移"
+                selectedMode == Mode.ROUTE -> "開始路徑"
+                selectedMode == Mode.FLOWERS -> "開始尋花"
+                else -> "選擇收藏"
+            }
+            background = GradientDrawable().apply {
+                cornerRadius = dp(15).toFloat()
+                setColor(colors().accent.toArgb())
+            }
+            setTextColor(colors().onAccent.toArgb())
+        }
+        quickSecondary?.text = if (active) "停止" else "打開地圖"
+    }
+
     fun show() {
         if (root != null) return
         val container = LinearLayout(context).apply {
@@ -461,28 +546,84 @@ class FloatingControls(
             contentDescription = "PikminBee 懸浮視窗，點一下展開"
         }
         container.addView(bee)
+        beeButton = bee
         val actions = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
         }
+        val header = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val description = action("PikminBee\n懸浮快速操作 · Regular") { onOpenSettings() }.apply {
+            gravity = Gravity.CENTER_VERTICAL
+            textSize = 16f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            background = null
+        }
+        header.addView(description, LinearLayout.LayoutParams(0, dp(66), 1f))
+        header.addView(action("×") { toggleExpanded() }.apply {
+            textSize = 23f
+            background = null
+            minWidth = dp(48)
+            contentDescription = "收合浮窗"
+        }, LinearLayout.LayoutParams(dp(48), dp(54)))
+        actions.addView(header)
+
         val modeBar = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
         }
+        actions.addView(modeBar)
+        val summary = action("瞬移 · 預設模式") { }.apply {
+            background = softButtonBackground()
+            gravity = Gravity.CENTER_VERTICAL
+            textSize = 13f
+            setOnClickListener(null)
+            minHeight = dp(65)
+        }
+        quickSummary = summary
+        actions.addView(summary)
+        val quickRow = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+        val primary = action("選取位置後瞬移") { performQuickAction() }.apply {
+            minHeight = dp(51)
+        }
+        val secondary = action("打開地圖") {
+            if (lastPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED))
+                sendAction(STOP_WALK)
+            else openMap()
+        }.apply { minHeight = dp(51) }
+        quickPrimary = primary
+        quickSecondary = secondary
+        quickRow.addView(primary, LinearLayout.LayoutParams(0, dp(51), 1f).apply {
+            marginEnd = dp(5)
+        })
+        quickRow.addView(secondary, LinearLayout.LayoutParams(0, dp(51), 1f))
+        actions.addView(quickRow)
+
+        val advanced = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+        }
+        advancedSection = advanced
+        actions.addView(action("⌃ 展開詳細操作") {
+            advancedVisible = !advancedVisible
+            advanced.visibility = if (advancedVisible) View.VISIBLE else View.GONE
+            panel?.post { fitExpandedPanelToScreen() }
+        }.apply {
+            background = softButtonBackground()
+            textSize = 12f
+            contentDescription = "展開或收起完整的模式控制"
+        })
+        actions.addView(advanced)
+
         val modePanel = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
         }
-        actions.addView(modeBar)
-        actions.addView(modePanel)
+        advanced.addView(modePanel)
         modeTabs = modeBar
         modeContent = modePanel
         refreshTabs()
         renderMode()
-        val description = action("全功能控制中心 · 待機") { }
-        description.setOnClickListener(null)
-        description.textSize = 12f
-        description.setTypeface(description.typeface, android.graphics.Typeface.BOLD)
-        description.background = null
-        description.minHeight = dp(37)
-        actions.addView(description, 0)
+        refreshQuick()
         val speedHeading = action("行走速度") { }.apply {
             textSize = 12f
             background = null
@@ -490,7 +631,7 @@ class FloatingControls(
             gravity = Gravity.CENTER_VERTICAL
             setOnClickListener(null)
         }
-        actions.addView(speedHeading)
+        advanced.addView(speedHeading)
         val speedRow = LinearLayout(context)
         WalkSpeedPreset.entries.forEach { preset ->
             val button = action("${preset.label}\n${preset.kilometresPerHour} km/h") {
@@ -503,7 +644,7 @@ class FloatingControls(
             speedButtons[preset] = button
             speedRow.addView(button)
         }
-        actions.addView(speedRow)
+        advanced.addView(speedRow)
         val steps = action("⌁ 模擬行走估算 0 步 · 非真實感測") { onOpenSettings() }.apply {
             textSize = 11f
             background = null
@@ -515,16 +656,16 @@ class FloatingControls(
         val stop = action("停止行走") { sendAction(STOP_WALK) }
         row1.addView(pause)
         row1.addView(stop)
-        actions.addView(row1)
-        actions.addView(steps)
+        advanced.addView(row1)
+        advanced.addView(steps)
         val row2 = LinearLayout(context)
         row2.addView(action("地圖") { openMap() })
         row2.addView(action("隱藏") { sendAction(HIDE) })
-        actions.addView(row2)
+        advanced.addView(row2)
         val row3 = LinearLayout(context)
         row3.addView(action("恢復真實 GPS") { sendAction(RESTORE_REAL) })
-        actions.addView(row3)
-        actions.addView(action("♡ Health Connect 與其他設定請到主 App") { onOpenSettings() })
+        advanced.addView(row3)
+        advanced.addView(action("Health Connect 與其他設定請到主 App") { onOpenSettings() })
         val scroll = ScrollView(context).apply {
             visibility = View.GONE
             isVerticalScrollBarEnabled = true
@@ -602,7 +743,7 @@ class FloatingControls(
         windows.addView(container, layout)
         root = container
         panel = scroll
-        stateLabel = description
+        stateLabel = summary
         pauseAction = pause
         stopAction = stop
         params = layout
@@ -614,9 +755,14 @@ class FloatingControls(
 
     private fun toggleExpanded() {
         expanded = !expanded
+        advancedVisible = false
+        advancedSection?.visibility = View.GONE
         panel?.visibility = if (expanded) View.VISIBLE else View.GONE
+        beeButton?.visibility = if (expanded) View.GONE else View.VISIBLE
+        if (expanded) refreshQuick()
         params?.let { placement ->
-            placement.width = if (expanded) (screenSize().first - dp(24)).coerceAtLeast(dp(220))
+            placement.width = if (expanded)
+                minOf(screenSize().first - dp(24), dp(350)).coerceAtLeast(dp(220))
                 else WindowManager.LayoutParams.WRAP_CONTENT
             if (expanded) fitExpandedPanelToScreen()
             placement.flags = if (expanded)
@@ -642,6 +788,8 @@ class FloatingControls(
         planningFlowers: Boolean,
         status: String,
     ) {
+        lastPhase = phase
+        lastMode = mode
         val walking = phase == WalkPhase.MOVING || phase == WalkPhase.PAUSED
         pauseAction?.text = if (phase == WalkPhase.PAUSED) "繼續" else "暫停"
         pauseAction?.isEnabled = walking
@@ -652,13 +800,12 @@ class FloatingControls(
             val selected = option == speedPreset
             if (button.tag != selected) {
                 button.tag = selected
-                button.setTextColor(if (selected) Color.WHITE else
-                    if (isDark()) Color.rgb(241, 247, 255) else Color.rgb(29, 48, 78))
+                button.setTextColor(if (selected) colors().onAccent.toArgb()
+                    else colors().ink.toArgb())
                 button.background = GradientDrawable().apply {
                     cornerRadius = dp(12).toFloat()
-                    setColor(if (selected) Color.rgb(54, 116, 198)
-                        else if (isDark()) Color.argb(140, 81, 112, 151)
-                        else Color.argb(190, 232, 242, 255))
+                    setColor(if (selected) colors().accent.toArgb()
+                        else colors().soft.toArgb())
                 }
                 button.contentDescription = "速度：${option.display}" +
                     if (selected) "，目前選擇" else ""
@@ -680,6 +827,7 @@ class FloatingControls(
             phase == WalkPhase.PARKED -> "已停止 · 原地停留"
             else -> "PikminBee · 原地停留"
         }
+        refreshQuick()
     }
 
     fun dismiss() {
@@ -687,6 +835,14 @@ class FloatingControls(
         root?.let { runCatching { windows.removeView(it) } }
         root = null
         panel = null
+        beeButton = null
+        quickSummary = null
+        quickPrimary = null
+        quickSecondary = null
+        advancedSection = null
+        advancedVisible = false
+        lastPhase = WalkPhase.IDLE
+        lastMode = null
         stateLabel = null
         modeContent = null
         modeTabs = null

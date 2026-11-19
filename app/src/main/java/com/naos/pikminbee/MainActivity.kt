@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.graphics.Bitmap
 import android.net.Uri
 import android.provider.Settings
 import androidx.activity.ComponentActivity
@@ -45,6 +46,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -116,6 +118,12 @@ import com.naos.pikminbee.ui.MapFirstShell
 import com.naos.pikminbee.ui.BeeSettingsScreen
 import com.naos.pikminbee.ui.BeePermissionWizard
 import com.naos.pikminbee.ui.PikminBeeThemeColors
+import com.naos.pikminbee.ui.NaosThemeFamily
+import com.naos.pikminbee.ui.NaosGlassMaterial
+import com.naos.pikminbee.ui.NaosVisualState
+import com.naos.pikminbee.ui.NaosDesignSystem
+import com.naos.pikminbee.ui.LocalNaosVisualState
+import com.naos.pikminbee.ui.BeePermissions
 import kotlinx.coroutines.flow.MutableStateFlow
 
 private val navy = Color(0xFF18263A)
@@ -169,13 +177,17 @@ private fun PikminBeeScreen() {
     var provider by remember { mutableStateOf(prefs.provider()) }
     var freeMapStyle by remember { mutableStateOf(prefs.freeMapStyle()) }
     var appearance by remember { mutableStateOf(prefs.appearance()) }
+    var naosFamily by remember { mutableStateOf(prefs.naosThemeFamily()) }
+    var naosMaterial by remember { mutableStateOf(prefs.naosGlassMaterial()) }
+    var mapBackdrop by remember { mutableStateOf<Bitmap?>(null) }
     val dark = when (appearance) {
         MapAppearance.SYSTEM -> systemDark
         MapAppearance.LIGHT -> false
         MapAppearance.DARK -> true
     }
-    val foreground = if (dark) Color(0xFFEFF5FF) else navy
-    val muted = if (dark) Color(0xFFC1D0E3) else Color(0xFF6A778C)
+    val semantic = NaosDesignSystem.palette(naosFamily, dark)
+    val foreground = semantic.ink
+    val muted = semantic.muted
 
     var selected by remember { mutableStateOf(Coordinate(25.0330, 121.5654)) }
     var selectionExplicit by remember { mutableStateOf(false) }
@@ -556,7 +568,16 @@ private fun PikminBeeScreen() {
         else mapExplore = false
     }
 
-    MaterialTheme(colorScheme = PikminBeeThemeColors.forDarkMode(dark)) {
+    MaterialTheme(colorScheme = PikminBeeThemeColors.forDarkMode(dark).copy(
+        primary = semantic.accent, onPrimary = semantic.onAccent,
+        background = semantic.bg, onBackground = semantic.ink,
+        surface = semantic.surface, onSurface = semantic.ink,
+        surfaceVariant = semantic.soft, onSurfaceVariant = semantic.muted,
+        outline = semantic.stroke,
+    )) {
+        CompositionLocalProvider(
+            LocalNaosVisualState provides NaosVisualState(naosFamily, naosMaterial, dark)
+        ) {
         if (activePage == BeePage.MAP && tab == ToolTab.ROUTE) {
             routeStopActionIndex?.let { index ->
                 AlertDialog(
@@ -607,6 +628,8 @@ private fun PikminBeeScreen() {
                 provider = provider,
                 freeMapStyle = freeMapStyle,
                 appearance = appearance,
+                naosFamily = naosFamily,
+                glassMaterial = naosMaterial,
                 defaultSpeed = defaultSpeedPreset,
                 overlayVisible = overlayVisible,
                 mockActive = mockPosition != null,
@@ -627,6 +650,22 @@ private fun PikminBeeScreen() {
                         context.startService(MockLocationService.command(
                             context, MockLocationService.ACTION_REFRESH_OVERLAY_APPEARANCE))
                     }.onFailure { message = "已切換主題，浮窗更新失敗：${it.message}" }
+                },
+                onNaosFamily = {
+                    naosFamily = it
+                    prefs.setNaosThemeFamily(it)
+                    if (overlayVisible) runCatching {
+                        context.startService(MockLocationService.command(
+                            context, MockLocationService.ACTION_REFRESH_OVERLAY_APPEARANCE))
+                    }
+                },
+                onGlassMaterial = {
+                    naosMaterial = it
+                    prefs.setNaosGlassMaterial(it)
+                    if (overlayVisible) runCatching {
+                        context.startService(MockLocationService.command(
+                            context, MockLocationService.ACTION_REFRESH_OVERLAY_APPEARANCE))
+                    }
                 },
                 onDefaultSpeed = ::setDefaultWalkSpeed,
                 onPermissions = { activePage = BeePage.PERMISSIONS },
@@ -684,6 +723,62 @@ private fun PikminBeeScreen() {
                 onPermissions = { activePage = BeePage.PERMISSIONS },
                 mapExplore = mapExplore,
                 onCloseExplore = { mapExplore = false },
+                backdrop = mapBackdrop,
+                routeStopsCount = roadStops.size,
+                routeActive = walkMode == WalkMode.ROUTE &&
+                    walkPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED),
+                routePaused = walkMode == WalkMode.ROUTE && walkPhase == WalkPhase.PAUSED,
+                onRouteUndo = {
+                    if (walkPhase !in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)) {
+                        prefs.saveRouteDraft(RoutePointDraft.undo(roadStops))
+                        routeEditingStopIndex = null
+                        message = "已返回上一個路點，直接點地圖重新選取"
+                    }
+                },
+                onRoutePrimary = {
+                    if (walkMode == WalkMode.ROUTE &&
+                        walkPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)) {
+                        context.startService(MockLocationService.command(context,
+                            if (walkPhase == WalkPhase.PAUSED)
+                                MockLocationService.ACTION_RESUME_ROUTE
+                            else MockLocationService.ACTION_PAUSE_ROUTE))
+                    } else {
+                        val origin = mockPosition ?: phonePosition
+                        when {
+                            origin == null -> message = "尚無有效的目前位置，請先取得定位"
+                            roadStops.isEmpty() -> message = "請先點地圖加入第 1 個目的地"
+                            ContextCompat.checkSelfPermission(context,
+                                Manifest.permission.ACCESS_FINE_LOCATION) !=
+                                PackageManager.PERMISSION_GRANTED ->
+                                message = "請先在權限設定授予精確位置權限"
+                            !BeePermissions.inspect(context).selectedMockApp ->
+                                message = "請先設定 PikminBee 為 Android 模擬位置應用程式"
+                            else -> work.launch {
+                                planning = true
+                                try {
+                                    val targets = listOf(origin) + roadStops
+                                    val geometry = ValhallaPlanner.plan(targets)
+                                    if (geometry.size < 2) throw IllegalStateException("沒有有效的步行道路")
+                                    routeRoadPreview = geometry
+                                    ContextCompat.startForegroundService(context,
+                                        MockLocationService.routeIntent(context, geometry,
+                                            WalkSpeedState.selected.value.metresPerSecond,
+                                            WalkMode.ROUTE, loop = false))
+                                    message = "已規劃步行道路，開始行走"
+                                } catch (e: Exception) {
+                                    message = "無法啟動步行：" + (e.message ?: "請檢查網路與路點")
+                                } finally {
+                                    planning = false
+                                }
+                            }
+                        }
+                    }
+                },
+                onRouteStop = {
+                    context.startService(MockLocationService.command(
+                        context, MockLocationService.ACTION_STOP_ROUTE))
+                    message = "已停止道路行走"
+                },
                 mapContent = {
             LocationMap(
                 provider = provider, dark = dark,
@@ -785,6 +880,7 @@ private fun PikminBeeScreen() {
                     }
                     else -> null
                 },
+                onGlassSnapshot = { mapBackdrop = it },
                 modifier = Modifier.fillMaxSize()
             )
                 },
@@ -1191,6 +1287,7 @@ private fun PikminBeeScreen() {
                     }) { Text("取消") }
                 },
             )
+        }
         }
     }
 }

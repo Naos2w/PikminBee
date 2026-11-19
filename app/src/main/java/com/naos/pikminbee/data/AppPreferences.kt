@@ -3,6 +3,8 @@ package com.naos.pikminbee.data
 import android.content.Context
 import com.naos.pikminbee.BuildConfig
 import com.naos.pikminbee.domain.Coordinate
+import com.naos.pikminbee.ui.NaosThemeFamily
+import com.naos.pikminbee.ui.NaosGlassMaterial
 import com.naos.pikminbee.domain.WalkMode
 import com.naos.pikminbee.domain.WalkSpeedPreset
 import org.json.JSONArray
@@ -114,6 +116,25 @@ class AppPreferences(private val context: Context) {
         prefs.edit().putString("provider", resolved.name).apply()
     }
     fun setAppearance(appearance: MapAppearance) { prefs.edit().putString("appearance", appearance.name).apply() }
+
+    /** Both settings refer to the ONE approved Naos Universal design kit. */
+    fun naosThemeFamily(): NaosThemeFamily =
+        NaosThemeFamily.entries.firstOrNull {
+            it.name == prefs.getString("naos_theme_family", null)
+        } ?: NaosThemeFamily.SAGE
+
+    fun setNaosThemeFamily(next: NaosThemeFamily) {
+        prefs.edit().putString("naos_theme_family", next.name).apply()
+    }
+
+    fun naosGlassMaterial(): NaosGlassMaterial =
+        NaosGlassMaterial.entries.firstOrNull {
+            it.name == prefs.getString("naos_glass_material", null)
+        } ?: NaosGlassMaterial.REGULAR
+
+    fun setNaosGlassMaterial(next: NaosGlassMaterial) {
+        prefs.edit().putString("naos_glass_material", next.name).apply()
+    }
 
     fun places(): List<SavedPlace> = runCatching {
         val json = JSONArray(prefs.getString("places", "[]") ?: "[]")
