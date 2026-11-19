@@ -1,5 +1,15 @@
 # PikminBee TODO
 
+## V3 approved OpenPencil design / current Android implementation
+- [x] Approved source-of-truth: `C:\Naos\02.Git\personal\design-previews\PikminBee-UI-V3-20261119.fig` (12 editable screens).
+- [x] DEV v0.1.4 source: floating bee provides all four independent tabs (teleport, route, flowers, saved), waypoint edit/reorder, route launch from current device/virtual location, walking speed, pause/resume/stop/restore, and a link to main settings; tab changes never directly change GPS.
+- [x] DEV v0.1.4 source: walking-time virtual step accumulator, persistent session ledger, Health Connect WRITE_STEPS permission flow, manual-entry source classification, stable client IDs, explicit opt-in, opt-out and local pending-record deletion; WorkManager backs up permission-gated synchronization.
+- [ ] POCO acceptance: real overlay, background behaviour, keyboard on overlay, coordinate input, mode switching, route start, HC permission dialog/write/duplicate handling and screenshots; source tests do not prove physical-device function.
+- [ ] Track **real physical sensor steps** separately from virtual route estimates; detect existing sources and avoid writing duplicate hardware step counts. Real step sensor integration is not yet implemented.
+- [ ] Design parity: refine translucent glass backgrounds, spacing and icon assets against the OpenPencil screens, not screenshots alone; the first Android slice is not a pixel-perfect port.
+- [ ] Do not cut a new UAT APK or touch `main` without the standard develop -> staging checks.
+
+
 ## Version numbering policy (owner decision, November 18, 2026)
 - [x] Configure UAT display versions starting at `0.1.1`; on a **new** UAT cycle increment minor and reset patch to 1 (`0.2.1`, `0.3.1`). DEV increments patch within the current minor (`0.1.2-dev`, `0.1.3-dev`, then `0.2.2-dev`).
 - [x] Preserve the fixed UAT signer and monotonic Android `versionCode` independently of the visible version name. First signed build with the new policy still requires promotion to `staging` and an explicit manual package request; do not publish automatically.

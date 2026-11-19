@@ -105,7 +105,7 @@ fun MapFirstShell(
                     }
                     HorizontalDivider(Modifier.padding(vertical = 10.dp))
                     NavigationDrawerItem(
-                        label = { Text("⚙ 共用設定", color = foreground) },
+                        label = { Text("⚙ 設定", color = foreground) },
                         selected = false,
                         onClick = {
                             onSettings()

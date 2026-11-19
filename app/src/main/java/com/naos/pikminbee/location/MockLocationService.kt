@@ -20,6 +20,12 @@ import android.os.SystemClock
 import android.provider.Settings
 import com.naos.pikminbee.MainActivity
 import com.naos.pikminbee.ui.FloatingControls
+import com.naos.pikminbee.domain.FloatingRouteDraft
+import com.naos.pikminbee.location.OverlayMapSelection
+import com.naos.pikminbee.health.EstimatedStepCounter
+import com.naos.pikminbee.health.EstimatedWalkStatus
+import com.naos.pikminbee.health.EstimatedStepLedger
+import com.naos.pikminbee.health.EstimatedStepsSyncWorker
 import com.naos.pikminbee.data.AppPreferences
 import com.naos.pikminbee.data.RouteDraftState
 import com.naos.pikminbee.data.WalkSpeedState
@@ -61,6 +67,7 @@ class MockLocationService : Service() {
         const val ACTION_STOP_ROUTE = "com.naos.pikminbee.action.STOP_ROUTE"
         const val ACTION_CLEAR_ROUTE = "com.naos.pikminbee.action.CLEAR_ROUTE"
         const val ACTION_START_FLOWERS = "com.naos.pikminbee.action.START_FLOWER_DRAFT"
+        const val ACTION_START_DRAFT_ROUTE = "com.naos.pikminbee.action.START_ROUTE_DRAFT"
         const val ACTION_SET_SPEED = "com.naos.pikminbee.action.SET_WALK_SPEED"
         const val ACTION_SHOW_OVERLAY = "com.naos.pikminbee.action.SHOW_OVERLAY"
         const val ACTION_HIDE_OVERLAY = "com.naos.pikminbee.action.HIDE_OVERLAY"
@@ -114,6 +121,10 @@ class MockLocationService : Service() {
     private var track = emptyList<Coordinate>()
     private var trackLengthMeters = 0.0
     private var walkingDistanceMeters = 0.0
+    private val estimatedSteps = EstimatedStepCounter()
+    private var estimatedStepPersistTicker = 0
+    private var sessionStartMillis = 0L
+    private var sessionStartSteps = 0L
     private var speedMetersPerSecond = WalkSpeedPreset.DEFAULT.metresPerSecond
     private var loopRoute = false
     private var previousTickMillis = 0L
@@ -133,7 +144,17 @@ class MockLocationService : Service() {
             val deltaSeconds = ((now - previousTickMillis) / 1000.0).coerceIn(0.0, 2.0)
             previousTickMillis = now
             if (phase == WalkPhase.MOVING && track.size > 1) {
-                walkingDistanceMeters += speedMetersPerSecond * deltaSeconds
+                val travelMetres = speedMetersPerSecond * deltaSeconds
+                val acceptedMetres = if (loopRoute) travelMetres else
+                    travelMetres.coerceAtMost((trackLengthMeters - walkingDistanceMeters).coerceAtLeast(0.0))
+                if (acceptedMetres > 0) {
+                    EstimatedWalkStatus.state.value = estimatedSteps.addTravel(acceptedMetres)
+                    if (++estimatedStepPersistTicker >= 15) {
+                        saveEstimatedSteps()
+                        estimatedStepPersistTicker = 0
+                    }
+                }
+                walkingDistanceMeters += travelMetres
                 if (loopRoute && trackLengthMeters > 0.1 && walkingDistanceMeters >= trackLengthMeters) {
                     walkingDistanceMeters %= trackLengthMeters
                 }
@@ -142,6 +163,7 @@ class MockLocationService : Service() {
                     phase = WalkPhase.PARKED
                     LocationStatus.phase.value = phase
                     LocationStatus.display.value = "已抵達終點 · 原地停留"
+                    finishEstimatedSession()
                     refreshNotification()
                 }
             }
@@ -164,6 +186,10 @@ class MockLocationService : Service() {
         // Also initialise saved route drafts when Android restores the service
         // before the app Activity has ever been opened in this process.
         AppPreferences(this)
+        val previousEstimated = getSharedPreferences("pikminbee_estimated_steps", MODE_PRIVATE)
+            .getFloat("total_metres", 0f).toDouble()
+        estimatedSteps.restore(previousEstimated.coerceAtLeast(0.0))
+        EstimatedWalkStatus.state.value = estimatedSteps.snapshot()
         speedMetersPerSecond = WalkSpeedState.selected.value.metresPerSecond
         journal = SessionJournal(this)
         journal.read()
@@ -244,6 +270,13 @@ class MockLocationService : Service() {
                                 }
                                 startService(command(this, actionName))
                             },
+                            onTeleport = { point -> startService(teleportIntent(this, point)) },
+                            onStartRoute = { startService(command(this, ACTION_START_DRAFT_ROUTE)) },
+                            onOpenSettings = {
+                                startActivity(Intent(this, MainActivity::class.java)
+                                    .putExtra(MainActivity.EXTRA_OPEN_SETTINGS, true)
+                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+                            },
                             onSpeedSelected = { preset ->
                                 startService(speedIntent(this, preset))
                             },
@@ -290,54 +323,10 @@ class MockLocationService : Service() {
                 }
                 return if (providerActive) START_STICKY else START_NOT_STICKY
             }
-            ACTION_START_FLOWERS -> {
-                if (flowerPlanJob?.isActive == true) {
-                    LocationStatus.display.value = "尋花道路規劃中，請先確認結果或取消"
-                    updateOverlay()
-                    return START_STICKY
-                }
-                val origin = target
-                val decision = FloatingFlowerRoutePolicy.prepare(
-                    providerActive, phase, origin, RouteDraftState.flowerStops.value,
+            ACTION_START_FLOWERS, ACTION_START_DRAFT_ROUTE -> {
+                return startFloatingDraft(
+                    if (intent.action == ACTION_START_FLOWERS) WalkMode.FLOWERS else WalkMode.ROUTE
                 )
-                if (!decision.allowed) {
-                    LocationStatus.display.value = "尋花未啟動：" + decision.problem
-                    updateOverlay()
-                    refreshNotification()
-                    return START_STICKY
-                }
-                val revision = ++flowerPlanRevision
-                LocationStatus.display.value = "尋花道路規劃中 · 尚未開始移動"
-                flowerPlanJob = serviceScope.launch {
-                    try {
-                        val geometry = ValhallaPlanner.plan(decision.anchors)
-                        // Never start a stale result after a stop, teleport, restore,
-                        // or another service command that changes the current origin.
-                        if (revision != flowerPlanRevision || !providerActive ||
-                            target != origin || phase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)
-                        ) return@launch
-                        activateRoute(
-                            geometry, WalkSpeedState.selected.value.metresPerSecond,
-                            WalkMode.FLOWERS, loop = true,
-                        )
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: Exception) {
-                        if (revision == flowerPlanRevision) {
-                            LocationStatus.display.value =
-                                "尋花道路規劃失敗：" + (e.message ?: "請確認網路與路點")
-                        }
-                    } finally {
-                        if (revision == flowerPlanRevision) {
-                            flowerPlanJob = null
-                            updateOverlay()
-                            refreshNotification()
-                        }
-                    }
-                }
-                updateOverlay()
-                refreshNotification()
-                return START_STICKY
             }
             ACTION_HIDE_OVERLAY -> {
                 floatingControls?.dismiss()
@@ -385,11 +374,14 @@ class MockLocationService : Service() {
                     LocationStatus.phase.value = phase
                     LocationStatus.display.value = "步行已停止 · 保留目前位置"
                     target?.let { journal.record(it, force = true) }
+                    finishEstimatedSession()
+                    saveEstimatedSteps()
                     refreshNotification()
                 }
                 return START_STICKY
             }
             ACTION_CLEAR_ROUTE -> {
+                finishEstimatedSession()
                 cancelFlowerPlanning()
                 track = emptyList()
                 trackLengthMeters = 0.0
@@ -407,6 +399,7 @@ class MockLocationService : Service() {
                 return START_STICKY
             }
             ACTION_TELEPORT -> {
+                finishEstimatedSession()
                 val point = runCatching {
                     Coordinate(intent.getDoubleExtra(EXTRA_LAT, Double.NaN),
                         intent.getDoubleExtra(EXTRA_LON, Double.NaN))
@@ -451,6 +444,107 @@ class MockLocationService : Service() {
         }
     }
 
+
+    private fun finishEstimatedSession() {
+        val start = sessionStartMillis
+        if (start <= 0L) return
+        sessionStartMillis = 0L
+        val estimated = (estimatedSteps.snapshot().estimatedSteps - sessionStartSteps)
+            .coerceAtLeast(0L)
+        if (estimated == 0L) return
+        val ledger = EstimatedStepLedger(this)
+        val stored = runCatching {
+            ledger.add(start, System.currentTimeMillis(), estimated)
+        }.getOrElse { error ->
+            LocationStatus.display.value = "估算步數保存失敗：" + error.message
+            return
+        }
+        if (stored != null && ledger.optIn()) {
+            runCatching { EstimatedStepsSyncWorker.enqueue(this) }
+                .onFailure { LocationStatus.display.value = "Health Connect 同步排程失敗：" + it.message }
+        }
+    }
+
+    private fun saveEstimatedSteps() {
+        getSharedPreferences("pikminbee_estimated_steps", MODE_PRIVATE).edit()
+            .putFloat("total_metres", estimatedSteps.snapshot().totalMetres.toFloat())
+            .apply()
+    }
+
+    /** Current virtual fix or a recently observed device fix; never the first route waypoint. */
+    private fun floatingOrigin(): Coordinate? {
+        target?.let { return it }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
+            != PackageManager.PERMISSION_GRANTED) return null
+        if (System.currentTimeMillis() - OverlayMapSelection.deviceFixTimestampMillis.value
+            < 300_000L) {
+            OverlayMapSelection.deviceFix.value?.let { return it }
+        }
+        return sequenceOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
+            .mapNotNull { provider ->
+                runCatching { manager.getLastKnownLocation(provider) }.getOrNull()
+                    ?.takeIf { it.time > System.currentTimeMillis() - 300_000L }
+            }
+            .firstOrNull()
+            ?.let { fix -> runCatching { Coordinate(fix.latitude, fix.longitude) }.getOrNull() }
+    }
+
+    private fun startFloatingDraft(walkMode: WalkMode): Int {
+        val label = if (walkMode == WalkMode.FLOWERS) "尋花" else "路徑"
+        if (flowerPlanJob?.isActive == true) {
+            LocationStatus.display.value = "已有道路規劃正在進行，請先取消"
+            updateOverlay()
+            return if (providerActive) START_STICKY else START_NOT_STICKY
+        }
+        if (phase == WalkPhase.MOVING || phase == WalkPhase.PAUSED) {
+            LocationStatus.display.value = "請先停止目前行走，再啟動新的" + label
+            updateOverlay()
+            return START_STICKY
+        }
+        val current = floatingOrigin()
+        val stops = if (walkMode == WalkMode.FLOWERS) RouteDraftState.flowerStops.value
+            else RouteDraftState.routeStops.value
+        val anchors = runCatching {
+            FloatingRouteDraft.anchors(current, stops, loop = walkMode == WalkMode.FLOWERS)
+        }.getOrElse { error ->
+            LocationStatus.display.value = label + "無法開始：" +
+                (error.message ?: "請檢查路點")
+            updateOverlay()
+            return if (providerActive) START_STICKY else START_NOT_STICKY
+        }
+        val revision = ++flowerPlanRevision
+        LocationStatus.display.value = label + "道路規劃中 · 尚未移動"
+        updateOverlay()
+        flowerPlanJob = serviceScope.launch {
+            try {
+                val planned = ValhallaPlanner.plan(anchors)
+                if (revision != flowerPlanRevision ||
+                    phase == WalkPhase.MOVING || phase == WalkPhase.PAUSED ||
+                    (providerActive && target != current)) return@launch
+                activateRoute(
+                    planned,
+                    WalkSpeedState.selected.value.metresPerSecond,
+                    walkMode,
+                    loop = walkMode == WalkMode.FLOWERS,
+                )
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (revision == flowerPlanRevision) {
+                    LocationStatus.display.value = label + "道路規劃失敗：" +
+                        (error.message ?: "網路或路點錯誤")
+                }
+            } finally {
+                if (revision == flowerPlanRevision) {
+                    flowerPlanJob = null
+                    updateOverlay()
+                    refreshNotification()
+                }
+            }
+        }
+        return if (providerActive) START_STICKY else START_NOT_STICKY
+    }
+
     private fun updateOverlay() {
         floatingControls?.update(
             phase = phase,
@@ -483,6 +577,9 @@ class MockLocationService : Service() {
             return false
         }
         if (!ensureProvider()) return false
+        finishEstimatedSession()
+        sessionStartMillis = System.currentTimeMillis()
+        sessionStartSteps = estimatedSteps.snapshot().estimatedSteps
         track = planned
         trackLengthMeters = length
         target = planned.first()
@@ -619,6 +716,8 @@ class MockLocationService : Service() {
     }
 
     private fun releaseMock(clearCheckpoint: Boolean = true) {
+        finishEstimatedSession()
+        saveEstimatedSteps()
         cancelFlowerPlanning()
         if (clearCheckpoint) journal.clear()
         lanController?.close()
