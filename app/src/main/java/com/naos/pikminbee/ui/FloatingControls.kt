@@ -9,6 +9,7 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import android.view.ViewGroup
 import android.view.inputmethod.InputMethodManager
 import android.os.Handler
 import android.os.Looper
@@ -20,6 +21,7 @@ import android.text.InputType
 import com.naos.pikminbee.location.OverlayMapSelection
 import com.naos.pikminbee.health.EstimatedWalkStatus
 import com.naos.pikminbee.domain.Coordinate
+import com.naos.pikminbee.domain.RoutePointDraft
 import com.naos.pikminbee.data.SavedRouteState
 import android.widget.TextView
 import com.naos.pikminbee.data.AppPreferences
@@ -150,6 +152,48 @@ class FloatingControls(
         }
     }
 
+    /** Redraw the overlay in place after light/dark/system mode changes.
+     * Never dismiss the view, reset the selected tab or alter GPS state.
+     */
+    fun refreshAppearance() {
+        val holder = root ?: return
+        holder.background = glass()
+        val foreground = if (isDark()) Color.rgb(241, 247, 255)
+            else Color.rgb(29, 48, 78)
+        fun visit(view: View) {
+            if (view is TextView) {
+                view.setTextColor(foreground)
+                when {
+                    view is EditText -> {
+                        view.setHintTextColor(if (isDark()) Color.LTGRAY else Color.GRAY)
+                        view.background = softButtonBackground()
+                    }
+                    view.hasOnClickListeners() && view !== stepsSummary ->
+                        view.background = softButtonBackground()
+                    else -> view.background = null
+                }
+            }
+            if (view is ViewGroup) {
+                for (index in 0 until view.childCount) visit(view.getChildAt(index))
+            }
+        }
+        visit(holder)
+        refreshTabs()
+        renderMode()
+        speedButtons.forEach { (option, button) ->
+            val selected = option == currentSpeed
+            button.tag = selected
+            button.setTextColor(if (selected) Color.WHITE else foreground)
+            button.background = GradientDrawable().apply {
+                cornerRadius = dp(12).toFloat()
+                setColor(if (selected) Color.rgb(54, 116, 198)
+                    else if (isDark()) Color.argb(140, 81, 112, 151)
+                    else Color.argb(190, 232, 242, 255))
+            }
+        }
+        holder.invalidate()
+    }
+
     /** Called on orientation change; never creates a service or resumes walking. */
     fun onScreenChanged() {
         params?.let { placement ->
@@ -177,15 +221,16 @@ class FloatingControls(
             else Color.argb(225, 255, 255, 255))
     }
 
+    private fun softButtonBackground() = GradientDrawable().apply {
+        cornerRadius = dp(14).toFloat()
+        setColor(if (isDark()) Color.argb(142, 81, 112, 151)
+            else Color.argb(198, 232, 242, 255))
+        // No stroke: the old outline on every row caused a wall of visible lines.
+    }
+
     private fun action(label: String, click: () -> Unit): TextView = TextView(context).apply {
         text = label
-        background = GradientDrawable().apply {
-            cornerRadius = dp(13).toFloat()
-            setColor(if (isDark()) Color.argb(168, 48, 77, 113)
-                else Color.argb(205, 244, 250, 255))
-            setStroke(dp(1), if (isDark()) Color.argb(130, 193, 219, 247)
-                else Color.argb(230, 255, 255, 255))
-        }
+        background = softButtonBackground()
         textSize = 14f
         setTextColor(if (isDark()) Color.rgb(241, 247, 255) else Color.rgb(29, 48, 78))
         gravity = Gravity.CENTER
@@ -228,13 +273,24 @@ class FloatingControls(
         fun heading(name: String) {
             content.addView(action(name) { }.apply {
                 textSize = 12f
+                minHeight = dp(31)
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
+                background = null
+                gravity = Gravity.CENTER_VERTICAL
                 setOnClickListener(null)
             })
         }
         fun line(vararg views: View) {
             val row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
-            views.forEach { row.addView(it,
-                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)) }
+            views.forEachIndexed { index, view ->
+                row.addView(view, LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.WRAP_CONTENT,
+                    if (views.size >= 3 && index == 0) 2.4f else 1f,
+                ).apply {
+                    marginEnd = dp(5)
+                    topMargin = dp(4)
+                })
+            }
             content.addView(row)
         }
         fun pointFromMap(): Coordinate? = OverlayMapSelection.picked.value
@@ -284,7 +340,12 @@ class FloatingControls(
                 content.addView(action("● 起點：" +
                     (com.naos.pikminbee.location.LocationStatus.selected.value
                         ?: OverlayMapSelection.deviceFix.value)?.label().orEmpty()
-                ) { }.apply { setOnClickListener(null); textSize = 11f })
+                ) { }.apply {
+                    setOnClickListener(null)
+                    textSize = 11f
+                    background = null
+                    minHeight = dp(29)
+                })
                 stops.forEachIndexed { index, point ->
                     line(
                         action((index + 1).toString() + ". " + point.label()) {
@@ -312,11 +373,20 @@ class FloatingControls(
                     action("＋ 加入選取路點") {
                         val point = pointFromMap()
                         if (point == null) showMessage("請先在地圖選取路點")
-                        else if (stops.size >= 14) showMessage("最多新增 14 個路點")
+                        else if (mode == WalkMode.ROUTE) {
+                            val result = RoutePointDraft.select(
+                                stops,
+                                com.naos.pikminbee.location.LocationStatus.selected.value
+                                    ?: OverlayMapSelection.deviceFix.value,
+                                point,
+                            )
+                            if (result.outcome == RoutePointDraft.Outcome.ADDED) {
+                                prefs.saveRouteDraft(result.stops)
+                                renderMode()
+                            } else showMessage("路點未新增：已存在、過近或超過 14 點")
+                        } else if (stops.size >= 14) showMessage("最多 14 個花點")
                         else {
-                            val next = stops + point
-                            if (mode == WalkMode.ROUTE) prefs.saveRouteDraft(next)
-                            else prefs.saveFlowerDraft(next)
+                            prefs.saveFlowerDraft(stops + point)
                             renderMode()
                         }
                     },
@@ -408,11 +478,16 @@ class FloatingControls(
         renderMode()
         val description = action("全功能控制中心 · 待機") { }
         description.setOnClickListener(null)
-        description.textSize = 11f
+        description.textSize = 12f
+        description.setTypeface(description.typeface, android.graphics.Typeface.BOLD)
+        description.background = null
         description.minHeight = dp(37)
         actions.addView(description, 0)
-        val speedHeading = action("行走速度（行走中也可調整）") { }.apply {
-            textSize = 11f
+        val speedHeading = action("行走速度") { }.apply {
+            textSize = 12f
+            background = null
+            minHeight = dp(29)
+            gravity = Gravity.CENTER_VERTICAL
             setOnClickListener(null)
         }
         actions.addView(speedHeading)
@@ -431,6 +506,7 @@ class FloatingControls(
         actions.addView(speedRow)
         val steps = action("⌁ 模擬行走估算 0 步 · 非真實感測") { onOpenSettings() }.apply {
             textSize = 11f
+            background = null
             contentDescription = "估算步數，Health Connect 設定請至主 App"
         }
         stepsSummary = steps
@@ -576,12 +652,13 @@ class FloatingControls(
             val selected = option == speedPreset
             if (button.tag != selected) {
                 button.tag = selected
+                button.setTextColor(if (selected) Color.WHITE else
+                    if (isDark()) Color.rgb(241, 247, 255) else Color.rgb(29, 48, 78))
                 button.background = GradientDrawable().apply {
                     cornerRadius = dp(12).toFloat()
-                    setColor(if (selected) if (isDark()) Color.rgb(52, 103, 177)
-                        else Color.rgb(207, 227, 255) else Color.TRANSPARENT)
-                    setStroke(dp(1), if (selected) Color.rgb(106, 168, 247)
-                        else if (isDark()) Color.rgb(165, 185, 212) else Color.rgb(105, 136, 181))
+                    setColor(if (selected) Color.rgb(54, 116, 198)
+                        else if (isDark()) Color.argb(140, 81, 112, 151)
+                        else Color.argb(190, 232, 242, 255))
                 }
                 button.contentDescription = "速度：${option.display}" +
                     if (selected) "，目前選擇" else ""

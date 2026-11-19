@@ -23,26 +23,27 @@ object RoutePinBitmap {
         }
     }
 
-    /** Blue location dot for phone fixes; bee-marked amber dot for active mock GPS. */
+    /**
+     * Compact Google-Maps-like position dot, not a large tap target or halo.
+     * Real GPS is blue; a mock GPS position is orange. Bee remains the overlay icon.
+     * Total bitmap footprint is 24dp, coloured centre about 9dp.
+     */
     fun current(context: Context, simulated: Boolean): Bitmap {
         val density = context.resources.displayMetrics.density
-        val size = (58f * density).toInt().coerceAtLeast(58)
+        val size = (24f * density).toInt().coerceAtLeast(24)
         val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
-        val centre = size / 2f
+        val centre = size * .5f
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-        paint.color = Color.argb(38, 44, 122, 245)
-        canvas.drawCircle(centre, centre, size * .46f, paint)
+        val colour = if (simulated) Color.rgb(248, 144, 46)
+            else Color.rgb(53, 125, 239)
+        paint.color = if (simulated) Color.argb(26, 248, 144, 46)
+            else Color.argb(26, 53, 125, 239)
+        canvas.drawCircle(centre, centre, size * .45f, paint)
         paint.color = Color.WHITE
-        canvas.drawCircle(centre, centre, size * .29f, paint)
-        paint.color = if (simulated) Color.rgb(255, 197, 53) else Color.rgb(53, 123, 244)
-        canvas.drawCircle(centre, centre, size * .235f, paint)
-        if (simulated) {
-            paint.color = Color.rgb(21, 46, 86)
-            paint.textAlign = Paint.Align.CENTER
-            paint.textSize = 21f * density
-            canvas.drawText("🐝", centre, centre - (paint.ascent() + paint.descent()) / 2f, paint)
-        }
+        canvas.drawCircle(centre, centre, size * .31f, paint)
+        paint.color = colour
+        canvas.drawCircle(centre, centre, size * .23f, paint)
         return bitmap
     }
 

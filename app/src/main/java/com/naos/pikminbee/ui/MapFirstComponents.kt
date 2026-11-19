@@ -53,60 +53,37 @@ fun MapGlass(dark: Boolean, modifier: Modifier = Modifier, content: @Composable 
     )
 }
 
-/** Coordinate-only top bar. No network search or automatic teleport. */
+/** Coordinate entry is always ready to teleport. A map tap only pre-fills coordinates. */
 @Composable
 fun CoordinateTopBar(
     value: String,
     onValueChange: (String) -> Unit,
-    onApply: () -> Unit,
-    onCopy: () -> Unit,
-    onMenu: () -> Unit,
-    onMapBack: () -> Unit,
-    mapExplore: Boolean,
+    onTeleport: () -> Unit,
     dark: Boolean,
     modifier: Modifier = Modifier,
 ) {
     MapGlass(dark, modifier) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 3.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(1.dp),
-        ) {
-            IconButton(
-                onClick = if (mapExplore) onMapBack else onMenu,
-                modifier = Modifier.size(48.dp),
-            ) {
-                Text(
-                    if (mapExplore) "‹" else "☰",
-                    fontSize = 26.sp,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.semantics {
-                        contentDescription = if (mapExplore) "返回操作" else "開啟模式選單"
-                    },
-                )
-            }
-            OutlinedTextField(
-                value = value,
-                onValueChange = { onValueChange(it.take(65)) },
-                modifier = Modifier.weight(1f).heightIn(min = 56.dp),
-                singleLine = true,
-                label = { Text("經緯度", fontSize = 12.sp) },
-                placeholder = { Text("25.0330, 121.5654", fontSize = 12.sp) },
-                textStyle = MaterialTheme.typography.bodyMedium,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(onDone = { onApply() }),
-                trailingIcon = {
-                    IconButton(onClick = onApply, modifier = Modifier.size(44.dp)) {
-                        Text("↗", fontSize = 24.sp,
-                            modifier = Modifier.semantics { contentDescription = "前往輸入座標" })
-                    }
-                },
-            )
-            IconButton(onClick = onCopy, modifier = Modifier.size(43.dp)) {
-                Text("⧉", fontSize = 24.sp,
-                    modifier = Modifier.semantics { contentDescription = "複製選取座標" })
-            }
-        }
+        OutlinedTextField(
+            value = value,
+            onValueChange = { onValueChange(it.take(65)) },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 7.dp, vertical = 4.dp)
+                .heightIn(min = 55.dp),
+            singleLine = true,
+            label = { Text("經緯度 · 輸入或點地圖", fontSize = 12.sp) },
+            placeholder = { Text("25.0330, 121.5654", fontSize = 12.sp) },
+            textStyle = MaterialTheme.typography.bodyMedium,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
+            keyboardActions = KeyboardActions(onGo = { onTeleport() }),
+            trailingIcon = {
+                IconButton(onClick = onTeleport, modifier = Modifier.size(48.dp)) {
+                    Text(
+                        "➜", fontWeight = FontWeight.Bold, fontSize = 24.sp,
+                        color = if (dark) Color(0xFFACD0FF) else Color(0xFF2967C0),
+                        modifier = Modifier.semantics { contentDescription = "立即瞬移到輸入的座標" },
+                    )
+                }
+            },
+        )
     }
 }
 

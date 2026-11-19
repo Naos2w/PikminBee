@@ -136,6 +136,9 @@ private fun OpenFreeMapPane(
         view.getMapAsync { ready ->
             map = ready
             ready.uiSettings.isCompassEnabled = false
+            ready.uiSettings.isScrollGesturesEnabled = true
+            ready.uiSettings.isZoomGesturesEnabled = true
+            ready.uiSettings.isRotateGesturesEnabled = true
             ready.uiSettings.isAttributionEnabled = true
             ready.addOnMapClickListener { point ->
                 latestOnPick(Coordinate(point.latitude, point.longitude))
@@ -237,8 +240,8 @@ private fun OpenFreeMapPane(
                 .position(LibreLatLng(coordinate.latitude, coordinate.longitude))
                 .icon(LibreIconFactory.getInstance(context).fromBitmap(
                     RoutePinBitmap.create(context, index, stops.size)))
-                .title("第 ${index + 1} 點" + if (index == 0) " · 起點"
-                    else if (index == stops.lastIndex) " · 終點" else " · 途經點"))
+                .title("第 ${index + 1} 個目的地" +
+                    if (index == stops.lastIndex) " · 終點" else " · 途經點"))
         }
         line = if (road.size >= 2) m.addPolyline(LibrePolylineOptions()
             .addAll(road.map { LibreLatLng(it.latitude, it.longitude) })
@@ -334,6 +337,9 @@ private fun GoogleMapsPane(
         view.getMapAsync { ready ->
             map = ready
             ready.uiSettings.isMapToolbarEnabled = false
+            ready.uiSettings.isScrollGesturesEnabled = true
+            ready.uiSettings.isZoomGesturesEnabled = true
+            ready.uiSettings.isRotateGesturesEnabled = true
             ready.setOnMapClickListener { point ->
                 latestOnPick(Coordinate(point.latitude, point.longitude))
             }
@@ -420,8 +426,8 @@ private fun GoogleMapsPane(
                 .anchor(.5f, .5f)
                 .icon(com.google.android.gms.maps.model.BitmapDescriptorFactory.fromBitmap(
                     RoutePinBitmap.create(context, index, stops.size)))
-                .title("第 ${index + 1} 點" + if (index == 0) " · 起點"
-                    else if (index == stops.lastIndex) " · 終點" else " · 途經點"))
+                .title("第 ${index + 1} 個目的地" +
+                    if (index == stops.lastIndex) " · 終點" else " · 途經點"))
         }
         line = if (road.size >= 2) m.addPolyline(GooglePolylineOptions()
             .addAll(road.map { GoogleLatLng(it.latitude, it.longitude) })
