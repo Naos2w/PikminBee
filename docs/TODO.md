@@ -1,5 +1,15 @@
 # PikminBee TODO
 
+## Naos Liquid Glass V3 · User-approved A/map-first Android UI (20 Nov 2026)
+- [x] DEV 0.3.3: canonical Naos six theme families with Light/Dark and Regular/Clear/Blur, persistent settings, vector icons and low-saturation controls.
+- [x] DEV 0.3.3: AGSL source-sampled rounded-edge lens effect on Android 13+ with idle MapLibre/Google snapshot, frosted fallback where unsupported; cross-app overlay uses privacy-safe frosted material.
+- [x] DEV 0.3.3: top direct-teleport entry, floating four-mode dock, route undo/start/pause/stop, and compact bee quick actions with full controls behind deliberate expansion.
+- [x] Initial Kotlin compile, 152 JVM tests, Android Lint and DEV assemble passed on MSI.
+- [ ] PR and CI-gated signed UAT 0.4.1 publication; production `main` unchanged.
+- [ ] POCO real-device acceptance for native camera gestures, shader optics, performance, overlay clipping, permission/HC regression, signed UAT install/upgrade; no connected device yet.
+- [ ] Compare POCO runtime screenshots against the approved fig/HTML preview before claiming design pixel parity. See docs/NAOS-LIQUID-GLASS-V3-ANDROID.md.
+
+
 ## UAT 0.2.1 — user-reported UI regressions (19 Nov 2026)
 - [x] DEV 0.2.3 source: remove edge-swipe `ModalNavigationDrawer` and always-mounted `BottomSheetScaffold`; keep native map visible with a compact bottom-only four-mode selector. Only the dedicated bottom handle may open a modal editor.
 - [x] DEV source: bottom mode rail switches **瞬移／路徑／尋花／收藏**, without a left-hand drawer; settings and permissions are inside the expanded sheet.

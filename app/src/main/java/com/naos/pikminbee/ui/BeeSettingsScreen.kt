@@ -37,6 +37,8 @@ fun BeeSettingsScreen(
     provider: MapProvider,
     freeMapStyle: FreeMapStyle,
     appearance: MapAppearance,
+    naosFamily: NaosThemeFamily,
+    glassMaterial: NaosGlassMaterial,
     defaultSpeed: WalkSpeedPreset,
     overlayVisible: Boolean,
     mockActive: Boolean,
@@ -45,6 +47,8 @@ fun BeeSettingsScreen(
     onProvider: (MapProvider) -> Unit,
     onFreeMapStyle: (FreeMapStyle) -> Unit,
     onAppearance: (MapAppearance) -> Unit,
+    onNaosFamily: (NaosThemeFamily) -> Unit,
+    onGlassMaterial: (NaosGlassMaterial) -> Unit,
     onDefaultSpeed: (WalkSpeedPreset) -> Unit,
     onPermissions: () -> Unit,
     onOverlay: () -> Unit,
@@ -54,13 +58,12 @@ fun BeeSettingsScreen(
     statusMessage: String,
     onBack: () -> Unit,
 ) {
-    val foreground = if (dark) Color(0xFFF3F7FF) else Color(0xFF18263A)
-    val muted = if (dark) Color(0xFFC6D3E6) else Color(0xFF52627A)
+    val palette = NaosDesignSystem.palette(naosFamily, dark)
+    val foreground = palette.ink
+    val muted = palette.muted
     Column(
         Modifier.fillMaxSize()
-            .background(Brush.verticalGradient(if (dark)
-                listOf(Color(0xFF142541), Color(0xFF0C152A), Color(0xFF1C3150))
-                else listOf(Color(0xFFDFEBFF), Color(0xFFF8FBFF), Color(0xFFE8EFFF))))
+            .background(palette.bg)
             .statusBarsPadding().navigationBarsPadding()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 13.dp),
@@ -72,7 +75,11 @@ fun BeeSettingsScreen(
             Text("設定", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = foreground)
             Text("UAT", color = muted, fontSize = 11.sp)
         }
-        MapGlass(dark, Modifier.fillMaxWidth()) {
+        androidx.compose.material3.Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(22.dp),
+            color = palette.surface,
+        ) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("地圖與外觀", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
                 if (BuildConfig.HAS_GOOGLE_MAPS_KEY) {
@@ -106,7 +113,7 @@ fun BeeSettingsScreen(
                         }
                     }
                 }
-                Text("介面主題", fontSize = 12.sp)
+                Text("介面外觀", color = foreground, fontSize = 12.sp)
                 androidx.compose.foundation.layout.FlowRow(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(7.dp),
@@ -123,9 +130,42 @@ fun BeeSettingsScreen(
                         )
                     }
                 }
+                Text("Naos Universal V3 · 六種核准低飽和主題",
+                    color = foreground, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                androidx.compose.foundation.layout.FlowRow(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                ) {
+                    NaosThemeFamily.entries.forEach { option ->
+                        FilterChip(
+                            selected = naosFamily == option,
+                            onClick = { onNaosFamily(option) },
+                            label = { Text(option.label, fontSize = 12.sp) },
+                        )
+                    }
+                }
+                Text("玻璃材質", fontSize = 13.sp, color = foreground)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    NaosGlassMaterial.entries.forEach { option ->
+                        FilterChip(
+                            selected = glassMaterial == option,
+                            onClick = { onGlassMaterial(option) },
+                            label = { Text(option.label) },
+                        )
+                    }
+                }
+                Text("Regular／Clear 只在可取得地圖像素的裝置啟用光學折射；"+
+                    "不支援時自動使用霧面替代，不會宣稱有折射。"+
+                    "視覺參數使用 Naos 共用模板的預覽基準。",
+                    color = muted, fontSize = 11.sp)
             }
         }
-        MapGlass(dark, Modifier.fillMaxWidth()) {
+        androidx.compose.material3.Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(22.dp),
+            color = palette.surface,
+        ) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("行走預設", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
                 Text("個人預設：" + defaultSpeed.display, color = muted, fontSize = 12.sp)
@@ -145,7 +185,11 @@ fun BeeSettingsScreen(
                     color = muted, fontSize = 12.sp)
             }
         }
-        MapGlass(dark, Modifier.fillMaxWidth()) {
+        androidx.compose.material3.Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(22.dp),
+            color = palette.surface,
+        ) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("權限與控制", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
                 TextButton(onClick = onPermissions) { Text("檢查 Android 權限與模擬位置") }

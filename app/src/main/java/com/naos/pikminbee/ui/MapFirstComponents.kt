@@ -1,59 +1,148 @@
 package com.naos.pikminbee.ui
 
-import androidx.compose.foundation.BorderStroke
+import android.graphics.Bitmap
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.Button
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 
 /**
- * High-opacity, low-cost Liquid Glass-inspired surfaces for MapLibre/POCO.
- * Avoid per-frame backdrop blur over an actively rendered vector map.
+ * Naos Universal Liquid Glass V3. Pixel refraction is only claimed when a
+ * real map snapshot can be sampled. On unsupported/missing source, a frosted
+ * semantic-colour fallback is used. No fake edge-displacement decoration.
  */
 @Composable
-fun MapGlass(dark: Boolean, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(25.dp),
-        color = if (dark) Color(0xC521334D) else Color(0xD8F7FAFF),
-        contentColor = if (dark) Color(0xFFF5F7FF) else Color(0xFF1B2536),
-        border = BorderStroke(1.2.dp, Brush.linearGradient(
-            if (dark) listOf(Color(0xDAFFFFFF), Color(0x559FC9FF), Color(0x95FFFFFF))
-            else listOf(Color.White, Color(0xA7B8D3FF), Color(0xFFFFFFFF)),
-        )),
-        shadowElevation = 14.dp,
-        tonalElevation = 0.dp,
-        content = content,
-    )
+fun MapGlass(
+    dark: Boolean,
+    modifier: Modifier = Modifier,
+    backdrop: Bitmap? = null,
+    content: @Composable () -> Unit,
+) {
+    val visual = LocalNaosVisualState.current
+    val palette = if (visual.dark == dark) visual.palette
+        else NaosDesignSystem.palette(visual.family, dark)
+    val shape = RoundedCornerShape(25.dp)
+    val glassMaterial = visual.material
+    var originX by remember { mutableFloatStateOf(0f) }
+    var originY by remember { mutableFloatStateOf(0f) }
+    Box(modifier.shadow(8.dp, shape).clip(shape)) {
+        AndroidView(
+            modifier = Modifier.matchParentSize().onGloballyPositioned { coordinates ->
+                val location = coordinates.positionInRoot()
+                originX = location.x
+                originY = location.y
+            },
+            factory = { NaosMapGlassView(it) },
+            update = {
+                it.snapshot = backdrop
+                it.glassMode = glassMaterial
+                it.palette = palette
+                it.originX = originX
+                it.originY = originY
+            },
+        )
+        content()
+    }
 }
 
-/** Coordinate entry is always ready to teleport. A map tap only pre-fills coordinates. */
+/** Custom vector glyphs, one consistent 24dp style (no emoji or font-dependent icons). */
+@Composable
+fun NaosModeIcon(index: Int, tint: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier.size(22.dp)) {
+        val s = size.minDimension / 24f
+        fun p(x: Float, y: Float) = Offset(x * s, y * s)
+        val stroke = 1.9f * s
+        when (index) {
+            0 -> { // direct teleport: navigational arrow
+                val tri = Path().apply {
+                    moveTo(3f*s, 11f*s)
+                    lineTo(22f*s, 2f*s)
+                    lineTo(13f*s, 21f*s)
+                    lineTo(11f*s, 13f*s)
+                    close()
+                }
+                drawPath(tri, tint, style = Stroke(stroke, cap = StrokeCap.Round))
+            }
+            1 -> {
+                drawLine(tint, p(5f, 7f), p(5f, 15f), stroke, StrokeCap.Round)
+                drawLine(tint, p(5f, 15f), p(18f, 15f), stroke, StrokeCap.Round)
+                drawCircle(tint, 2.5f*s, p(5f, 5f), style = Stroke(stroke))
+                drawCircle(tint, 2.5f*s, p(19f, 19f), style = Stroke(stroke))
+            }
+            2 -> {
+                for (n in 0 until 5) {
+                    val angle = Math.PI * 2 * n / 5
+                    drawCircle(tint, 2.7f*s,
+                        p((12+5*Math.cos(angle)).toFloat(), (12+5*Math.sin(angle)).toFloat()),
+                        style = Stroke(stroke))
+                }
+                drawCircle(tint, 2.1f*s, p(12f, 12f))
+            }
+            3 -> {
+                val bookmark = Path().apply {
+                    moveTo(6f*s, 3f*s); lineTo(18f*s, 3f*s)
+                    lineTo(18f*s, 21f*s); lineTo(12f*s, 17f*s)
+                    lineTo(6f*s, 21f*s); close()
+                }
+                drawPath(bookmark, tint, style = Stroke(stroke, cap = StrokeCap.Round))
+            }
+            else -> {
+                drawCircle(tint, 7f*s, p(12f,12f), style = Stroke(stroke))
+                drawCircle(tint, 2f*s, p(12f,12f))
+                drawLine(tint,p(12f,1f),p(12f,6f),stroke,StrokeCap.Round)
+                drawLine(tint,p(12f,18f),p(12f,23f),stroke,StrokeCap.Round)
+                drawLine(tint,p(1f,12f),p(6f,12f),stroke,StrokeCap.Round)
+                drawLine(tint,p(18f,12f),p(23f,12f),stroke,StrokeCap.Round)
+            }
+        }
+    }
+}
+
+/** A map pick only fills the coordinate field. The arrow/Go explicitly teleports. */
 @Composable
 fun CoordinateTopBar(
     value: String,
@@ -61,69 +150,81 @@ fun CoordinateTopBar(
     onTeleport: () -> Unit,
     dark: Boolean,
     modifier: Modifier = Modifier,
+    backdrop: Bitmap? = null,
 ) {
-    MapGlass(dark, modifier) {
-        OutlinedTextField(
-            value = value,
-            onValueChange = { onValueChange(it.take(65)) },
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 7.dp, vertical = 4.dp)
-                .heightIn(min = 55.dp),
-            singleLine = true,
-            label = { Text("經緯度 · 輸入或點地圖", fontSize = 12.sp) },
-            placeholder = { Text("25.0330, 121.5654", fontSize = 12.sp) },
-            textStyle = MaterialTheme.typography.bodyMedium,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
-            keyboardActions = KeyboardActions(onGo = { onTeleport() }),
-            trailingIcon = {
-                IconButton(onClick = onTeleport, modifier = Modifier.size(48.dp)) {
-                    Text(
-                        "➜", fontWeight = FontWeight.Bold, fontSize = 24.sp,
-                        color = if (dark) Color(0xFFACD0FF) else Color(0xFF2967C0),
-                        modifier = Modifier.semantics { contentDescription = "立即瞬移到輸入的座標" },
-                    )
+    val palette = NaosDesignSystem.palette(LocalNaosVisualState.current.family, dark)
+    MapGlass(dark, modifier, backdrop) {
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 66.dp).padding(start = 14.dp, end = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            NaosModeIcon(4, palette.accent, Modifier.size(20.dp))
+            Column(Modifier.weight(1f)) {
+                Text("經緯度 · 點地圖選取", fontSize = 11.sp, color = palette.muted)
+                BasicTextField(
+                    value = value,
+                    onValueChange = { onValueChange(it.take(65)) },
+                    modifier = Modifier.fillMaxWidth()
+                        .semantics { contentDescription = "輸入緯度、經度" },
+                    singleLine = true,
+                    textStyle = androidx.compose.ui.text.TextStyle(
+                        fontSize = 17.sp, fontWeight = FontWeight.Bold,
+                        color = palette.ink,
+                    ),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
+                    keyboardActions = KeyboardActions(onGo = { onTeleport() }),
+                    cursorBrush = androidx.compose.ui.graphics.SolidColor(palette.accent),
+                )
+            }
+            Box(
+                modifier = Modifier.size(width = 52.dp, height = 49.dp)
+                    .clip(RoundedCornerShape(15.dp)).background(palette.accent),
+                contentAlignment = Alignment.Center,
+            ) {
+                IconButton(
+                    onClick = onTeleport,
+                    modifier = Modifier.matchParentSize()
+                        .semantics { contentDescription = "立即瞬移到輸入的座標" },
+                ) {
+                    Text("↗", fontSize = 26.sp, fontWeight = FontWeight.Bold,
+                        color = palette.onAccent)
                 }
-            },
-        )
+            }
+        }
     }
 }
 
-/** Map camera only; this action never writes a mock GPS position. */
 @Composable
 fun CurrentLocationMapButton(
     onClick: () -> Unit,
     dark: Boolean,
     modifier: Modifier = Modifier,
+    backdrop: Bitmap? = null,
 ) {
-    FloatingActionButton(
-        onClick = onClick,
-        modifier = modifier.size(54.dp).semantics {
-            contentDescription = "地圖移至目前位置，不會瞬移"
-        },
-        containerColor = if (dark) Color(0xD02B4165) else Color(0xDEF5F9FF),
-        contentColor = if (dark) Color(0xFFD4E8FF) else Color(0xFF3265B7),
-    ) { Text("◎", fontSize = 29.sp, fontWeight = FontWeight.Bold) }
+    val p = NaosDesignSystem.palette(LocalNaosVisualState.current.family, dark)
+    MapGlass(dark, modifier.size(52.dp), backdrop) {
+        IconButton(
+            onClick = onClick,
+            modifier = Modifier.fillMaxSize()
+                .semantics { contentDescription = "地圖移至目前位置，不會瞬移" },
+        ) { NaosModeIcon(4, p.ink, Modifier.size(24.dp)) }
+    }
 }
 
 @Composable
 fun CompactModeHeader(
-    mode: String,
-    description: String,
-    onExpand: () -> Unit,
-    dark: Boolean,
+    mode: String, description: String, onExpand: () -> Unit, dark: Boolean,
 ) {
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = 17.dp, vertical = 12.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(mode, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
-                color = if (dark) Color.White else Color(0xFF1B2536))
-            Text(description, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                fontSize = 12.sp, color = if (dark) Color(0xFFD2D9E8) else Color(0xFF526077))
+    val p = NaosDesignSystem.palette(LocalNaosVisualState.current.family, dark)
+    Row(Modifier.fillMaxWidth().padding(horizontal = 17.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(mode, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = p.ink)
+            Text(description, fontSize = 12.sp, color = p.muted, maxLines = 1)
         }
         TextButton(onClick = onExpand, modifier = Modifier.heightIn(min = 48.dp)) {
-            Text("展開操作 ⌃", fontSize = 12.sp)
+            Text("展開操作 ⌃", color = p.accent, fontSize = 12.sp)
         }
     }
 }
