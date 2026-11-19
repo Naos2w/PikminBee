@@ -96,6 +96,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import com.naos.pikminbee.location.LocationStatus
+import com.naos.pikminbee.location.OverlayMapSelection
 import com.naos.pikminbee.location.CheckpointStatus
 import com.naos.pikminbee.location.SessionJournal
 import com.naos.pikminbee.location.MockLocationService
@@ -114,6 +115,7 @@ import com.naos.pikminbee.ui.MapFirstShell
 import com.naos.pikminbee.ui.BeeSettingsScreen
 import com.naos.pikminbee.ui.BeePermissionWizard
 import com.naos.pikminbee.ui.PikminBeeThemeColors
+import kotlinx.coroutines.flow.MutableStateFlow
 
 private val navy = Color(0xFF18263A)
 private val honey = Color(0xFF9F5E0C)
@@ -121,6 +123,16 @@ private val lightGlass = Color.White.copy(alpha = 0.975f)
 private val darkGlass = Color(0xFF1E2B3C).copy(alpha = 0.985f)
 
 class MainActivity : ComponentActivity() {
+    companion object {
+        const val EXTRA_OPEN_SETTINGS = "com.naos.pikminbee.OPEN_SETTINGS"
+        val settingsRequests = MutableStateFlow(0L)
+    }
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.getBooleanExtra(EXTRA_OPEN_SETTINGS, false))
+            settingsRequests.value++
+    }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent { PikminBeeScreen() }
@@ -165,6 +177,7 @@ private fun PikminBeeScreen() {
     val muted = if (dark) Color(0xFFC1D0E3) else Color(0xFF6A778C)
 
     var selected by remember { mutableStateOf(Coordinate(25.0330, 121.5654)) }
+    var selectionExplicit by remember { mutableStateOf(false) }
     var flowerPick by remember { mutableStateOf<FlowerMapPick?>(null) }
     var editingFlowerStopIndex by remember { mutableStateOf<Int?>(null) }
     // A recorded flower is never silently treated as the route's starting point.
@@ -220,6 +233,14 @@ private fun PikminBeeScreen() {
         message = if (granted) "已取得定位權限，可以再次點選瞬移" else "請先授予精確定位權限"
     }
     val phonePosition by rememberDeviceLocation(phoneLocationRefresh)
+    LaunchedEffect(selected, selectionExplicit) {
+        if (selectionExplicit) OverlayMapSelection.picked.value = selected
+    }
+    LaunchedEffect(phonePosition) {
+        OverlayMapSelection.deviceFix.value = phonePosition
+        OverlayMapSelection.deviceFixTimestampMillis.value =
+            if (phonePosition != null) System.currentTimeMillis() else 0L
+    }
     val overlaySettings = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) {
@@ -421,7 +442,14 @@ private fun PikminBeeScreen() {
     }
 
     var activePage by remember {
-        mutableStateOf(if (prefs.setupCompleted()) BeePage.MAP else BeePage.PERMISSIONS)
+        mutableStateOf(if ((context as? MainActivity)?.intent
+                ?.getBooleanExtra(MainActivity.EXTRA_OPEN_SETTINGS, false) == true)
+            BeePage.SETTINGS
+            else if (prefs.setupCompleted()) BeePage.MAP else BeePage.PERMISSIONS)
+    }
+    val settingsRequest by MainActivity.settingsRequests.collectAsState()
+    LaunchedEffect(settingsRequest) {
+        if (settingsRequest > 0L) activePage = BeePage.SETTINGS
     }
     var coordinateInput by remember { mutableStateOf(selected.label()) }
     LaunchedEffect(selected) { coordinateInput = selected.label() }
@@ -432,6 +460,7 @@ private fun PikminBeeScreen() {
             return
         }
         selected = parsed
+        selectionExplicit = true
         if (tab == ToolTab.FLOWERS) flowerPick = FlowerMapPick(parsed)
         message = "已選取 " + parsed.label() + " · 不會自動瞬移"
         focusMapPoint(parsed)
@@ -608,6 +637,7 @@ private fun PikminBeeScreen() {
                     selected, allFlowers, 5000.0, maxCount = 100
                 ) else emptyList(),
                 onPick = { point ->
+                    selectionExplicit = true
                     if (mapExplore) mapExplore = false
                     when (tab) {
                         ToolTab.ROUTE -> {
@@ -628,6 +658,7 @@ private fun PikminBeeScreen() {
                     }
                 },
                 onFlowerPick = { flower ->
+                    selectionExplicit = true
                     if (mapExplore) mapExplore = false
                     selected = flower.coordinate
                     flowerPick = FlowerMapPick(flower.coordinate, flower)
