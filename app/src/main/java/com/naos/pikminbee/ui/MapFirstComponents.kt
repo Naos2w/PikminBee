@@ -162,12 +162,18 @@ fun NaosModeIcon(index: Int, tint: Color, modifier: Modifier = Modifier) {
 fun NaosBeeHomeIcon(tint: Color, modifier: Modifier = Modifier) {
     Canvas(modifier.size(24.dp)) {
         val s = size.minDimension / 24f
-        val outline = Stroke(width = 1.8f * s, cap = StrokeCap.Round)
-        drawOval(tint, topLeft = Offset(3.5f*s, 5f*s), size = Size(9f*s, 8f*s), style = outline)
-        drawOval(tint, topLeft = Offset(11.5f*s, 5f*s), size = Size(9f*s, 8f*s), style = outline)
-        drawOval(tint, topLeft = Offset(7f*s, 10f*s), size = Size(10f*s, 12f*s), style = outline)
-        drawLine(tint, Offset(7f*s, 15f*s), Offset(17f*s, 15f*s), 1.7f*s)
-        drawLine(tint, Offset(8f*s, 19f*s), Offset(16f*s, 19f*s), 1.7f*s)
+        // Same original bee silhouette as the draggable overlay icon.
+        val outline = Stroke(width = 1.9f * s, cap = StrokeCap.Round)
+        drawOval(tint, topLeft = Offset(2.8f*s, 7.6f*s),
+            size = Size(7.8f*s, 5.4f*s), style = outline)
+        drawOval(tint, topLeft = Offset(13.4f*s, 7.6f*s),
+            size = Size(7.8f*s, 5.4f*s), style = outline)
+        drawOval(tint, topLeft = Offset(7.2f*s, 9.8f*s),
+            size = Size(9.6f*s, 11.6f*s), style = outline)
+        drawLine(tint, Offset(8f*s, 14.1f*s), Offset(16f*s, 14.1f*s), 1.9f*s, StrokeCap.Round)
+        drawLine(tint, Offset(8.1f*s, 17.5f*s), Offset(15.9f*s, 17.5f*s), 1.9f*s, StrokeCap.Round)
+        drawLine(tint, Offset(10.2f*s, 10f*s), Offset(8.8f*s, 5.5f*s), 1.9f*s, StrokeCap.Round)
+        drawLine(tint, Offset(13.8f*s, 10f*s), Offset(15.2f*s, 5.5f*s), 1.9f*s, StrokeCap.Round)
     }
 }
 
