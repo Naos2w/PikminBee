@@ -5,6 +5,14 @@
 - User-approved editable A/map-first artboards: `C:\Naos\02.Git\personal\design-previews\PikminBee-V4-A-Naos-LiquidGlassV3-20261120.fig`.
 - Approved interactive design reference: `PikminBee-LiquidGlass-V3-Interactive-20261120.html`; design notes in `PikminBee-LiquidGlassV3-DESIGN.md`.
 
+## V4-A overlay follow-up (source only, 20 November)
+- Focused OpenPencil revision: `C:\Naos\02.Git\personal\design-previews\PikminBee-V4-A-Overlay-Icons-20261120.fig` and matching inspected PNG, containing editable Light/Dark Sage previews. Earlier canonical A-map design stays intact.
+- The floating bee is a small draggable collapsed button; expansion shows 8 semantic vector icons in two rows plus a short status and *separate* real/estimated step counts. Long-press descriptions, a replayable three-step help dialog and a persisted first-use toggle live in Settings.
+- Main map remains the sole map/route editor. Overlay Map returns to the app, never stops a route; Flower Vision returns to the permission-gated existing screen-capture UI. Stopping travel, restoring real GPS, restoring the remembered parked virtual fix, collapsing and closing are distinct operations.
+- The map sheet displays road-progress distance, upcoming stop, estimated remaining minutes and speed where an active route exists. No location or screen effects are triggered by a navigation tab alone.
+- Optical glass fades to frosted backing when the native map moves, avoiding stale distorted pixels and continuous snapshot capture. Android GPU correctness and map smoothness remain subject to POCO UAT.
+- This set of source changes is not included in already-signed UAT 0.4.1; no new APK, `staging`/production promotion or CI wait is part of the source-only task.
+
 ## DEV implementation
 1. `NaosDesignSystem.kt`: all six Light/Dark canonical themes and Regular/Clear/Blur semantic materials. Sage + Regular is default. Per-device choices persist in `AppPreferences` and are presented on the settings screen.
 2. `MapFirstShell.kt` + `MapFirstComponents.kt`: full-screen native map, floating top coordinate entry, 4 vector-only tabs in bottom dock, dedicated sheet handle, route quick actions and small recenter control. No left-hand drawer or full-screen map gesture interceptor.

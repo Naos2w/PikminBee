@@ -1,0 +1,123 @@
+package com.naos.pikminbee.ui
+
+import android.graphics.Canvas
+import android.graphics.ColorFilter
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.PixelFormat
+import android.graphics.drawable.Drawable
+import kotlin.math.cos
+import kotlin.math.sin
+
+/** Single low-contrast, vector-only icon language for the floating toolbar. */
+internal enum class OverlayGlyph {
+    BEE, PLAY, PAUSE, RESUME, STOP, REAL, VIRTUAL, FLOWER, SPEED, MAP, CLOSE, MORE
+}
+
+internal class NaosOverlayActionIcon(
+    private val glyph: OverlayGlyph,
+    private val ink: Int,
+    private val pixels: Int,
+) : Drawable() {
+    private val pen = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = ink
+        strokeWidth = 1.9f
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+        style = Paint.Style.STROKE
+    }
+    override fun getIntrinsicWidth() = pixels
+    override fun getIntrinsicHeight() = pixels
+    override fun draw(canvas: Canvas) {
+        val saved = canvas.save()
+        canvas.translate(bounds.left.toFloat(), bounds.top.toFloat())
+        canvas.scale(bounds.width() / 24f, bounds.height() / 24f)
+        pen.style = Paint.Style.STROKE
+        when (glyph) {
+            OverlayGlyph.PLAY, OverlayGlyph.RESUME -> {
+                val path = Path().apply {
+                    moveTo(8f, 5f); lineTo(19f, 12f); lineTo(8f, 19f); close()
+                }
+                canvas.drawPath(path, pen)
+            }
+            OverlayGlyph.PAUSE -> {
+                canvas.drawLine(8f, 5f, 8f, 19f, pen)
+                canvas.drawLine(16f, 5f, 16f, 19f, pen)
+            }
+            OverlayGlyph.STOP -> canvas.drawRoundRect(5f, 5f, 19f, 19f, 2f, 2f, pen)
+            OverlayGlyph.REAL -> {
+                canvas.drawCircle(12f, 12f, 6.5f, pen)
+                canvas.drawCircle(12f, 12f, 2f, pen)
+                canvas.drawLine(12f, 1f, 12f, 4f, pen)
+                canvas.drawLine(12f, 20f, 12f, 23f, pen)
+                canvas.drawLine(1f, 12f, 4f, 12f, pen)
+                canvas.drawLine(20f, 12f, 23f, 12f, pen)
+            }
+            OverlayGlyph.VIRTUAL -> {
+                val path = Path().apply {
+                    moveTo(12f, 22f)
+                    cubicTo(10f, 18f, 4.5f, 14.5f, 4.5f, 10f)
+                    cubicTo(4.5f, 0f, 19.5f, 0f, 19.5f, 10f)
+                    cubicTo(19.5f, 14.5f, 14f, 18f, 12f, 22f)
+                }
+                canvas.drawPath(path, pen)
+                canvas.drawCircle(12f, 9.5f, 2.9f, pen)
+            }
+            OverlayGlyph.FLOWER -> {
+                repeat(5) { index ->
+                    val angle = Math.PI * 2 * index / 5 - Math.PI / 2
+                    canvas.drawCircle(
+                        (12 + 5.1 * cos(angle)).toFloat(),
+                        (12 + 5.1 * sin(angle)).toFloat(), 3f, pen
+                    )
+                }
+                pen.style = Paint.Style.FILL
+                canvas.drawCircle(12f, 12f, 2f, pen)
+            }
+            OverlayGlyph.SPEED -> {
+                canvas.drawArc(3f, 4f, 21f, 22f, 195f, 150f, false, pen)
+                canvas.drawLine(12f, 17f, 17f, 10f, pen)
+                canvas.drawCircle(12f, 17f, 2f, pen)
+            }
+            OverlayGlyph.MAP -> {
+                val path = Path().apply {
+                    moveTo(2.5f, 5f); lineTo(9f, 3f); lineTo(15f, 5f)
+                    lineTo(21.5f, 3f); lineTo(21.5f, 19f)
+                    lineTo(15f, 21f); lineTo(9f, 19f)
+                    lineTo(2.5f, 21f); close()
+                }
+                canvas.drawPath(path, pen)
+                canvas.drawLine(9f, 3f, 9f, 19f, pen)
+                canvas.drawLine(15f, 5f, 15f, 21f, pen)
+            }
+            OverlayGlyph.CLOSE -> {
+                canvas.drawLine(6f, 6f, 18f, 18f, pen)
+                canvas.drawLine(18f, 6f, 6f, 18f, pen)
+            }
+            OverlayGlyph.MORE -> {
+                val p = Path().apply {
+                    moveTo(5f, 9f); lineTo(12f, 16f); lineTo(19f, 9f)
+                }
+                canvas.drawPath(p, pen)
+            }
+            OverlayGlyph.BEE -> {
+                canvas.drawOval(4f, 6f, 13f, 13f, pen)
+                canvas.drawOval(11f, 5f, 20f, 13f, pen)
+                canvas.drawOval(7f, 10f, 17f, 22f, pen)
+                canvas.drawLine(8.7f, 14f, 15.3f, 14f, pen)
+                canvas.drawLine(8f, 18f, 16f, 18f, pen)
+                canvas.drawLine(10f, 10f, 9f, 6f, pen)
+                canvas.drawLine(14f, 10f, 15f, 6f, pen)
+            }
+        }
+        canvas.restoreToCount(saved)
+    }
+
+    override fun setAlpha(alpha: Int) { pen.alpha = alpha; invalidateSelf() }
+    override fun setColorFilter(colorFilter: ColorFilter?) {
+        pen.colorFilter = colorFilter
+        invalidateSelf()
+    }
+    @Deprecated("Drawable opacity", level = DeprecationLevel.WARNING)
+    override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+}

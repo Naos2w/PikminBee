@@ -1,11 +1,13 @@
 package com.naos.pikminbee.ui
 
 import android.content.Context
+import android.content.res.ColorStateList
 import android.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import android.graphics.PixelFormat
 import android.os.Build
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.RippleDrawable
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -16,11 +18,16 @@ import android.os.Handler
 import android.os.Looper
 import com.naos.pikminbee.health.PhysicalStepsStatus
 import android.widget.LinearLayout
+import android.widget.FrameLayout
+import android.widget.ImageView
+import android.widget.Toast
 import android.widget.ScrollView
 import android.widget.EditText
 import android.text.InputType
 import com.naos.pikminbee.location.OverlayMapSelection
 import com.naos.pikminbee.health.EstimatedWalkStatus
+import com.naos.pikminbee.vision.BloomVisionState
+import com.naos.pikminbee.vision.BloomCaptureService
 import com.naos.pikminbee.domain.Coordinate
 import com.naos.pikminbee.domain.RoutePointDraft
 import com.naos.pikminbee.data.SavedRouteState
@@ -43,6 +50,7 @@ class FloatingControls(
     private val onOpenSettings: () -> Unit,
     private val onSpeedSelected: (WalkSpeedPreset) -> Unit,
     private val openMap: () -> Unit,
+    private val onFlowerVision: () -> Unit,
 ) {
     companion object {
         const val PAUSE = "pause"
@@ -50,6 +58,7 @@ class FloatingControls(
         const val STOP_WALK = "stop_walk"
         const val START_FLOWERS = "start_flowers"
         const val RESTORE_REAL = "restore_real"
+        const val RESTORE_VIRTUAL = "restore_virtual"
         const val HIDE = "hide"
     }
 
@@ -60,14 +69,17 @@ class FloatingControls(
     private var modeContent: LinearLayout? = null
     private var modeTabs: LinearLayout? = null
     private var stepsSummary: TextView? = null
-    private var beeButton: TextView? = null
+    private var beeButton: View? = null
+    private var beeIcon: ImageView? = null
     private var quickSummary: TextView? = null
-    private var quickPrimary: TextView? = null
-    private var quickSecondary: TextView? = null
+    private var quickSteps: TextView? = null
+    private val quickActions = linkedMapOf<OverlayQuickAction, ImageView>()
     private var advancedSection: LinearLayout? = null
     private var advancedVisible: Boolean = false
     private var lastPhase: WalkPhase = WalkPhase.IDLE
     private var lastMode: WalkMode? = null
+    private var lastStatus: String = ""
+    private var planningRoute = false
 
     private fun showMessage(text: String) {
         stateLabel?.text = text
@@ -78,6 +90,7 @@ class FloatingControls(
     private val stepRefresh = object : Runnable {
         override fun run() {
             updateStepSummary()
+            refreshQuick()
             if (root != null) stepsHandler.postDelayed(this, 5_000L)
         }
     }
@@ -85,8 +98,11 @@ class FloatingControls(
         val virtualSteps = EstimatedWalkStatus.state.value.estimatedSteps
         val physical = PhysicalStepsStatus.state.value
         stepsSummary?.text = if (physical.tracking || physical.todaySteps > 0) {
-            "⌁ 虛擬估算 $virtualSteps 步  ·  本機實際感測 ${physical.todaySteps} 步｜♡ HC 在設定"
-        } else "⌁ 虛擬估算 $virtualSteps 步 · ♡ Health Connect 在設定"
+            "虛擬估算 $virtualSteps 步 · 本機實際感測 ${physical.todaySteps} 步"
+        } else "虛擬估算 $virtualSteps 步 · 實際步數尚無資料"
+        quickSteps?.text = if (physical.tracking || physical.todaySteps > 0) {
+            "虛擬 $virtualSteps 步    實際 ${physical.todaySteps} 步"
+        } else "虛擬 $virtualSteps 步    實際 —"
     }
     private var root: LinearLayout? = null
     private var panel: ScrollView? = null
@@ -467,70 +483,113 @@ class FloatingControls(
         else sendAction(START_FLOWERS)
     }
 
-    /** The first level of the overlay performs the primary action for each tab.
-     * Old full controls remain accessible as a second level when needed.
-     */
+    /** One dynamic start/pause/resume action; never teleport as a side effect. */
     private fun performQuickAction() {
-        val walking = lastPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)
-        when (selectedMode) {
-            Mode.TELEPORT -> {
-                val picked = OverlayMapSelection.picked.value
-                if (picked == null) {
-                    showMessage("請先在地圖選擇位置，或展開詳細操作輸入經緯度")
-                    advancedVisible = true
-                    advancedSection?.visibility = View.VISIBLE
-                    panel?.post { fitExpandedPanelToScreen() }
-                } else onTeleport(picked)
-            }
-            Mode.ROUTE, Mode.FLOWERS -> {
-                val requested = if (selectedMode == Mode.ROUTE) WalkMode.ROUTE
-                    else WalkMode.FLOWERS
-                if (walking && lastMode == requested) {
-                    sendAction(if (lastPhase == WalkPhase.PAUSED) RESUME else PAUSE)
+        when (OverlayQuickPolicy.primary(lastPhase)) {
+            OverlayPrimaryState.PAUSE -> sendAction(PAUSE)
+            OverlayPrimaryState.RESUME -> sendAction(RESUME)
+            OverlayPrimaryState.START -> {
+                val prefs = AppPreferences(context)
+                val requested = when (selectedMode) {
+                    Mode.ROUTE -> WalkMode.ROUTE
+                    Mode.FLOWERS -> WalkMode.FLOWERS
+                    else -> lastMode ?: when {
+                        prefs.routeDraft().isNotEmpty() -> WalkMode.ROUTE
+                        prefs.flowerDraft().isNotEmpty() -> WalkMode.FLOWERS
+                        else -> null
+                    }
+                }
+                if (requested == null) {
+                    showMessage("請先到 PikminBee 地圖規劃路線")
+                    openMap()
                 } else onStartRouteOrFlowers(requested)
-            }
-            Mode.SAVED -> {
-                advancedVisible = true
-                advancedSection?.visibility = View.VISIBLE
-                panel?.post { fitExpandedPanelToScreen() }
             }
         }
     }
 
+    private fun iconAction(
+        which: OverlayQuickAction, icon: OverlayGlyph, label: String, click: () -> Unit,
+    ): ImageView = ImageView(context).apply {
+        setImageDrawable(NaosOverlayActionIcon(icon, colors().ink.toArgb(), dp(24)))
+        background = RippleDrawable(
+            ColorStateList.valueOf(colors().accent.copy(alpha = 0.20f).toArgb()),
+            softButtonBackground(), null,
+        )
+        scaleType = ImageView.ScaleType.CENTER
+        setPadding(dp(12), dp(12), dp(12), dp(12))
+        isClickable = true
+        isFocusable = true
+        contentDescription = label
+        setOnClickListener { click() }
+        setOnLongClickListener {
+            if (AppPreferences(context).overlayLongPressTips()) {
+                Toast.makeText(context, contentDescription, Toast.LENGTH_SHORT).show()
+            }
+            true
+        }
+        quickActions[which] = this
+    }
+
+    private fun iconUpdate(
+        which: OverlayQuickAction, icon: OverlayGlyph, label: String, enabled: Boolean = true,
+    ) {
+        quickActions[which]?.apply {
+            setImageDrawable(NaosOverlayActionIcon(
+                icon, if (enabled) colors().ink.toArgb() else colors().muted.toArgb(), dp(24)))
+            contentDescription = label
+            isEnabled = enabled
+            alpha = if (enabled) 1f else .42f
+        }
+    }
+
     private fun refreshQuick() {
+        if (root == null) return
         val prefs = AppPreferences(context)
-        val active = lastPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)
-        val requested = when (selectedMode) {
-            Mode.ROUTE -> WalkMode.ROUTE
-            Mode.FLOWERS -> WalkMode.FLOWERS
-            else -> null
+        val primary = OverlayQuickPolicy.primary(lastPhase)
+        val visibleMode = lastMode ?: if (prefs.routeDraft().isNotEmpty()) WalkMode.ROUTE
+            else if (prefs.flowerDraft().isNotEmpty()) WalkMode.FLOWERS else null
+        val label = when {
+            planningRoute -> "正在規劃步行道路"
+            lastPhase == WalkPhase.MOVING -> if (lastMode == WalkMode.FLOWERS)
+                "尋花行走中" else "路徑行走中"
+            lastPhase == WalkPhase.PAUSED -> "已暫停"
+            lastPhase == WalkPhase.PARKED -> "已停止 · 原地停留"
+            lastStatus.contains("失敗") || lastStatus.contains("無法") -> lastStatus.take(25)
+            visibleMode != null -> "待命 · ${if (visibleMode == WalkMode.FLOWERS) "尋花" else "路徑"}已就緒"
+            else -> "待命 · 請先在主 App 規劃"
         }
-        val sameWalk = active && requested != null && lastMode == requested
-        quickSummary?.text = when (selectedMode) {
-            Mode.TELEPORT -> "瞬移 · " +
-                (OverlayMapSelection.picked.value?.let { "已選擇 ${it.label()}" }
-                    ?: "預設模式 · 請點地圖或輸入座標")
-            Mode.ROUTE -> "路徑 · ${prefs.routeDraft().size} 個目的地" +
-                if (sameWalk) (if (lastPhase == WalkPhase.PAUSED) " · 已暫停" else " · 行走中") else ""
-            Mode.FLOWERS -> "尋花 · ${prefs.flowerDraft().size} 個候選花點" +
-                if (sameWalk) " · 巡迴中" else ""
-            Mode.SAVED -> "收藏 · 地點與已儲存路線"
+        val progress = com.naos.pikminbee.location.LocationStatus.progress.value
+        val journey = if (lastPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED) &&
+            progress.totalMetres > 0.0) {
+            val stop = progress.nextWaypoint?.toString() ?: "終點"
+            " · $stop/${progress.waypointCount} · ${(progress.fraction * 100).toInt()}%"
+        } else ""
+        quickSummary?.text = "$label · ${currentSpeed.kilometresPerHour} km/h$journey"
+        val primaryLabel = when (primary) {
+            OverlayPrimaryState.START -> "開始行走"
+            OverlayPrimaryState.PAUSE -> "暫停行走"
+            OverlayPrimaryState.RESUME -> "繼續行走"
         }
-        quickPrimary?.apply {
-            text = when {
-                sameWalk -> if (lastPhase == WalkPhase.PAUSED) "繼續" else "暫停"
-                selectedMode == Mode.TELEPORT -> "立即瞬移"
-                selectedMode == Mode.ROUTE -> "開始路徑"
-                selectedMode == Mode.FLOWERS -> "開始尋花"
-                else -> "選擇收藏"
-            }
-            background = GradientDrawable().apply {
-                cornerRadius = dp(15).toFloat()
-                setColor(colors().accent.toArgb())
-            }
-            setTextColor(colors().onAccent.toArgb())
-        }
-        quickSecondary?.text = if (active) "停止" else "打開地圖"
+        iconUpdate(OverlayQuickAction.PRIMARY, when (primary) {
+            OverlayPrimaryState.PAUSE -> OverlayGlyph.PAUSE
+            OverlayPrimaryState.RESUME -> OverlayGlyph.RESUME
+            else -> OverlayGlyph.PLAY
+        }, primaryLabel)
+        iconUpdate(OverlayQuickAction.STOP, OverlayGlyph.STOP, "停止行走，保持目前位置",
+            OverlayQuickPolicy.canStop(lastPhase, planningRoute))
+        iconUpdate(OverlayQuickAction.REAL_GPS, OverlayGlyph.REAL, "還原真實 GPS，暫停模擬定位")
+        iconUpdate(OverlayQuickAction.VIRTUAL_GPS, OverlayGlyph.VIRTUAL,
+            "回到上次虛擬位置，不繼續行走",
+            AppPreferences(context).lastVirtualPosition() != null)
+        val capturing = BloomVisionState.state.value.phase == BloomVisionState.Phase.CAPTURING
+        iconUpdate(OverlayQuickAction.FLOWER_VISION, OverlayGlyph.FLOWER,
+            if (capturing) "停止畫面偵測花" else "開啟畫面偵測花並取得系統授權")
+        iconUpdate(OverlayQuickAction.SPEED, OverlayGlyph.SPEED,
+            "切換行走速度，目前 ${currentSpeed.kilometresPerHour} km/h")
+        iconUpdate(OverlayQuickAction.MAP, OverlayGlyph.MAP, "開啟 PikminBee 地圖")
+        iconUpdate(OverlayQuickAction.CLOSE, OverlayGlyph.CLOSE, "關閉懸浮視窗，不停止行走")
+        beeIcon?.setImageDrawable(NaosOverlayActionIcon(
+            OverlayGlyph.BEE, colors().ink.toArgb(), dp(28)))
     }
 
     fun show() {
@@ -541,12 +600,30 @@ class FloatingControls(
             elevation = dp(13).toFloat()
             setPadding(dp(7), dp(5), dp(7), dp(5))
         }
-        val bee = action("🐝") { toggleExpanded() }.apply {
-            textSize = 24f
-            contentDescription = "PikminBee 懸浮視窗，點一下展開"
+        val bee = ImageView(context).apply {
+            setImageDrawable(NaosOverlayActionIcon(OverlayGlyph.BEE, colors().ink.toArgb(), dp(28)))
+            background = softButtonBackground()
+            scaleType = ImageView.ScaleType.CENTER
+            setPadding(dp(9), dp(9), dp(9), dp(9))
+            contentDescription = "PikminBee 蜜蜂控制，點一下展開，拖曳移動"
+            isClickable = true
+            isFocusable = true
         }
-        container.addView(bee)
-        beeButton = bee
+        val beeShell = FrameLayout(context).apply {
+            addView(bee, FrameLayout.LayoutParams(dp(54), dp(54)))
+            addView(View(context).apply {
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(colors().accent.toArgb())
+                }
+            }, FrameLayout.LayoutParams(dp(8), dp(8), Gravity.BOTTOM or Gravity.END).apply {
+                marginEnd = dp(5)
+                bottomMargin = dp(5)
+            })
+        }
+        container.addView(beeShell)
+        beeButton = beeShell
+        beeIcon = bee
         val actions = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
         }
@@ -554,66 +631,113 @@ class FloatingControls(
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        val description = action("PikminBee\n懸浮快速操作 · Regular") { onOpenSettings() }.apply {
-            gravity = Gravity.CENTER_VERTICAL
-            textSize = 16f
+        val description = TextView(context).apply {
+            text = "PikminBee · 快捷控制"
+            textSize = 14f
             setTypeface(typeface, android.graphics.Typeface.BOLD)
-            background = null
+            setTextColor(colors().ink.toArgb())
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(9), 0, dp(2), 0)
         }
-        header.addView(description, LinearLayout.LayoutParams(0, dp(66), 1f))
-        header.addView(action("×") { toggleExpanded() }.apply {
-            textSize = 23f
-            background = null
-            minWidth = dp(48)
-            contentDescription = "收合浮窗"
-        }, LinearLayout.LayoutParams(dp(48), dp(54)))
+        header.addView(description, LinearLayout.LayoutParams(0, dp(45), 1f))
+        header.addView(ImageView(context).apply {
+            setImageDrawable(NaosOverlayActionIcon(OverlayGlyph.MORE,
+                colors().ink.toArgb(), dp(22)))
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            contentDescription = "收合懸浮控制，保持在背景執行"
+            isClickable = true
+            setOnClickListener { toggleExpanded() }
+        }, LinearLayout.LayoutParams(dp(48), dp(48)))
         actions.addView(header)
+
+        val summary = TextView(context).apply {
+            text = "待命"
+            textSize = 12f
+            setTextColor(colors().ink.toArgb())
+            setPadding(dp(9), dp(1), dp(9), dp(1))
+            minHeight = dp(28)
+            gravity = Gravity.CENTER_VERTICAL
+            maxLines = 1
+        }
+        quickSummary = summary
+        actions.addView(summary)
+        val stepsLine = TextView(context).apply {
+            text = "虛擬 —    實際 —"
+            textSize = 11f
+            setTextColor(colors().muted.toArgb())
+            setPadding(dp(9), dp(1), dp(9), dp(7))
+            maxLines = 1
+        }
+        quickSteps = stepsLine
+        actions.addView(stepsLine)
+
+        val buttons = listOf(
+            Triple(OverlayQuickAction.PRIMARY, OverlayGlyph.PLAY, "開始／暫停／繼續"),
+            Triple(OverlayQuickAction.STOP, OverlayGlyph.STOP, "停止行走"),
+            Triple(OverlayQuickAction.REAL_GPS, OverlayGlyph.REAL, "還原真實定位"),
+            Triple(OverlayQuickAction.VIRTUAL_GPS, OverlayGlyph.VIRTUAL, "恢復虛擬定位"),
+            Triple(OverlayQuickAction.FLOWER_VISION, OverlayGlyph.FLOWER, "畫面偵測花"),
+            Triple(OverlayQuickAction.SPEED, OverlayGlyph.SPEED, "切換走路速度"),
+            Triple(OverlayQuickAction.MAP, OverlayGlyph.MAP, "打開地圖"),
+            Triple(OverlayQuickAction.CLOSE, OverlayGlyph.CLOSE, "關閉懸浮"),
+        )
+        buttons.chunked(4).forEach { group ->
+            val row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+            group.forEach { (which, glyph, label) ->
+                row.addView(iconAction(which, glyph, label) {
+                    when (which) {
+                        OverlayQuickAction.PRIMARY -> performQuickAction()
+                        OverlayQuickAction.STOP -> sendAction(STOP_WALK)
+                        OverlayQuickAction.REAL_GPS -> sendAction(RESTORE_REAL)
+                        OverlayQuickAction.VIRTUAL_GPS -> sendAction(RESTORE_VIRTUAL)
+                        OverlayQuickAction.FLOWER_VISION -> {
+                            if (BloomVisionState.state.value.phase ==
+                                BloomVisionState.Phase.CAPTURING) {
+                                context.startService(BloomCaptureService.stopIntent(context))
+                            } else onFlowerVision()
+                        }
+                        OverlayQuickAction.SPEED -> {
+                            val next = OverlayQuickPolicy.nextSpeed(currentSpeed)
+                            currentSpeed = next
+                            onSpeedSelected(next)
+                            refreshQuick()
+                        }
+                        OverlayQuickAction.MAP -> openMap()
+                        OverlayQuickAction.CLOSE -> sendAction(HIDE)
+                    }
+                }, LinearLayout.LayoutParams(0, dp(52), 1f).apply {
+                    marginEnd = dp(4)
+                    bottomMargin = dp(5)
+                })
+            }
+            actions.addView(row)
+        }
 
         val modeBar = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
         }
-        actions.addView(modeBar)
-        val summary = action("瞬移 · 預設模式") { }.apply {
-            background = softButtonBackground()
-            gravity = Gravity.CENTER_VERTICAL
-            textSize = 13f
-            setOnClickListener(null)
-            minHeight = dp(65)
-        }
-        quickSummary = summary
-        actions.addView(summary)
-        val quickRow = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
-        val primary = action("選取位置後瞬移") { performQuickAction() }.apply {
-            minHeight = dp(51)
-        }
-        val secondary = action("打開地圖") {
-            if (lastPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED))
-                sendAction(STOP_WALK)
-            else openMap()
-        }.apply { minHeight = dp(51) }
-        quickPrimary = primary
-        quickSecondary = secondary
-        quickRow.addView(primary, LinearLayout.LayoutParams(0, dp(51), 1f).apply {
-            marginEnd = dp(5)
-        })
-        quickRow.addView(secondary, LinearLayout.LayoutParams(0, dp(51), 1f))
-        actions.addView(quickRow)
 
         val advanced = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             visibility = View.GONE
         }
         advancedSection = advanced
-        actions.addView(action("⌃ 展開詳細操作") {
-            advancedVisible = !advancedVisible
-            advanced.visibility = if (advancedVisible) View.VISIBLE else View.GONE
-            panel?.post { fitExpandedPanelToScreen() }
-        }.apply {
-            background = softButtonBackground()
-            textSize = 12f
-            contentDescription = "展開或收起完整的模式控制"
-        })
+        val more = ImageView(context).apply {
+            setImageDrawable(NaosOverlayActionIcon(OverlayGlyph.MORE, colors().muted.toArgb(), dp(18)))
+            setPadding(dp(16), dp(14), dp(16), dp(14))
+            isClickable = true
+            isFocusable = true
+            contentDescription = "展開進階控制，路線編輯建議在主 App 完成"
+            setOnClickListener {
+                advancedVisible = !advancedVisible
+                advanced.visibility = if (advancedVisible) View.VISIBLE else View.GONE
+                panel?.post { fitExpandedPanelToScreen() }
+            }
+        }
+        actions.addView(more, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, dp(46)))
         actions.addView(advanced)
+        advanced.addView(modeBar)
 
         val modePanel = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -757,12 +881,19 @@ class FloatingControls(
         expanded = !expanded
         advancedVisible = false
         advancedSection?.visibility = View.GONE
+        panel?.animate()?.cancel()
         panel?.visibility = if (expanded) View.VISIBLE else View.GONE
         beeButton?.visibility = if (expanded) View.GONE else View.VISIBLE
-        if (expanded) refreshQuick()
+        if (expanded) {
+            panel?.alpha = 0f
+            panel?.translationY = dp(10).toFloat()
+            panel?.animate()?.alpha(1f)?.translationY(0f)
+                ?.setDuration(NaosDesignSystem.FAST_MS.toLong())?.start()
+            refreshQuick()
+        }
         params?.let { placement ->
             placement.width = if (expanded)
-                minOf(screenSize().first - dp(24), dp(350)).coerceAtLeast(dp(220))
+                minOf(screenSize().first - dp(24), dp(292)).coerceAtLeast(dp(220))
                 else WindowManager.LayoutParams.WRAP_CONTENT
             if (expanded) fitExpandedPanelToScreen()
             placement.flags = if (expanded)
@@ -790,6 +921,8 @@ class FloatingControls(
     ) {
         lastPhase = phase
         lastMode = mode
+        lastStatus = status
+        planningRoute = planningFlowers
         val walking = phase == WalkPhase.MOVING || phase == WalkPhase.PAUSED
         pauseAction?.text = if (phase == WalkPhase.PAUSED) "繼續" else "暫停"
         pauseAction?.isEnabled = walking
@@ -837,12 +970,15 @@ class FloatingControls(
         panel = null
         beeButton = null
         quickSummary = null
-        quickPrimary = null
-        quickSecondary = null
+        quickSteps = null
+        beeIcon = null
+        quickActions.clear()
         advancedSection = null
         advancedVisible = false
         lastPhase = WalkPhase.IDLE
         lastMode = null
+        lastStatus = ""
+        planningRoute = false
         stateLabel = null
         modeContent = null
         modeTabs = null

@@ -136,6 +136,40 @@ class AppPreferences(private val context: Context) {
         prefs.edit().putString("naos_glass_material", next.name).apply()
     }
 
+    /** The last virtual fix is opt-in recall only, never automatic mock GPS restart. */
+    fun rememberVirtualPosition(point: Coordinate) {
+        prefs.edit().putString("last_virtual_for_overlay",
+            "${point.latitude}|${point.longitude}|${System.currentTimeMillis()}").apply()
+    }
+
+    fun lastVirtualPosition(nowMillis: Long = System.currentTimeMillis()): Coordinate? =
+        runCatching {
+            val parts = prefs.getString("last_virtual_for_overlay", null)
+                ?.split('|') ?: return@runCatching null
+            if (parts.size != 3) return@runCatching null
+            val savedAt = parts[2].toLong()
+            if (nowMillis - savedAt !in 0..(12 * 60 * 60 * 1000L)) return@runCatching null
+            Coordinate(parts[0].toDouble(), parts[1].toDouble())
+        }.getOrNull()
+
+    fun overlayFirstUseGuideEnabled(): Boolean =
+        prefs.getBoolean("overlay_first_guide_enabled", true)
+
+    fun setOverlayFirstUseGuideEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean("overlay_first_guide_enabled", enabled).apply()
+    }
+
+    fun overlayGuideSeen(): Boolean = prefs.getBoolean("overlay_guide_seen", false)
+
+    fun markOverlayGuideSeen() { prefs.edit().putBoolean("overlay_guide_seen", true).apply() }
+
+    fun overlayLongPressTips(): Boolean =
+        prefs.getBoolean("overlay_long_press_tips", true)
+
+    fun setOverlayLongPressTips(enabled: Boolean) {
+        prefs.edit().putBoolean("overlay_long_press_tips", enabled).apply()
+    }
+
     fun places(): List<SavedPlace> = runCatching {
         val json = JSONArray(prefs.getString("places", "[]") ?: "[]")
         (0 until json.length()).mapNotNull { index ->

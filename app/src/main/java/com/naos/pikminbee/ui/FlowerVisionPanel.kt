@@ -20,6 +20,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -56,11 +57,13 @@ fun FlowerVisionPanel(
     foreground: Color,
     muted: Color,
     onMessage: (String) -> Unit,
+    openRequest: Long = 0L,
 ) {
     val context = LocalContext.current
     val work = rememberCoroutineScope()
     val vision by BloomVisionState.state.collectAsState()
-    var expanded by remember { mutableStateOf(false) }
+    var expanded by remember { mutableStateOf(openRequest > 0L) }
+    LaunchedEffect(openRequest) { if (openRequest > 0L) expanded = true }
     // User-picked image pixels remain in this Compose session only, never in BloomVisionState.
     var selectedDocument by remember { mutableStateOf<SelectedDocumentPreview?>(null) }
     var activeDocumentRevision by remember { mutableStateOf(0L) }

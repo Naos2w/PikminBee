@@ -122,6 +122,7 @@ import com.naos.pikminbee.ui.NaosThemeFamily
 import com.naos.pikminbee.ui.NaosGlassMaterial
 import com.naos.pikminbee.ui.NaosVisualState
 import com.naos.pikminbee.ui.NaosDesignSystem
+import com.naos.pikminbee.ui.OverlayGuideDialog
 import com.naos.pikminbee.ui.LocalNaosVisualState
 import com.naos.pikminbee.ui.BeePermissions
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -134,13 +135,17 @@ private val darkGlass = Color(0xFF1E2B3C).copy(alpha = 0.985f)
 class MainActivity : ComponentActivity() {
     companion object {
         const val EXTRA_OPEN_SETTINGS = "com.naos.pikminbee.OPEN_SETTINGS"
+        const val EXTRA_OPEN_FLOWER_VISION = "com.naos.pikminbee.OPEN_FLOWER_VISION"
         val settingsRequests = MutableStateFlow(0L)
+        val flowerVisionRequests = MutableStateFlow(0L)
     }
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         if (intent.getBooleanExtra(EXTRA_OPEN_SETTINGS, false))
             settingsRequests.value++
+        if (intent.getBooleanExtra(EXTRA_OPEN_FLOWER_VISION, false))
+            flowerVisionRequests.value++
     }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -207,7 +212,11 @@ private fun PikminBeeScreen() {
     val controlsScroll = rememberScrollState()
     var latitudeText by remember { mutableStateOf(selected.latitude.toString()) }
     var longitudeText by remember { mutableStateOf(selected.longitude.toString()) }
-    var tab by remember { mutableStateOf(ToolTab.TELEPORT) }
+    var tab by remember {
+        mutableStateOf(if ((context as? MainActivity)?.intent
+                ?.getBooleanExtra(MainActivity.EXTRA_OPEN_FLOWER_VISION, false) == true)
+            ToolTab.FLOWERS else ToolTab.TELEPORT)
+    }
     LaunchedEffect(tab) { controlsScroll.scrollTo(0) }
     var showWifiPanel by remember { mutableStateOf(false) }
     var places by remember { mutableStateOf(prefs.places()) }
@@ -225,6 +234,7 @@ private fun PikminBeeScreen() {
     val walkPhase by LocationStatus.phase.collectAsState()
     val walkMode by LocationStatus.mode.collectAsState()
     val roadLine by LocationStatus.geometry.collectAsState()
+    val walkingProgress by LocationStatus.progress.collectAsState()
     val overlayVisible by LocationStatus.overlayVisible.collectAsState()
     LaunchedEffect(flowerStops, flowerStart, mockPosition) {
         flowerRoadPreview = emptyList()
@@ -283,6 +293,21 @@ private fun PikminBeeScreen() {
         } else {
             message = "尚未授權顯示在其他應用程式上層，可稍後再開啟"
         }
+    }
+
+    fun requestOverlayEnabled() {
+        if (!Settings.canDrawOverlays(context)) {
+            message = "需要「顯示在其他應用程式上層」權限，返回後將自動開啟"
+            val overlayPermission = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:${context.packageName}"))
+            runCatching { overlaySettings.launch(overlayPermission) }.onFailure {
+                message = "無法開啟系統懸浮權限頁面，請由應用程式設定授權"
+            }
+        } else runCatching {
+            context.startService(MockLocationService.command(context,
+                MockLocationService.ACTION_SHOW_OVERLAY))
+            message = "正在顯示極簡蜜蜂控制，點圖示可展開"
+        }.onFailure { message = "無法開啟懸浮蜜蜂：${it.message}" }
     }
 
     var importMode by remember { mutableStateOf(WalkMode.ROUTE) }
@@ -478,8 +503,25 @@ private fun PikminBeeScreen() {
             else if (prefs.setupCompleted()) BeePage.MAP else BeePage.PERMISSIONS)
     }
     val settingsRequest by MainActivity.settingsRequests.collectAsState()
+    val visionRequest by MainActivity.flowerVisionRequests.collectAsState()
+    var showOverlayGuide by remember { mutableStateOf(false) }
+    var showOverlayAfterGuide by remember { mutableStateOf(false) }
+    var openDetailsRequest by remember { mutableIntStateOf(
+        if ((context as? MainActivity)?.intent
+                ?.getBooleanExtra(MainActivity.EXTRA_OPEN_FLOWER_VISION, false) == true) 1 else 0
+    ) }
+    var guideEnabled by remember { mutableStateOf(prefs.overlayFirstUseGuideEnabled()) }
+    var holdHints by remember { mutableStateOf(prefs.overlayLongPressTips()) }
     LaunchedEffect(settingsRequest) {
         if (settingsRequest > 0L) activePage = BeePage.SETTINGS
+    }
+    LaunchedEffect(visionRequest) {
+        if (visionRequest > 0L) {
+            tab = ToolTab.FLOWERS
+            activePage = BeePage.MAP
+            openDetailsRequest++
+            message = "請在花朵辨識面板取得 Android 畫面擷取同意"
+        }
     }
     var coordinateInput by remember { mutableStateOf(selected.label()) }
     LaunchedEffect(selected) { coordinateInput = selected.label() }
@@ -578,6 +620,16 @@ private fun PikminBeeScreen() {
         CompositionLocalProvider(
             LocalNaosVisualState provides NaosVisualState(naosFamily, naosMaterial, dark)
         ) {
+        if (showOverlayGuide) {
+            OverlayGuideDialog(onFinished = {
+                prefs.markOverlayGuideSeen()
+                showOverlayGuide = false
+                if (showOverlayAfterGuide) {
+                    showOverlayAfterGuide = false
+                    requestOverlayEnabled()
+                }
+            })
+        }
         if (activePage == BeePage.MAP && tab == ToolTab.ROUTE) {
             routeStopActionIndex?.let { index ->
                 AlertDialog(
@@ -669,26 +721,32 @@ private fun PikminBeeScreen() {
                 },
                 onDefaultSpeed = ::setDefaultWalkSpeed,
                 onPermissions = { activePage = BeePage.PERMISSIONS },
+                overlayGuideEnabled = guideEnabled,
+                overlayHoldHints = holdHints,
+                onOverlayGuideEnabled = {
+                    guideEnabled = it
+                    prefs.setOverlayFirstUseGuideEnabled(it)
+                },
+                onOverlayHoldHints = {
+                    holdHints = it
+                    prefs.setOverlayLongPressTips(it)
+                },
+                onReplayOverlayGuide = {
+                    showOverlayAfterGuide = false
+                    showOverlayGuide = true
+                },
                 onOverlay = {
                     when {
                         overlayVisible -> runCatching {
                             context.startService(MockLocationService.command(
                                 context, MockLocationService.ACTION_HIDE_OVERLAY))
-                            message = "正在關閉懸浮蜜蜂"
+                            message = "正在關閉懸浮蜜蜂（不停止行走）"
                         }.onFailure { message = "無法關閉懸浮蜜蜂：${it.message}" }
-                        !Settings.canDrawOverlays(context) -> {
-                            message = "需要「顯示在其他應用程式上層」權限，返回後將自動開啟"
-                            val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                                Uri.parse("package:${context.packageName}"))
-                            runCatching { overlaySettings.launch(intent) }.onFailure {
-                                message = "無法開啟系統懸浮權限頁面，請由應用程式設定授權"
-                            }
+                        guideEnabled && !prefs.overlayGuideSeen() -> {
+                            showOverlayAfterGuide = true
+                            showOverlayGuide = true
                         }
-                        else -> runCatching {
-                            context.startService(MockLocationService.command(
-                                context, MockLocationService.ACTION_SHOW_OVERLAY))
-                            message = "正在顯示懸浮蜜蜂，點擊圖示可展開控制"
-                        }.onFailure { message = "無法開啟懸浮蜜蜂：${it.message}" }
+                        else -> requestOverlayEnabled()
                     }
                 },
                 onToggleWifi = { showWifiPanel = !showWifiPanel },
@@ -713,6 +771,12 @@ private fun PikminBeeScreen() {
                 onCoordinateChange = { coordinateInput = it },
                 onCoordinateTeleport = ::applyCoordinateInput,
                 onCurrentLocation = ::goToCurrentMapPosition,
+                onHome = {
+                    activePage = BeePage.MAP
+                    mapExplore = false
+                    goToCurrentMapPosition()
+                },
+                openDetailsRequest = openDetailsRequest,
                 onMode = { index ->
                     tab = ToolTab.entries[index]
                     routeEditingStopIndex = null
@@ -725,9 +789,14 @@ private fun PikminBeeScreen() {
                 onCloseExplore = { mapExplore = false },
                 backdrop = mapBackdrop,
                 routeStopsCount = roadStops.size,
+                flowerStopsCount = flowerStops.size,
+                flowerActive = walkMode == WalkMode.FLOWERS &&
+                    walkPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED),
+                walkingProgress = walkingProgress,
+                routeSpeedKmh = speedPreset.kilometresPerHour,
                 routeActive = walkMode == WalkMode.ROUTE &&
                     walkPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED),
-                routePaused = walkMode == WalkMode.ROUTE && walkPhase == WalkPhase.PAUSED,
+                routePaused = walkPhase == WalkPhase.PAUSED,
                 onRouteUndo = {
                     if (walkPhase !in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)) {
                         prefs.saveRouteDraft(RoutePointDraft.undo(roadStops))
@@ -736,12 +805,16 @@ private fun PikminBeeScreen() {
                     }
                 },
                 onRoutePrimary = {
-                    if (walkMode == WalkMode.ROUTE &&
-                        walkPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)) {
+                    val walkingNow = walkPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)
+                    val sameMode = walkMode == if (tab == ToolTab.FLOWERS)
+                        WalkMode.FLOWERS else WalkMode.ROUTE
+                    if (walkingNow && sameMode) {
                         context.startService(MockLocationService.command(context,
                             if (walkPhase == WalkPhase.PAUSED)
                                 MockLocationService.ACTION_RESUME_ROUTE
                             else MockLocationService.ACTION_PAUSE_ROUTE))
+                    } else if (walkingNow) {
+                        message = "其他行走模式進行中，請先停止目前路線"
                     } else {
                         val origin = mockPosition ?: phonePosition
                         when {
@@ -1225,6 +1298,10 @@ private fun PikminBeeScreen() {
                                     foreground = foreground,
                                     muted = muted,
                                     onMessage = { message = it },
+                                    openRequest = if (visionRequest > 0L) visionRequest else
+                                        if ((context as? MainActivity)?.intent
+                                                ?.getBooleanExtra(MainActivity.EXTRA_OPEN_FLOWER_VISION, false)
+                                            == true) 1L else 0L,
                                 )
                             }
                         }

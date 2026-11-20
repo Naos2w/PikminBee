@@ -38,6 +38,8 @@ import com.naos.pikminbee.domain.Coordinate
 import com.naos.pikminbee.domain.WalkMode
 import com.naos.pikminbee.domain.WalkPhase
 import com.naos.pikminbee.domain.WalkingGeometry
+import com.naos.pikminbee.domain.RoutePlaybackProgress
+import com.naos.pikminbee.domain.WalkingProgressSnapshot
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -55,6 +57,7 @@ object LocationStatus {
     val mode = MutableStateFlow<WalkMode?>(null)
     val geometry = MutableStateFlow<List<Coordinate>>(emptyList())
     val overlayVisible = MutableStateFlow(false)
+    val progress = MutableStateFlow(WalkingProgressSnapshot())
 }
 
 class MockLocationService : Service() {
@@ -71,6 +74,8 @@ class MockLocationService : Service() {
         const val ACTION_SET_SPEED = "com.naos.pikminbee.action.SET_WALK_SPEED"
         const val ACTION_SHOW_OVERLAY = "com.naos.pikminbee.action.SHOW_OVERLAY"
         const val ACTION_HIDE_OVERLAY = "com.naos.pikminbee.action.HIDE_OVERLAY"
+        const val ACTION_REAL_GPS_OVERLAY = "com.naos.pikminbee.action.REAL_GPS_OVERLAY"
+        const val ACTION_VIRTUAL_GPS_OVERLAY = "com.naos.pikminbee.action.VIRTUAL_GPS_OVERLAY"
         const val ACTION_REFRESH_OVERLAY_APPEARANCE = "com.naos.pikminbee.action.REFRESH_OVERLAY_APPEARANCE"
         const val ACTION_ENABLE_LAN = "com.naos.pikminbee.action.ENABLE_LAN"
         const val ACTION_DISABLE_LAN = "com.naos.pikminbee.action.DISABLE_LAN"
@@ -122,6 +127,7 @@ class MockLocationService : Service() {
     private var track = emptyList<Coordinate>()
     private var trackLengthMeters = 0.0
     private var walkingDistanceMeters = 0.0
+    private var stopThresholds = emptyList<Double>()
     private val estimatedSteps = EstimatedStepCounter()
     private var estimatedStepPersistTicker = 0
     private var sessionStartMillis = 0L
@@ -175,6 +181,12 @@ class MockLocationService : Service() {
                     LocationStatus.selected.value = point
                 }
             }
+            if (track.size >= 2) {
+                LocationStatus.progress.value = RoutePlaybackProgress.snapshot(
+                    walkingDistanceMeters, trackLengthMeters, speedMetersPerSecond,
+                    stopThresholds, loopRoute,
+                )
+            }
             updateOverlay()
             lanController?.checkNetwork()
             if (providerActive) handler.postDelayed(this, 1_000L)
@@ -214,6 +226,8 @@ class MockLocationService : Service() {
                 }
                 track = emptyList()
                 trackLengthMeters = 0.0
+                stopThresholds = emptyList()
+                LocationStatus.progress.value = WalkingProgressSnapshot()
                 loopRoute = false
                 mode = null
                 phase = WalkPhase.PARKED
@@ -271,7 +285,8 @@ class MockLocationService : Service() {
                                     FloatingControls.RESUME -> ACTION_RESUME_ROUTE
                                     FloatingControls.STOP_WALK -> ACTION_STOP_ROUTE
                                     FloatingControls.START_FLOWERS -> ACTION_START_FLOWERS
-                                    FloatingControls.RESTORE_REAL -> ACTION_STOP
+                                    FloatingControls.RESTORE_REAL -> ACTION_REAL_GPS_OVERLAY
+                                    FloatingControls.RESTORE_VIRTUAL -> ACTION_VIRTUAL_GPS_OVERLAY
                                     else -> ACTION_HIDE_OVERLAY
                                 }
                                 startService(command(this, actionName))
@@ -288,6 +303,11 @@ class MockLocationService : Service() {
                             },
                             openMap = {
                                 startActivity(Intent(this, MainActivity::class.java)
+                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+                            },
+                            onFlowerVision = {
+                                startActivity(Intent(this, MainActivity::class.java)
+                                    .putExtra(MainActivity.EXTRA_OPEN_FLOWER_VISION, true)
                                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
                             })
                     }
@@ -338,7 +358,44 @@ class MockLocationService : Service() {
                 if (!providerActive) stopSelf()
                 return if (providerActive) START_STICKY else START_NOT_STICKY
             }
+            ACTION_REAL_GPS_OVERLAY -> {
+                target?.let { AppPreferences(this).rememberVirtualPosition(it) }
+                releaseMock(keepOverlay = true)
+                updateOverlay()
+                return START_NOT_STICKY
+            }
+            ACTION_VIRTUAL_GPS_OVERLAY -> {
+                val remembered = AppPreferences(this).lastVirtualPosition()
+                if (remembered == null) {
+                    LocationStatus.display.value = "找不到最近的虛擬位置，請先在地圖選取"
+                    updateOverlay()
+                    return START_NOT_STICKY
+                }
+                if (!ensureProvider()) {
+                    updateOverlay()
+                    return START_NOT_STICKY
+                }
+                finishEstimatedSession()
+                cancelFlowerPlanning()
+                phase = WalkPhase.PARKED
+                mode = null
+                track = emptyList()
+                trackLengthMeters = 0.0
+                stopThresholds = emptyList()
+                walkingDistanceMeters = 0.0
+                LocationStatus.progress.value = WalkingProgressSnapshot()
+                target = remembered
+                journal.record(remembered, force = true)
+                LocationStatus.phase.value = phase
+                LocationStatus.mode.value = null
+                LocationStatus.geometry.value = emptyList()
+                LocationStatus.display.value = "已回到虛擬位置 · 沒有自動行走"
+                scheduleTicks()
+                refreshNotification()
+                return START_STICKY
+            }
             ACTION_STOP -> {
+                target?.let { AppPreferences(this).rememberVirtualPosition(it) }
                 releaseMock()
                 stopSelf()
                 return START_NOT_STICKY
@@ -387,7 +444,9 @@ class MockLocationService : Service() {
                 cancelFlowerPlanning()
                 track = emptyList()
                 trackLengthMeters = 0.0
+                stopThresholds = emptyList()
                 walkingDistanceMeters = 0.0
+                LocationStatus.progress.value = WalkingProgressSnapshot()
                 loopRoute = false
                 mode = null
                 phase = WalkPhase.IDLE
@@ -412,6 +471,8 @@ class MockLocationService : Service() {
                 mode = null
                 track = emptyList()
                 trackLengthMeters = 0.0
+                stopThresholds = emptyList()
+                LocationStatus.progress.value = WalkingProgressSnapshot()
                 LocationStatus.phase.value = phase
                 LocationStatus.mode.value = null
                 LocationStatus.geometry.value = emptyList()
@@ -584,11 +645,17 @@ class MockLocationService : Service() {
         sessionStartSteps = estimatedSteps.snapshot().estimatedSteps
         track = planned
         trackLengthMeters = length
+        val draftStops = if (routeMode == WalkMode.FLOWERS)
+            RouteDraftState.flowerStops.value else RouteDraftState.routeStops.value
+        stopThresholds = RoutePlaybackProgress.thresholds(planned, draftStops)
         target = planned.first()
         journal.record(planned.first(), force = true)
         speedMetersPerSecond = speed.coerceIn(0.2, 3.0)
         walkingDistanceMeters = 0.0
         loopRoute = loop
+        LocationStatus.progress.value = RoutePlaybackProgress.snapshot(
+            0.0, length, speedMetersPerSecond, stopThresholds, loop,
+        )
         mode = routeMode
         phase = WalkPhase.MOVING
         LocationStatus.phase.value = phase
@@ -717,21 +784,36 @@ class MockLocationService : Service() {
         }
     }
 
-    private fun releaseMock(clearCheckpoint: Boolean = true) {
+    private fun releaseMock(
+        clearCheckpoint: Boolean = true,
+        keepOverlay: Boolean = false,
+    ) {
         finishEstimatedSession()
         saveEstimatedSteps()
         cancelFlowerPlanning()
         if (clearCheckpoint) journal.clear()
         lanController?.close()
         lanController = null
-        floatingControls?.dismiss()
-        floatingControls = null
-        LocationStatus.overlayVisible.value = false
+        if (!keepOverlay) {
+            floatingControls?.dismiss()
+            floatingControls = null
+            LocationStatus.overlayVisible.value = false
+        }
+        if (providerActive) {
+            if (Build.VERSION.SDK_INT >= 24) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                @Suppress("DEPRECATION")
+                stopForeground(true)
+            }
+        }
         providerActive = false
         handler.removeCallbacks(tick)
         target = null
         track = emptyList()
         trackLengthMeters = 0.0
+        stopThresholds = emptyList()
+        LocationStatus.progress.value = WalkingProgressSnapshot()
         mode = null
         loopRoute = false
         phase = WalkPhase.IDLE

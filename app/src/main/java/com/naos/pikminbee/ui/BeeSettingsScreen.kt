@@ -14,6 +14,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Switch
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -51,6 +56,11 @@ fun BeeSettingsScreen(
     onGlassMaterial: (NaosGlassMaterial) -> Unit,
     onDefaultSpeed: (WalkSpeedPreset) -> Unit,
     onPermissions: () -> Unit,
+    overlayGuideEnabled: Boolean,
+    overlayHoldHints: Boolean,
+    onOverlayGuideEnabled: (Boolean) -> Unit,
+    onOverlayHoldHints: (Boolean) -> Unit,
+    onReplayOverlayGuide: () -> Unit,
     onOverlay: () -> Unit,
     onToggleWifi: () -> Unit,
     onAskLocation: () -> Unit,
@@ -61,6 +71,7 @@ fun BeeSettingsScreen(
     val palette = NaosDesignSystem.palette(naosFamily, dark)
     val foreground = palette.ink
     val muted = palette.muted
+    var showAdvancedAppearance by remember { mutableStateOf(false) }
     Column(
         Modifier.fillMaxSize()
             .background(palette.bg)
@@ -130,8 +141,12 @@ fun BeeSettingsScreen(
                         )
                     }
                 }
-                Text("Naos Universal V3 · 六種核准低飽和主題",
+                Text("PikminBee 主題 · 鼠尾草色／Regular 為預設",
                     color = foreground, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                TextButton(onClick = { showAdvancedAppearance = !showAdvancedAppearance }) {
+                    Text(if (showAdvancedAppearance) "收起進階外觀" else "進階外觀選項")
+                }
+                if (showAdvancedAppearance) {
                 androidx.compose.foundation.layout.FlowRow(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -159,6 +174,7 @@ fun BeeSettingsScreen(
                     "不支援時自動使用霧面替代，不會宣稱有折射。"+
                     "視覺參數使用 Naos 共用模板的預覽基準。",
                     color = muted, fontSize = 11.sp)
+                }
             }
         }
         androidx.compose.material3.Surface(
@@ -202,6 +218,30 @@ fun BeeSettingsScreen(
                     color = muted, fontSize = 12.sp,
                 )
                 Text(statusMessage, color = foreground, fontSize = 12.sp)
+                Text("懸浮控制教學", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("首次開啟顯示教學", color = foreground, fontSize = 14.sp)
+                        Text("只顯示一次，隨時可重新觀看", color = muted, fontSize = 11.sp)
+                    }
+                    Switch(checked = overlayGuideEnabled, onCheckedChange = onOverlayGuideEnabled)
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("長按圖示顯示名稱", color = foreground, fontSize = 14.sp)
+                        Text("輔助識別 Icon，不影響蜜蜂拖曳", color = muted, fontSize = 11.sp)
+                    }
+                    Switch(checked = overlayHoldHints, onCheckedChange = onOverlayHoldHints)
+                }
+                TextButton(onClick = onReplayOverlayGuide) {
+                    Text("查看懸浮控制操作說明")
+                }
+                Text("開始／暫停／停止 · 真實與虛擬定位 · 花朵偵測 · 速度切換 · 地圖 · 關閉",
+                    color = muted, fontSize = 11.sp)
+                Text("收合與關閉不會停止正在執行的路線；恢復虛擬位置不會自動開始行走。",
+                    color = muted, fontSize = 11.sp)
                 TextButton(onClick = onToggleWifi) {
                     Text(if (showWifiPanel) "收起 Wi-Fi 遠端控制" else "Wi-Fi 遠端控制")
                 }
