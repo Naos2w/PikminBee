@@ -1,6 +1,10 @@
 package com.naos.pikminbee.ui
 
 import android.graphics.Bitmap
+import com.naos.pikminbee.domain.WalkingProgressSnapshot
+import java.util.Locale
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -29,6 +33,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -65,6 +70,8 @@ fun MapFirstShell(
     onCoordinateChange: (String) -> Unit,
     onCoordinateTeleport: () -> Unit,
     onCurrentLocation: () -> Unit,
+    onHome: () -> Unit,
+    openDetailsRequest: Int = 0,
     onMode: (Int) -> Unit,
     onSettings: () -> Unit,
     onPermissions: () -> Unit,
@@ -74,6 +81,10 @@ fun MapFirstShell(
     modeContent: @Composable () -> Unit,
     backdrop: Bitmap? = null,
     routeStopsCount: Int = 0,
+    flowerStopsCount: Int = 0,
+    flowerActive: Boolean = false,
+    walkingProgress: WalkingProgressSnapshot = WalkingProgressSnapshot(),
+    routeSpeedKmh: Double = 1.4,
     routeActive: Boolean = false,
     routePaused: Boolean = false,
     onRouteUndo: () -> Unit = {},
@@ -81,6 +92,9 @@ fun MapFirstShell(
     onRouteStop: () -> Unit = {},
 ) {
     var detailsOpen by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(openDetailsRequest) {
+        if (openDetailsRequest > 0) detailsOpen = true
+    }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val p = NaosDesignSystem.palette(LocalNaosVisualState.current.family, dark)
     val heightDp = LocalConfiguration.current.screenHeightDp
@@ -130,11 +144,14 @@ fun MapFirstShell(
                 ) {
                     labels.forEachIndexed { i, label ->
                         val selected = i == active
+                        val tabColor by animateColorAsState(
+                            if (selected) p.accent else Color.Transparent,
+                            tween(NaosDesignSystem.FAST_MS), label = "tabColour")
                         Surface(
                             modifier = Modifier.weight(1f).height(55.dp),
                             onClick = { onMode(i) },
                             shape = RoundedCornerShape(15.dp),
-                            color = if (selected) p.accent else Color.Transparent,
+                            color = tabColor,
                             contentColor = if (selected) p.onAccent else p.ink,
                         ) {
                             Column(
@@ -151,34 +168,39 @@ fun MapFirstShell(
             }
         }
 
-        if (modeIndex == 1 && (routeStopsCount > 0 || routeActive)) {
+        if ((modeIndex == 1 && (routeStopsCount > 0 || routeActive)) ||
+            (modeIndex == 2 && flowerActive)) {
+            val activeWalking = routeActive || flowerActive
+            val modeStopsCount = if (modeIndex == 2) flowerStopsCount else routeStopsCount
             MapGlass(
                 dark,
                 Modifier.align(Alignment.BottomCenter).navigationBarsPadding()
                     .padding(start = 15.dp, end = 15.dp, bottom = 113.dp),
                 backdrop,
             ) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 9.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 9.dp, vertical = 8.dp),
+                    Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text(if (routeActive) "道路行走中" else "下一個路點",
+                        Text(if (activeWalking) (if (flowerActive) "尋花行走中" else "道路行走中") else "下一個路點",
                             color = p.muted, fontSize = 11.sp, maxLines = 1)
-                        Text(if (routeActive) (if (routePaused) "已暫停" else "進行中")
-                            else "第 ${routeStopsCount + 1} 點",
+                        Text(if (activeWalking) (if (routePaused) "已暫停" else "進行中")
+                            else "第 ${modeStopsCount + 1} 點",
                             color = p.ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                     }
                     Surface(
-                        onClick = if (routeActive) onRouteStop else onRouteUndo,
-                        enabled = routeActive || routeStopsCount > 0,
+                        onClick = if (activeWalking) onRouteStop else onRouteUndo,
+                        enabled = activeWalking || modeStopsCount > 0,
                         shape = RoundedCornerShape(13.dp),
                         color = p.soft,
                         modifier = Modifier.height(48.dp),
                     ) {
                         Box(Modifier.padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
-                            Text(if (routeActive) "停止" else "↶ 上一步",
+                            Text(if (activeWalking) "停止" else "↶ 上一步",
                                 color = p.ink, fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold)
                         }
@@ -190,11 +212,35 @@ fun MapFirstShell(
                         modifier = Modifier.height(48.dp),
                     ) {
                         Box(Modifier.padding(horizontal = 15.dp), contentAlignment = Alignment.Center) {
-                            Text(if (!routeActive) "▷ 開始" else if (routePaused) "▷ 繼續" else "Ⅱ 暫停",
+                            Text(if (!activeWalking) "▷ 開始" else if (routePaused) "▷ 繼續" else "Ⅱ 暫停",
                                 color = p.onAccent, fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold)
                         }
                     }
+                }
+                if (activeWalking && walkingProgress.totalMetres > 0.0) {
+                    val total = walkingProgress.totalMetres / 1000.0
+                    val done = walkingProgress.travelledMetres / 1000.0
+                    val progressText = buildString {
+                        append("路點 ")
+                        append(walkingProgress.nextWaypoint?.toString() ?: "終點")
+                        append(" / ")
+                        append(walkingProgress.waypointCount.coerceAtLeast(modeStopsCount))
+                        append(" · ")
+                        append(String.format(Locale.US, "%.2f / %.2f km", done, total))
+                        append(" · ")
+                        append(routeSpeedKmh)
+                        append(" km/h · ")
+                        append(walkingProgress.remainingSeconds / 60)
+                        append(" 分")
+                    }
+                    Text(progressText, color = p.muted, fontSize = 10.sp, maxLines = 1)
+                    Box(Modifier.fillMaxWidth().height(4.dp)
+                        .background(p.soft, RoundedCornerShape(4.dp))) {
+                        Box(Modifier.fillMaxWidth(walkingProgress.fraction).height(4.dp)
+                            .background(p.accent, RoundedCornerShape(4.dp)))
+                    }
+                }
                 }
             }
         }
@@ -203,6 +249,10 @@ fun MapFirstShell(
             value = coordinateInput,
             onValueChange = onCoordinateChange,
             onTeleport = onCoordinateTeleport,
+            onHome = {
+                detailsOpen = false
+                onHome()
+            },
             dark = dark,
             modifier = Modifier.align(Alignment.TopCenter)
                 .statusBarsPadding()
@@ -215,8 +265,8 @@ fun MapFirstShell(
             dark = dark,
             modifier = Modifier.align(Alignment.BottomEnd)
                 .navigationBarsPadding().padding(end = 16.dp,
-                    bottom = if (modeIndex == 1 && (routeStopsCount > 0 || routeActive))
-                        207.dp else 132.dp),
+                    bottom = if ((modeIndex == 1 && (routeStopsCount > 0 || routeActive)) ||
+                        (modeIndex == 2 && flowerActive)) 224.dp else 132.dp),
             backdrop = backdrop,
         )
     }
@@ -236,12 +286,14 @@ fun MapFirstShell(
                 Text("$modeTitle · 詳細操作",
                     modifier = Modifier.weight(1f), color = p.ink,
                     fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-                TextButton(onClick = { detailsOpen = false; onSettings() }) {
-                    Text("設定", color = p.accent)
-                }
-                TextButton(onClick = { detailsOpen = false; onPermissions() }) {
-                    Text("權限", color = p.accent)
-                }
+                IconButton(
+                    onClick = { detailsOpen = false; onSettings() },
+                    modifier = Modifier.size(48.dp).semantics { contentDescription = "開啟設定" },
+                ) { NaosUtilityIcon(0, p.ink) }
+                IconButton(
+                    onClick = { detailsOpen = false; onPermissions() },
+                    modifier = Modifier.size(48.dp).semantics { contentDescription = "檢查權限" },
+                ) { NaosUtilityIcon(1, p.ink) }
             }
             Column(
                 Modifier.fillMaxWidth()

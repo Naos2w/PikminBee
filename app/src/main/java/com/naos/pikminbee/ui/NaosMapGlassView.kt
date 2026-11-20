@@ -33,6 +33,11 @@ internal class NaosMapGlassView(context: Context) : View(context) {
         set(value) { if (field != value) { field = value; invalidate() } }
     var originY: Float = 0f
         set(value) { if (field != value) { field = value; invalidate() } }
+    var opticalBlend: Float = 0f
+        set(value) {
+            val next = value.coerceIn(0f, 1f)
+            if (field != next) { field = next; invalidate() }
+        }
     var glassMode: NaosGlassMaterial = NaosGlassMaterial.REGULAR
         set(value) { if (field != value) { field = value; invalidate() } }
     var palette: NaosPalette = NaosDesignSystem.palette(NaosThemeFamily.SAGE, false)
@@ -62,8 +67,8 @@ internal class NaosMapGlassView(context: Context) : View(context) {
             originX >= 0f && originY >= 0f &&
             originX + width <= backdrop.width + 1 &&
             originY + height <= backdrop.height + 1
-        val canSample = Build.VERSION.SDK_INT >= 33 && sourceReady
-        paint.shader = if (canSample) {
+        val canSample = Build.VERSION.SDK_INT >= 33 && sourceReady && opticalBlend > 0f
+        val activeShader = if (canSample) {
             if (cachedBitmap !== backdrop || cachedX != originX || cachedY != originY ||
                 cachedWidth != width || cachedHeight != height ||
                 cachedMode != glassMode || cachedPalette != palette) {
@@ -82,18 +87,25 @@ internal class NaosMapGlassView(context: Context) : View(context) {
             cachedBitmap = null
             null
         }
-        if (paint.shader == null) {
-            // Known limitation: no sampled backdrop means no optical refraction.
-            paint.color = palette.surface.copy(
-                alpha = when (glassMode) {
-                    NaosGlassMaterial.REGULAR -> if (palette.ink.red > .6f) .88f else .83f
-                    NaosGlassMaterial.CLEAR -> if (palette.ink.red > .6f) .78f else .68f
-                    NaosGlassMaterial.BLUR -> .96f
-                }
-            ).toArgb()
-        } else paint.color = android.graphics.Color.WHITE
-        canvas.drawRoundRect(frame, r, r, paint)
+        // Keep frosted backing visible at all times; blend sampled optics
+        // smoothly when the map begins or ends a pan, never warp old pixels indefinitely.
         paint.shader = null
+        paint.color = palette.surface.copy(
+            alpha = when (glassMode) {
+                NaosGlassMaterial.REGULAR -> if (palette.ink.red > .6f) .88f else .83f
+                NaosGlassMaterial.CLEAR -> if (palette.ink.red > .6f) .78f else .68f
+                NaosGlassMaterial.BLUR -> .96f
+            }
+        ).toArgb()
+        canvas.drawRoundRect(frame, r, r, paint)
+        if (activeShader != null) {
+            paint.shader = activeShader
+            paint.color = android.graphics.Color.WHITE
+            paint.alpha = (255f * opticalBlend).toInt().coerceIn(0, 255)
+            canvas.drawRoundRect(frame, r, r, paint)
+            paint.alpha = 255
+            paint.shader = null
+        }
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = resources.displayMetrics.density
         paint.color = palette.stroke.copy(alpha = 0.75f).toArgb()
