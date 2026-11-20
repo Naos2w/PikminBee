@@ -1,5 +1,12 @@
 # PikminBee TODO
 
+## UAT 0.6.1 acceptance candidate (20 Nov 2026)
+- [x] DEV source incorporated: PR #52 (floating bee tap, route preview, Mineral/Honey theme, single-level coloured actions) and PR #53 (bounded live-camera map-glass sampling). All GitHub PR checks passed at source merge; source merge does not imply device acceptance.
+- [x] UAT version bump via `scripts/bump_version.py uat`: UAT `0.6.1`; DEV `0.6.2-dev`. Version rule checks passed.
+- [ ] Promote `develop → staging` by checked Merge Commit; use the existing manual GitHub Actions workflow with `package_apk=true` to create fixed-signer `PikminBee-UAT-stable-signed`; verify applicationId, displayed version, increasing versionCode and signer digest.
+- [ ] POCO UAT: repeated map pan and pinch at varied speeds with no hard glass flicker; compare actual high-contrast map-edge distortion with a frozen frame; check smoothness/heat, panel tap/drag, eight icons, motion colours, route preview road fit, physical/virtual Steps and permissions. Keep `main` unchanged until explicit user acceptance.
+- [ ] Revisit any phone-specific GPU/map SDK limitation discovered in UAT rather than claiming 60 FPS continuous refraction from asynchronously sampled map snapshots.
+
 ## P0 · Live Liquid Glass during native-map gestures (20 Nov 2026)
 - [x] PR #52 Squash Merged to `develop`: commit `ffa69d8`, GitHub Android verify passed.
 - [x] Both MapLibre and Google Maps now request genuine native-map snapshots during camera movement instead of clearing optics at movement start. The existing AGSL border-refraction shader samples these changing map pixels.
