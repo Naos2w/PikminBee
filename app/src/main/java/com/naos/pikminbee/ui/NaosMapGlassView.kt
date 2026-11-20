@@ -3,6 +3,7 @@ package com.naos.pikminbee.ui
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Color
 import android.graphics.BitmapShader
 import android.graphics.Canvas
 import android.graphics.LinearGradient
@@ -11,6 +12,7 @@ import android.graphics.RectF
 import android.graphics.RuntimeShader
 import android.graphics.Shader
 import android.os.Build
+import android.util.Log
 import android.view.View
 import androidx.compose.ui.graphics.toArgb
 
@@ -73,7 +75,9 @@ internal class NaosMapGlassView(context: Context) : View(context) {
             if (cachedBitmap !== backdrop || cachedX != originX || cachedY != originY ||
                 cachedWidth != width || cachedHeight != height ||
                 cachedMode != glassMode || cachedPalette != palette) {
-                shaderCache = runCatching { makeOpticalShader(backdrop!!, r) }.getOrNull()
+                shaderCache = runCatching { makeOpticalShader(backdrop!!, r) }
+                    .onFailure { Log.w("PikminBeeGlass", "AGSL refraction unavailable", it) }
+                    .getOrNull()
                 cachedBitmap = backdrop
                 cachedX = originX
                 cachedY = originY
@@ -91,8 +95,8 @@ internal class NaosMapGlassView(context: Context) : View(context) {
         // Consistent translucent mineral backing under both live and idle
         // snapshot refraction, and during any provider capture stall.
         val dark = palette.ink.red > .6f
-        val topTint = palette.surface.copy(alpha = if (dark) .76f else .69f).toArgb()
-        val bottomTint = palette.soft.copy(alpha = if (dark) .64f else .62f).toArgb()
+        val topTint = palette.surface.copy(alpha = if (dark) .78f else .71f).toArgb()
+        val bottomTint = palette.soft.copy(alpha = if (dark) .68f else .64f).toArgb()
         paint.shader = LinearGradient(
             0f, 0f, width * .45f, height.toFloat(),
             topTint, bottomTint, Shader.TileMode.CLAMP,
@@ -108,19 +112,28 @@ internal class NaosMapGlassView(context: Context) : View(context) {
             paint.alpha = 255
             paint.shader = null
         }
+        // A stroke centred on the view bounds loses half its pixels to clipping.
+        // Put the highlight AND the secondary dark bevel fully inside the glass.
+        val density = resources.displayMetrics.density
         paint.style = Paint.Style.STROKE
-        paint.strokeWidth = 1.25f * resources.displayMetrics.density
-        paint.color = android.graphics.Color.argb(
-            if (dark) 110 else 220, 255, 255, 255,
-        )
-        canvas.drawRoundRect(frame, r, r, paint)
-        paint.strokeWidth = .8f * resources.displayMetrics.density
-        paint.color = palette.stroke.copy(alpha = if (dark) .58f else .42f).toArgb()
-        canvas.drawRoundRect(
-            RectF(frame.left + paint.strokeWidth, frame.top + paint.strokeWidth,
-                frame.right - paint.strokeWidth, frame.bottom - paint.strokeWidth),
-            r, r, paint,
-        )
+        paint.strokeWidth = 1.6f * density
+        paint.shader = LinearGradient(0f, 0f, width.toFloat(), height.toFloat(),
+            intArrayOf(
+                Color.argb(if (dark) 224 else 248, 255, 255, 255),
+                Color.argb(if (dark) 88 else 136, 255, 255, 255),
+                palette.stroke.copy(alpha = if (dark) .78f else .73f).toArgb(),
+            ), null, Shader.TileMode.CLAMP)
+        val rimInset = paint.strokeWidth / 2f + 0.6f * density
+        canvas.drawRoundRect(RectF(rimInset, rimInset,
+            width - rimInset, height - rimInset),
+            (r - rimInset).coerceAtLeast(0f), (r - rimInset).coerceAtLeast(0f), paint)
+        paint.shader = null
+        paint.strokeWidth = .85f * density
+        paint.color = palette.ink.copy(alpha = if (dark) .23f else .27f).toArgb()
+        val innerInset = 3f * density
+        canvas.drawRoundRect(RectF(innerInset, innerInset,
+            width - innerInset, height - innerInset),
+            (r - innerInset).coerceAtLeast(0f), (r - innerInset).coerceAtLeast(0f), paint)
         paint.style = Paint.Style.FILL
     }
 
@@ -134,9 +147,12 @@ internal class NaosMapGlassView(context: Context) : View(context) {
         agsl.setFloatUniform("corner", r)
         agsl.setFloatUniform("displacement", if (glassMode == NaosGlassMaterial.BLUR)
             0f else NaosDesignSystem.GLASS_REFRACTION_PX * resources.displayMetrics.density)
+        agsl.setFloatUniform("bevelWidth", 16f * resources.displayMetrics.density)
+        agsl.setFloatUniform("dispersion", if (glassMode == NaosGlassMaterial.BLUR)
+            0f else .65f * resources.displayMetrics.density)
         agsl.setFloatUniform("blur", NaosDesignSystem.GLASS_BLUR_PX * resources.displayMetrics.density)
         agsl.setFloatUniform("rawMix", when (glassMode) {
-            NaosGlassMaterial.REGULAR -> 0.15f
+            NaosGlassMaterial.REGULAR -> 0.24f
             NaosGlassMaterial.CLEAR -> 0.76f
             NaosGlassMaterial.BLUR -> 0.02f
         })
@@ -144,7 +160,7 @@ internal class NaosMapGlassView(context: Context) : View(context) {
             palette.surface.red, palette.surface.green, palette.surface.blue)
         agsl.setFloatUniform("tintStrength", if (glassMode == NaosGlassMaterial.BLUR)
             .32f else NaosDesignSystem.GLASS_TINT +
-                if (glassMode == NaosGlassMaterial.REGULAR) .12f else 0f)
+                if (glassMode == NaosGlassMaterial.REGULAR) .07f else 0f)
         return agsl
     }
 
@@ -158,6 +174,8 @@ internal class NaosMapGlassView(context: Context) : View(context) {
             uniform float2 extent;
             uniform float corner;
             uniform float displacement;
+            uniform float bevelWidth;
+            uniform float dispersion;
             uniform float blur;
             uniform float rawMix;
             uniform float3 tintColor;
@@ -168,13 +186,17 @@ internal class NaosMapGlassView(context: Context) : View(context) {
             }
             half4 main(float2 pixel) {
                 float inside = max(0.0, -distanceField(pixel));
-                float edge = pow(clamp(1.0 - inside / 24.0, 0.0, 1.0), 1.7);
+                float edge = pow(clamp(1.0 - inside / bevelWidth, 0.0, 1.0), 1.7);
                 float2 gradient = float2(
                     distanceField(pixel + float2(1.0,0.0)) - distanceField(pixel - float2(1.0,0.0)),
                     distanceField(pixel + float2(0.0,1.0)) - distanceField(pixel - float2(0.0,1.0)));
                 float2 normal = gradient / max(length(gradient), 0.01);
                 float2 uv = origin + pixel + normal * displacement * edge;
-                half3 raw = backdrop.eval(uv).rgb;
+                // Subtle RGB separation reinforces a genuine thick-lens edge.
+                half3 raw = half3(
+                    backdrop.eval(uv + normal * dispersion * edge).r,
+                    backdrop.eval(uv).g,
+                    backdrop.eval(uv - normal * dispersion * edge).b);
                 float sampleRadius = blur * 0.50;
                 half3 soft = (backdrop.eval(uv).rgb +
                     backdrop.eval(uv+float2(sampleRadius,0.0)).rgb +
@@ -183,7 +205,8 @@ internal class NaosMapGlassView(context: Context) : View(context) {
                     backdrop.eval(uv-float2(0.0,sampleRadius)).rgb) / 5.0;
                 half3 mixedPixels = mix(soft, raw, half(rawMix + edge * (1.0-rawMix)*0.55));
                 half3 coloured = mix(mixedPixels, half3(tintColor), half(tintStrength));
-                half lift = half(pow(edge,3.0) * 0.10);
+                half lift = half(pow(edge, 2.0) *
+                    (0.07 + 0.13 * clamp(-normal.y * 0.5 + 0.5, 0.0, 1.0)));
                 return half4(coloured + (1.0-coloured)*lift, 1.0);
             }
         """.trimIndent()

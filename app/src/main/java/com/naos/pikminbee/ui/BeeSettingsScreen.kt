@@ -1,6 +1,7 @@
 package com.naos.pikminbee.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -69,11 +70,12 @@ fun BeeSettingsScreen(
             .padding(horizontal = 16.dp, vertical = 13.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onBack) { Text("‹ 返回地圖") }
-            Text("設定", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = foreground)
-            Text("UAT", color = muted, fontSize = 11.sp)
+        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+            TextButton(onClick = onBack, modifier = Modifier.align(Alignment.CenterStart)) {
+                Text("‹ 返回地圖")
+            }
+            Text("設定", fontSize = 22.sp, fontWeight = FontWeight.Bold,
+                color = foreground)
         }
         androidx.compose.material3.Surface(
             modifier = Modifier.fillMaxWidth(),
@@ -93,11 +95,9 @@ fun BeeSettingsScreen(
                             )
                         }
                     }
-                } else {
-                    Text("OpenFreeMap · 免 Google API Key", color = muted, fontSize = 12.sp)
                 }
                 if (provider == MapProvider.OPEN_FREE_MAP) {
-                    Text("地圖樣式（圖磚需網路）", fontSize = 12.sp)
+                    Text("地圖樣式", fontSize = 12.sp)
                     androidx.compose.foundation.layout.FlowRow(
                         Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(7.dp),
@@ -129,10 +129,6 @@ fun BeeSettingsScreen(
                         )
                     }
                 }
-                Text("PikminBee 專屬外觀 · 礦石霧藍 × 蜜黃 · Regular Glass",
-                    color = muted, fontSize = 12.sp)
-                Text("移動地圖時維持半透明磨砂質感；靜止且支援時顯示地圖像素折射。",
-                    color = muted, fontSize = 11.sp)
             }
         }
         androidx.compose.material3.Surface(
@@ -142,7 +138,6 @@ fun BeeSettingsScreen(
         ) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("行走預設", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
-                Text("個人預設：" + defaultSpeed.display, color = muted, fontSize = 12.sp)
                 androidx.compose.foundation.layout.FlowRow(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(7.dp),
@@ -155,8 +150,6 @@ fun BeeSettingsScreen(
                         )
                     }
                 }
-                Text("行走時仍可在路徑／尋花面板臨時調速，個人預設不會被覆蓋。",
-                    color = muted, fontSize = 12.sp)
             }
         }
         androidx.compose.material3.Surface(
@@ -167,21 +160,19 @@ fun BeeSettingsScreen(
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("權限與控制", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
                 TextButton(onClick = onPermissions) { Text("檢查 Android 權限與模擬位置") }
-                TextButton(onClick = onOverlay) {
-                    Text(if (overlayVisible) "🐝 隱藏懸浮控制" else "🐝 開啟懸浮控制")
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Text("懸浮控制", color = foreground, fontSize = 14.sp)
+                    Switch(checked = overlayVisible, onCheckedChange = { onOverlay() })
                 }
-                Text(
-                    if (overlayVisible) "懸浮控制已顯示，點蜜蜂圖示可展開功能。"
-                    else "開啟時會檢查「顯示在其他應用程式上層」權限，無需先啟動模擬定位。",
-                    color = muted, fontSize = 12.sp,
-                )
-                Text(statusMessage, color = foreground, fontSize = 12.sp)
+                if (statusMessage.contains("懸浮") || statusMessage.contains("授權")) {
+                    Text(statusMessage, color = muted, fontSize = 12.sp)
+                }
                 Text("懸浮控制教學", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("首次開啟顯示教學", color = foreground, fontSize = 14.sp)
-                        Text("只顯示一次，隨時可重新觀看", color = muted, fontSize = 11.sp)
                     }
                     Switch(checked = overlayGuideEnabled, onCheckedChange = onOverlayGuideEnabled)
                 }
@@ -189,17 +180,12 @@ fun BeeSettingsScreen(
                     verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("長按圖示顯示名稱", color = foreground, fontSize = 14.sp)
-                        Text("輔助識別 Icon，不影響蜜蜂拖曳", color = muted, fontSize = 11.sp)
                     }
                     Switch(checked = overlayHoldHints, onCheckedChange = onOverlayHoldHints)
                 }
                 TextButton(onClick = onReplayOverlayGuide) {
                     Text("查看懸浮控制操作說明")
                 }
-                Text("開始／暫停／停止 · 真實與虛擬定位 · 花朵偵測 · 速度切換 · 地圖 · 關閉",
-                    color = muted, fontSize = 11.sp)
-                Text("收合與關閉不會停止正在執行的路線；恢復虛擬位置不會自動開始行走。",
-                    color = muted, fontSize = 11.sp)
                 TextButton(onClick = onToggleWifi) {
                     Text(if (showWifiPanel) "收起 Wi-Fi 遠端控制" else "Wi-Fi 遠端控制")
                 }
@@ -220,7 +206,5 @@ fun BeeSettingsScreen(
             }
         }
         HealthConnectSettings(dark = dark, onMessage = onMessage)
-        Text("PikminBee UAT · 僅使用者明確操作才會啟動模擬定位",
-            fontSize = 12.sp, color = muted)
     }
 }

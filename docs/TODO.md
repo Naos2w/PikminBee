@@ -1,5 +1,15 @@
 # PikminBee TODO
 
+## V4-C · Glass lens rim / overlay entry / concise settings (20 Nov 2026)
+- [x] DEV source: correct the inset glass rim and inner bevel, strengthen AGSL edge refraction with restrained dispersion/specular highlights and keep safe frosted fallback. Log shader failures for device diagnosis.
+- [x] Request initial native map snapshots when the MapLibre style has settled or Google map tiles have loaded; keep existing bounded in-motion sampling.
+- [x] Add a subtle glass rim around the collapsed bee overlay, retain the same state-coloured bee and touch/drag behaviour; give the expanded cross-app panel a restrained glass gradient without claiming access to other apps' pixels.
+- [x] Add floating-overlay show/hide next to Settings in the map's detail-sheet header, sharing the existing permission and first-use-guide flow with Settings.
+- [x] Simplify settings copy: remove developer/system explanations, redundant speed descriptions, and UAT decorative labels. Make the overlay preference a switch.
+- [x] MSI Kotlin compilation + **171/171** JVM unit tests + Android Lint passed (`BUILD SUCCESSFUL`, exit 0). `git diff --check` clean before TODO update.
+- [ ] Inspect on POCO: Light/Dark at actual map lines, edge refraction vs blur-only, initial idle capture, pan and pinch, GPU shader warnings, overlay rim/drag/tap, and settings/quick-switch permission states. ADB currently lists no device. Screenshot's purple flower floating icon differs from source's bee outline; verify which installed app owns that overlay.
+- [ ] Normal squash PR to `develop` and subsequent *separately approved* UAT build/installation; no automatic promotion to `staging` or `main` for this V4-C change.
+
 ## UAT 0.6.1 acceptance candidate (20 Nov 2026)
 - [x] DEV source incorporated: PR #52 (floating bee tap, route preview, Mineral/Honey theme, single-level coloured actions) and PR #53 (bounded live-camera map-glass sampling). All GitHub PR checks passed at source merge; source merge does not imply device acceptance.
 - [x] UAT version bump via `scripts/bump_version.py uat`: UAT `0.6.1`; DEV `0.6.2-dev`. Version rule checks passed.

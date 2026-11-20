@@ -113,6 +113,7 @@ private fun OpenFreeMapPane(
         MapLibre.getInstance(context)
         LibreMapView(context).apply { onCreate(null) }
     }
+    var glassSampler by remember(view) { mutableStateOf<MapGlassSnapshotBridge?>(null) }
     var map by remember { mutableStateOf<MapLibreMap?>(null) }
     var styleVersion by remember { mutableIntStateOf(0) }
     var currentMarker by remember { mutableStateOf<org.maplibre.android.annotations.Marker?>(null) }
@@ -128,7 +129,6 @@ private fun OpenFreeMapPane(
     var line by remember { mutableStateOf<org.maplibre.android.annotations.Polyline?>(null) }
     DisposableEffect(view, lifecycleOwner) {
         var disposed = false
-        var glassSampler: MapGlassSnapshotBridge? = null
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_START -> view.onStart()
@@ -190,6 +190,7 @@ private fun OpenFreeMapPane(
         onDispose {
             disposed = true
             glassSampler?.close()
+            glassSampler = null
             lifecycleOwner.lifecycle.removeObserver(observer)
             latestGlassSnapshot(null)
             map = null
@@ -199,10 +200,18 @@ private fun OpenFreeMapPane(
         }
     }
     LaunchedEffect(map, dark, freeMapStyle) {
-        map?.setStyle(Style.Builder().fromUri(
+        val loadedMap = map ?: return@LaunchedEffect
+        loadedMap.setStyle(Style.Builder().fromUri(
             MapBasemapPolicy.openFreeMapStyleUrl(freeMapStyle, dark)
         )) {
             styleVersion++
+            // Initial camera-idle can fire before tiles have rendered. Refresh
+            // once after the style settles so a static map also has real optics.
+            view.postDelayed({
+                if (view.isAttachedToWindow && map === loadedMap) {
+                    glassSampler?.cameraIdle()
+                }
+            }, 380L)
         }
     }
     // The moving position is updated in place. Do not recreate the whole route every second.
@@ -338,6 +347,7 @@ private fun GoogleMapsPane(
     val latestOnCameraFailure by rememberUpdatedState(onCameraFailure)
     val latestGlassSnapshot by rememberUpdatedState(onGlassSnapshot)
     val view = remember(context) { GoogleMapView(context).apply { onCreate(null) } }
+    var glassSampler by remember(view) { mutableStateOf<MapGlassSnapshotBridge?>(null) }
     var map by remember { mutableStateOf<GoogleMap?>(null) }
     var currentMarker by remember { mutableStateOf<com.google.android.gms.maps.model.Marker?>(null) }
     var liveMarker by remember { mutableStateOf<com.google.android.gms.maps.model.Marker?>(null) }
@@ -349,7 +359,6 @@ private fun GoogleMapsPane(
     var line by remember { mutableStateOf<com.google.android.gms.maps.model.Polyline?>(null) }
     DisposableEffect(view, lifecycleOwner) {
         var disposed = false
-        var glassSampler: MapGlassSnapshotBridge? = null
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_START -> view.onStart()
@@ -400,12 +409,14 @@ private fun GoogleMapsPane(
             ready.setOnCameraMoveStartedListener { _ -> glassSampler?.cameraStarted() }
             ready.setOnCameraMoveListener { glassSampler?.cameraMoved() }
             ready.setOnCameraIdleListener { glassSampler?.cameraIdle() }
+            ready.setOnMapLoadedCallback { glassSampler?.cameraIdle() }
             ready.moveCamera(CameraUpdateFactory.newLatLngZoom(
                 GoogleLatLng(selected.latitude, selected.longitude), 14.5f))
         }
         onDispose {
             disposed = true
             glassSampler?.close()
+            glassSampler = null
             lifecycleOwner.lifecycle.removeObserver(observer)
             latestGlassSnapshot(null)
             map = null

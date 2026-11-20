@@ -513,6 +513,21 @@ private fun PikminBeeScreen() {
     var closeDetailsRequest by remember { mutableIntStateOf(0) }
     var guideEnabled by remember { mutableStateOf(prefs.overlayFirstUseGuideEnabled()) }
     var holdHints by remember { mutableStateOf(prefs.overlayLongPressTips()) }
+    fun toggleOverlayControl() {
+        when {
+            overlayVisible -> runCatching {
+                context.startService(MockLocationService.command(
+                    context, MockLocationService.ACTION_HIDE_OVERLAY))
+                message = "正在關閉懸浮蜜蜂（不停止行走）"
+            }.onFailure { message = "無法關閉懸浮蜜蜂：${it.message}" }
+            guideEnabled && !prefs.overlayGuideSeen() -> {
+                showOverlayAfterGuide = true
+                showOverlayGuide = true
+            }
+            else -> requestOverlayEnabled()
+        }
+    }
+
     LaunchedEffect(settingsRequest) {
         if (settingsRequest > 0L) activePage = BeePage.SETTINGS
     }
@@ -718,20 +733,7 @@ private fun PikminBeeScreen() {
                     showOverlayAfterGuide = false
                     showOverlayGuide = true
                 },
-                onOverlay = {
-                    when {
-                        overlayVisible -> runCatching {
-                            context.startService(MockLocationService.command(
-                                context, MockLocationService.ACTION_HIDE_OVERLAY))
-                            message = "正在關閉懸浮蜜蜂（不停止行走）"
-                        }.onFailure { message = "無法關閉懸浮蜜蜂：${it.message}" }
-                        guideEnabled && !prefs.overlayGuideSeen() -> {
-                            showOverlayAfterGuide = true
-                            showOverlayGuide = true
-                        }
-                        else -> requestOverlayEnabled()
-                    }
-                },
+                onOverlay = { toggleOverlayControl() },
                 onToggleWifi = { showWifiPanel = !showWifiPanel },
                 onAskLocation = {
                     requestLocation.launch(Manifest.permission.ACCESS_FINE_LOCATION)
@@ -768,6 +770,8 @@ private fun PikminBeeScreen() {
                     mapExplore = false
                 },
                 onSettings = { activePage = BeePage.SETTINGS },
+                overlayVisible = overlayVisible,
+                onToggleOverlay = { toggleOverlayControl() },
                 onPermissions = { activePage = BeePage.PERMISSIONS },
                 mapExplore = mapExplore,
                 onCloseExplore = { mapExplore = false },
