@@ -250,7 +250,7 @@ fun JourneyControls(
                 },
                 enabled = controlling || (
                     phase !in listOf(WalkPhase.MOVING, WalkPhase.PAUSED) &&
-                        canPlan && if (flower) !planning else !routePlanning
+                        canPlan && (if (flower) !planning else !routePlanning)
                     ),
                 modifier = Modifier.weight(1.4f).height(48.dp),
                 colors = ButtonDefaults.buttonColors(
@@ -265,7 +265,7 @@ fun JourneyControls(
             ) {
                 Text(if (controlling && phase == WalkPhase.MOVING) "Ⅱ 暫停"
                     else if (controlling) "▶ 繼續"
-                    else if (!flower && routePlanning || flower && planning) "規劃中…"
+                    else if ((!flower && routePlanning) || (flower && planning)) "規劃中…"
                     else if (!flower && preparedRoad.size < 2) "規劃路徑"
                     else "▶ 開始行走",
                     fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
