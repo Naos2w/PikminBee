@@ -1,6 +1,8 @@
 package com.naos.pikminbee.ui
 
 import android.graphics.Bitmap
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -24,6 +26,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
@@ -33,6 +36,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -67,6 +71,15 @@ fun MapGlass(
         else NaosDesignSystem.palette(visual.family, dark)
     val shape = RoundedCornerShape(25.dp)
     val glassMaterial = visual.material
+    // Retain one last stationary sample only for a short optical-to-frosted fade.
+    // A moving map is never continuously captured, keeping native pan responsive.
+    var previousSnapshot by remember { androidx.compose.runtime.mutableStateOf<Bitmap?>(null) }
+    LaunchedEffect(backdrop) { if (backdrop != null) previousSnapshot = backdrop }
+    val glassBlend by animateFloatAsState(
+        targetValue = if (backdrop != null) 1f else 0f,
+        animationSpec = tween(NaosDesignSystem.FAST_MS),
+        label = "glassOpticalBlend",
+    )
     var originX by remember { mutableFloatStateOf(0f) }
     var originY by remember { mutableFloatStateOf(0f) }
     Box(modifier.shadow(8.dp, shape).clip(shape)) {
@@ -78,7 +91,8 @@ fun MapGlass(
             },
             factory = { NaosMapGlassView(it) },
             update = {
-                it.snapshot = backdrop
+                it.snapshot = previousSnapshot
+                it.opticalBlend = glassBlend
                 it.glassMode = glassMaterial
                 it.palette = palette
                 it.originX = originX
@@ -142,12 +156,61 @@ fun NaosModeIcon(index: Int, tint: Color, modifier: Modifier = Modifier) {
     }
 }
 
+/** Small original bee mark; doubles as the map Home/recentre action. */
+@Composable
+fun NaosBeeHomeIcon(tint: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier.size(24.dp)) {
+        val s = size.minDimension / 24f
+        val outline = Stroke(width = 1.8f * s, cap = StrokeCap.Round)
+        drawOval(tint, topLeft = Offset(3.5f*s, 5f*s), size = Size(9f*s, 8f*s), style = outline)
+        drawOval(tint, topLeft = Offset(11.5f*s, 5f*s), size = Size(9f*s, 8f*s), style = outline)
+        drawOval(tint, topLeft = Offset(7f*s, 10f*s), size = Size(10f*s, 12f*s), style = outline)
+        drawLine(tint, Offset(7f*s, 15f*s), Offset(17f*s, 15f*s), 1.7f*s)
+        drawLine(tint, Offset(8f*s, 19f*s), Offset(16f*s, 19f*s), 1.7f*s)
+    }
+}
+
+/** Small vector-only settings/permission utility actions matching the dock. */
+@Composable
+fun NaosUtilityIcon(kind: Int, tint: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier.size(24.dp)) {
+        val scale = size.minDimension / 24f
+        val stroke = Stroke(width = 1.8f * scale, cap = StrokeCap.Round)
+        fun pt(x: Float, y: Float) = Offset(x * scale, y * scale)
+        if (kind == 0) {
+            drawCircle(tint, radius = 7f * scale, center = pt(12f, 12f), style = stroke)
+            drawCircle(tint, radius = 3f * scale, center = pt(12f, 12f), style = stroke)
+            for (n in 0 until 8) {
+                val rad = Math.PI * n / 4
+                val dx = kotlin.math.cos(rad).toFloat()
+                val dy = kotlin.math.sin(rad).toFloat()
+                drawLine(tint, pt(12f + 8.6f*dx, 12f + 8.6f*dy),
+                    pt(12f + 11f*dx, 12f + 11f*dy), 1.8f * scale, StrokeCap.Round)
+            }
+        } else {
+            val path = Path().apply {
+                moveTo(12f*scale, 2f*scale)
+                lineTo(20f*scale, 5f*scale)
+                lineTo(20f*scale, 12f*scale)
+                quadraticTo(19f*scale, 18f*scale, 12f*scale, 22f*scale)
+                quadraticTo(5f*scale, 18f*scale, 4f*scale, 12f*scale)
+                lineTo(4f*scale, 5f*scale)
+                close()
+            }
+            drawPath(path, tint, style = stroke)
+            drawLine(tint, pt(8.5f, 12f), pt(11f, 14.5f), 1.8f*scale)
+            drawLine(tint, pt(11f, 14.5f), pt(16f, 9.5f), 1.8f*scale)
+        }
+    }
+}
+
 /** A map pick only fills the coordinate field. The arrow/Go explicitly teleports. */
 @Composable
 fun CoordinateTopBar(
     value: String,
     onValueChange: (String) -> Unit,
     onTeleport: () -> Unit,
+    onHome: () -> Unit,
     dark: Boolean,
     modifier: Modifier = Modifier,
     backdrop: Bitmap? = null,
@@ -159,7 +222,11 @@ fun CoordinateTopBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            NaosModeIcon(4, palette.accent, Modifier.size(20.dp))
+            IconButton(
+                onClick = onHome,
+                modifier = Modifier.size(46.dp)
+                    .semantics { contentDescription = "回到目前定位並收起選單" },
+            ) { NaosBeeHomeIcon(palette.accent) }
             Column(Modifier.weight(1f)) {
                 Text("經緯度 · 點地圖選取", fontSize = 11.sp, color = palette.muted)
                 BasicTextField(
