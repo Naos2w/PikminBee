@@ -99,9 +99,10 @@ class AppPreferences(private val context: Context) {
         BuildConfig.HAS_GOOGLE_MAPS_KEY,
     )
 
+    // The product exposes Light/Dark only. Older SYSTEM preference migrates to Light.
     fun appearance(): MapAppearance =
         enumValues<MapAppearance>().firstOrNull { it.name == prefs.getString("appearance", "") }
-            ?: MapAppearance.SYSTEM
+            ?.takeUnless { it == MapAppearance.SYSTEM } ?: MapAppearance.LIGHT
 
     fun freeMapStyle(): FreeMapStyle =
         enumValues<FreeMapStyle>().firstOrNull { it.name == prefs.getString("free_map_style", "") }
@@ -117,24 +118,9 @@ class AppPreferences(private val context: Context) {
     }
     fun setAppearance(appearance: MapAppearance) { prefs.edit().putString("appearance", appearance.name).apply() }
 
-    /** Both settings refer to the ONE approved Naos Universal design kit. */
-    fun naosThemeFamily(): NaosThemeFamily =
-        NaosThemeFamily.entries.firstOrNull {
-            it.name == prefs.getString("naos_theme_family", null)
-        } ?: NaosThemeFamily.SAGE
-
-    fun setNaosThemeFamily(next: NaosThemeFamily) {
-        prefs.edit().putString("naos_theme_family", next.name).apply()
-    }
-
-    fun naosGlassMaterial(): NaosGlassMaterial =
-        NaosGlassMaterial.entries.firstOrNull {
-            it.name == prefs.getString("naos_glass_material", null)
-        } ?: NaosGlassMaterial.REGULAR
-
-    fun setNaosGlassMaterial(next: NaosGlassMaterial) {
-        prefs.edit().putString("naos_glass_material", next.name).apply()
-    }
+    /** One product identity; old theme preferences are intentionally ignored. */
+    fun naosThemeFamily(): NaosThemeFamily = NaosThemeFamily.MINERAL
+    fun naosGlassMaterial(): NaosGlassMaterial = NaosGlassMaterial.REGULAR
 
     /** The last virtual fix is opt-in recall only, never automatic mock GPS restart. */
     fun rememberVirtualPosition(point: Coordinate) {

@@ -60,6 +60,7 @@ fun JourneyControls(
     onMessage: (String) -> Unit,
     onAskLocation: () -> Unit,
     onPreviewRoad: (List<Coordinate>) -> Unit = {},
+    onPreviewShown: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -69,10 +70,14 @@ fun JourneyControls(
     var planning by remember { mutableStateOf(false) }
     var requestRevision by remember { mutableIntStateOf(0) }
     var previewDistance by remember { mutableStateOf<Double?>(null) }
-    LaunchedEffect(stops, origin, loop, mode) {
+    var previewNotice by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(stops, loop, mode) {
+        // GPS fixes can jitter while Valhalla is still replying. Invalidate only
+        // actual route edits, never every transient origin-position update.
+        // Re-opening the sheet must not erase a successfully drawn road.
         requestRevision++
         previewDistance = null
-        onPreviewRoad(emptyList())
+        previewNotice = null
     }
     fun requestedPoints(start: Coordinate): List<Coordinate> =
         if (flower) FlowerMapDraft.routePoints(start, stops, loop) else buildList {
@@ -112,6 +117,7 @@ fun JourneyControls(
         }
         val revision = requestRevision
         planning = true
+        previewNotice = "正在查詢步行道路…"
         onMessage("正在查詢步行道路，失敗不會改成直線行走")
         coroutineScope.launch {
             try {
@@ -119,6 +125,7 @@ fun JourneyControls(
                 if (revision != requestRevision) return@launch
                 onPreviewRoad(geometry)
                 previewDistance = WalkingGeometry.lengthMeters(geometry)
+                previewNotice = null
                 if (startWalking) {
                     ContextCompat.startForegroundService(
                         context, MockLocationService.routeIntent(
@@ -128,10 +135,13 @@ fun JourneyControls(
                     )
                     onMessage("道路路線已取得，開始移動（${geometry.size} 個節點）")
                 } else {
-                    onMessage("已在地圖預覽步行道路，尚未開始移動")
+                    onMessage("已繪製步行道路預覽 · 沒有啟動模擬行走")
+                    onPreviewShown()
                 }
             } catch (e: Exception) {
-                onMessage(e.message ?: "規劃步行道路失敗")
+                val notice = e.message ?: "規劃步行道路失敗"
+                previewNotice = "道路預覽失敗：$notice"
+                onMessage(previewNotice!!)
             } finally {
                 planning = false
             }
@@ -177,7 +187,10 @@ fun JourneyControls(
 
         if (flower) FilterChip(
             selected = loop,
-            onClick = { loop = !loop },
+            onClick = {
+                loop = !loop
+                onPreviewRoad(emptyList())
+            },
             label = { Text("循環路線", fontSize = 12.sp) },
         )
 
@@ -188,6 +201,16 @@ fun JourneyControls(
                     (!active || phase !in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)),
                 modifier = Modifier.fillMaxWidth().height(46.dp),
             ) { Text(if (planning) "道路規劃中…" else "先預覽步行道路（不移動）", fontSize = 12.sp) }
+            if (!canPlan) {
+                Text(
+                    if (origin == null) "尚未取得路線起點：請先授權目前定位或設定尋花起點。"
+                    else "請先在地圖選取至少一個不同於起點的目的地。",
+                    color = muted, fontSize = 12.sp,
+                )
+            }
+            previewNotice?.let { notice ->
+                Text(notice, color = foreground, fontSize = 12.sp)
+            }
             previewDistance?.let { metres ->
                 val estimate = RouteEstimate.fromDistance(metres, speedPreset)
                 Text(
@@ -200,36 +223,50 @@ fun JourneyControls(
                 )
             }
         }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        val controlling = active && phase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Main-app and floating controls use the same semantic colour/state policy.
             Button(
-                onClick = { previewOrStart(startWalking = true) },
-                enabled = !planning && canPlan &&
-                    (!active || phase !in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)),
-                modifier = Modifier.weight(1.3f).height(46.dp),
-                colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF9F5E0C),
-                        contentColor = Color.White,
-                    ),
-            ) { Text(if (planning) "規劃中…" else "開始行走", fontSize = 12.sp) }
-
-            OutlinedButton(
                 onClick = {
-                    val cmd = if (phase == WalkPhase.PAUSED) MockLocationService.ACTION_RESUME_ROUTE
-                    else MockLocationService.ACTION_PAUSE_ROUTE
-                    context.startService(MockLocationService.command(context, cmd))
+                    if (controlling) {
+                        context.startService(MockLocationService.command(context,
+                            if (phase == WalkPhase.PAUSED)
+                                MockLocationService.ACTION_RESUME_ROUTE
+                            else MockLocationService.ACTION_PAUSE_ROUTE))
+                    } else previewOrStart(startWalking = true)
                 },
-                enabled = active && phase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED),
-                modifier = Modifier.weight(1f).height(46.dp),
-            ) { Text(if (active && phase == WalkPhase.PAUSED) "繼續" else "暫停", fontSize = 12.sp) }
+                enabled = controlling || (!planning && canPlan &&
+                    phase !in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)),
+                modifier = Modifier.weight(1.4f).height(48.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(BeeActionColors.primary(
+                        if (controlling) phase else WalkPhase.IDLE)),
+                    contentColor = Color(BeeActionColors.ON_BRIGHT),
+                    disabledContainerColor = muted.copy(alpha = .14f),
+                    disabledContentColor = muted,
+                ),
+            ) {
+                Text(if (planning && !controlling) "規劃中…"
+                    else if (controlling && phase == WalkPhase.MOVING) "Ⅱ 暫停"
+                    else if (controlling) "▶ 繼續" else "▶ 開始行走",
+                    fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            }
 
-            OutlinedButton(
+            Button(
                 onClick = {
-                    context.startService(MockLocationService.command(context, MockLocationService.ACTION_STOP_ROUTE))
+                    context.startService(MockLocationService.command(context,
+                        MockLocationService.ACTION_STOP_ROUTE))
                     onMessage("已停止行走，停在目前模擬位置")
                 },
-                enabled = active && phase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED),
-                modifier = Modifier.weight(1f).height(46.dp),
-            ) { Text("停止", fontSize = 12.sp) }
+                enabled = controlling,
+                modifier = Modifier.weight(1f).height(48.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(BeeActionColors.STOP_RED),
+                    contentColor = Color(BeeActionColors.ON_DANGER),
+                    disabledContainerColor = muted.copy(alpha = .14f),
+                    disabledContentColor = muted,
+                ),
+            ) { Text("■ 停止", fontSize = 13.sp, fontWeight = FontWeight.SemiBold) }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             TextButton(onClick = onUndo, enabled = stops.isNotEmpty()) { Text("上一步 · 重選") }

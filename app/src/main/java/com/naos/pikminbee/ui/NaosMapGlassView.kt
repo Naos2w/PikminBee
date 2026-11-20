@@ -5,6 +5,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapShader
 import android.graphics.Canvas
+import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.RuntimeShader
@@ -40,7 +41,7 @@ internal class NaosMapGlassView(context: Context) : View(context) {
         }
     var glassMode: NaosGlassMaterial = NaosGlassMaterial.REGULAR
         set(value) { if (field != value) { field = value; invalidate() } }
-    var palette: NaosPalette = NaosDesignSystem.palette(NaosThemeFamily.SAGE, false)
+    var palette: NaosPalette = NaosDesignSystem.palette(NaosThemeFamily.MINERAL, false)
         set(value) { if (field != value) { field = value; invalidate() } }
 
     private var shaderCache: Shader? = null
@@ -87,17 +88,19 @@ internal class NaosMapGlassView(context: Context) : View(context) {
             cachedBitmap = null
             null
         }
-        // Keep frosted backing visible at all times; blend sampled optics
-        // smoothly when the map begins or ends a pan, never warp old pixels indefinitely.
-        paint.shader = null
-        paint.color = palette.surface.copy(
-            alpha = when (glassMode) {
-                NaosGlassMaterial.REGULAR -> if (palette.ink.red > .6f) .88f else .83f
-                NaosGlassMaterial.CLEAR -> if (palette.ink.red > .6f) .78f else .68f
-                NaosGlassMaterial.BLUR -> .96f
-            }
-        ).toArgb()
+        // During camera motion the real map snapshot is unavailable. Preserve a
+        // translucent glass surface (not a near-solid card), without falsely
+        // claiming the moving background was refracted.
+        val dark = palette.ink.red > .6f
+        val topTint = palette.surface.copy(alpha = if (dark) .76f else .69f).toArgb()
+        val bottomTint = palette.soft.copy(alpha = if (dark) .64f else .62f).toArgb()
+        paint.shader = LinearGradient(
+            0f, 0f, width * .45f, height.toFloat(),
+            topTint, bottomTint, Shader.TileMode.CLAMP,
+        )
+        paint.color = android.graphics.Color.WHITE
         canvas.drawRoundRect(frame, r, r, paint)
+        paint.shader = null
         if (activeShader != null) {
             paint.shader = activeShader
             paint.color = android.graphics.Color.WHITE
@@ -107,9 +110,18 @@ internal class NaosMapGlassView(context: Context) : View(context) {
             paint.shader = null
         }
         paint.style = Paint.Style.STROKE
-        paint.strokeWidth = resources.displayMetrics.density
-        paint.color = palette.stroke.copy(alpha = 0.75f).toArgb()
+        paint.strokeWidth = 1.25f * resources.displayMetrics.density
+        paint.color = android.graphics.Color.argb(
+            if (dark) 110 else 220, 255, 255, 255,
+        )
         canvas.drawRoundRect(frame, r, r, paint)
+        paint.strokeWidth = .8f * resources.displayMetrics.density
+        paint.color = palette.stroke.copy(alpha = if (dark) .58f else .42f).toArgb()
+        canvas.drawRoundRect(
+            RectF(frame.left + paint.strokeWidth, frame.top + paint.strokeWidth,
+                frame.right - paint.strokeWidth, frame.bottom - paint.strokeWidth),
+            r, r, paint,
+        )
         paint.style = Paint.Style.FILL
     }
 

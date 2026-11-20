@@ -15,15 +15,9 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Switch
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -42,8 +36,6 @@ fun BeeSettingsScreen(
     provider: MapProvider,
     freeMapStyle: FreeMapStyle,
     appearance: MapAppearance,
-    naosFamily: NaosThemeFamily,
-    glassMaterial: NaosGlassMaterial,
     defaultSpeed: WalkSpeedPreset,
     overlayVisible: Boolean,
     mockActive: Boolean,
@@ -52,8 +44,6 @@ fun BeeSettingsScreen(
     onProvider: (MapProvider) -> Unit,
     onFreeMapStyle: (FreeMapStyle) -> Unit,
     onAppearance: (MapAppearance) -> Unit,
-    onNaosFamily: (NaosThemeFamily) -> Unit,
-    onGlassMaterial: (NaosGlassMaterial) -> Unit,
     onDefaultSpeed: (WalkSpeedPreset) -> Unit,
     onPermissions: () -> Unit,
     overlayGuideEnabled: Boolean,
@@ -68,10 +58,9 @@ fun BeeSettingsScreen(
     statusMessage: String,
     onBack: () -> Unit,
 ) {
-    val palette = NaosDesignSystem.palette(naosFamily, dark)
+    val palette = NaosDesignSystem.palette(NaosThemeFamily.MINERAL, dark)
     val foreground = palette.ink
     val muted = palette.muted
-    var showAdvancedAppearance by remember { mutableStateOf(false) }
     Column(
         Modifier.fillMaxSize()
             .background(palette.bg)
@@ -130,7 +119,6 @@ fun BeeSettingsScreen(
                     horizontalArrangement = Arrangement.spacedBy(7.dp),
                 ) {
                     listOf(
-                        MapAppearance.SYSTEM to "跟隨系統",
                         MapAppearance.LIGHT to "淺色",
                         MapAppearance.DARK to "深色",
                     ).forEach { (option, label) ->
@@ -141,40 +129,10 @@ fun BeeSettingsScreen(
                         )
                     }
                 }
-                Text("PikminBee 主題 · 鼠尾草色／Regular 為預設",
-                    color = foreground, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                TextButton(onClick = { showAdvancedAppearance = !showAdvancedAppearance }) {
-                    Text(if (showAdvancedAppearance) "收起進階外觀" else "進階外觀選項")
-                }
-                if (showAdvancedAppearance) {
-                androidx.compose.foundation.layout.FlowRow(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(3.dp),
-                ) {
-                    NaosThemeFamily.entries.forEach { option ->
-                        FilterChip(
-                            selected = naosFamily == option,
-                            onClick = { onNaosFamily(option) },
-                            label = { Text(option.label, fontSize = 12.sp) },
-                        )
-                    }
-                }
-                Text("玻璃材質", fontSize = 13.sp, color = foreground)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    NaosGlassMaterial.entries.forEach { option ->
-                        FilterChip(
-                            selected = glassMaterial == option,
-                            onClick = { onGlassMaterial(option) },
-                            label = { Text(option.label) },
-                        )
-                    }
-                }
-                Text("Regular／Clear 只在可取得地圖像素的裝置啟用光學折射；"+
-                    "不支援時自動使用霧面替代，不會宣稱有折射。"+
-                    "視覺參數使用 Naos 共用模板的預覽基準。",
+                Text("PikminBee 專屬外觀 · 礦石霧藍 × 蜜黃 · Regular Glass",
+                    color = muted, fontSize = 12.sp)
+                Text("移動地圖時維持半透明磨砂質感；靜止且支援時顯示地圖像素折射。",
                     color = muted, fontSize = 11.sp)
-                }
             }
         }
         androidx.compose.material3.Surface(
