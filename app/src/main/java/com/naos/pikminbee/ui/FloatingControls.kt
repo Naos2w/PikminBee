@@ -1,5 +1,8 @@
 package com.naos.pikminbee.ui
 
+import android.animation.AnimatorSet
+import android.animation.ObjectAnimator
+import android.animation.ValueAnimator
 import android.content.Context
 import android.content.res.ColorStateList
 import androidx.compose.ui.graphics.toArgb
@@ -14,6 +17,7 @@ import android.view.WindowManager
 import android.view.ViewGroup
 import android.os.Handler
 import android.os.Looper
+import android.view.animation.AccelerateDecelerateInterpolator
 import com.naos.pikminbee.health.PhysicalStepsStatus
 import android.widget.LinearLayout
 import android.widget.FrameLayout
@@ -54,6 +58,9 @@ class FloatingControls(
 
     private var beeButton: View? = null
     private var beeIcon: ImageView? = null
+    private var headerBeeIcon: ImageView? = null
+    private var logoAnimator: AnimatorSet? = null
+    private var logoRenderKey: String = ""
     private var quickSummary: TextView? = null
     private var quickSteps: TextView? = null
     private val quickActions = linkedMapOf<OverlayQuickAction, ImageView>()
@@ -150,7 +157,7 @@ class FloatingControls(
     /** Refresh the single-level overlay without altering the active GPS session. */
     fun refreshAppearance() {
         val holder = root ?: return
-        holder.background = glass()
+        holder.background = if (expanded) glass() else null
         val palette = colors()
         fun repaint(view: View) {
             if (view is TextView) view.setTextColor(palette.ink.toArgb())
@@ -160,13 +167,14 @@ class FloatingControls(
         }
         repaint(holder)
         quickSteps?.setTextColor(palette.muted.toArgb())
-        beeIcon?.background = softButtonBackground()
+        beeIcon?.background = null
         quickActions.values.forEach {
             it.background = RippleDrawable(
                 ColorStateList.valueOf(palette.accent.copy(alpha = .20f).toArgb()),
                 softButtonBackground(), null,
             )
         }
+        logoRenderKey = ""
         refreshQuick()
         holder.invalidate()
     }
@@ -325,38 +333,68 @@ class FloatingControls(
             "切換行走速度，目前 ${currentSpeed.kilometresPerHour} km/h")
         iconUpdate(OverlayQuickAction.MAP, OverlayGlyph.MAP, "開啟 PikminBee 地圖")
         iconUpdate(OverlayQuickAction.CLOSE, OverlayGlyph.CLOSE, "關閉懸浮視窗，不停止行走")
-        beeIcon?.setImageDrawable(NaosOverlayActionIcon(
-            OverlayGlyph.BEE, colors().ink.toArgb(), dp(28)))
+        refreshBeeLogo()
+    }
+
+    /** Logo-only collapsed surface, with status colour and reduced-motion support. */
+    private fun refreshBeeLogo() {
+        val dark = isDark()
+        val renderKey = "$dark:$expanded:$lastPhase"
+        if (renderKey == logoRenderKey) return
+        logoRenderKey = renderKey
+        val tint = BeeLogoPolicy.tint(dark, expanded, lastPhase)
+        beeIcon?.setImageDrawable(NaosOverlayActionIcon(OverlayGlyph.BEE, tint, dp(42)))
+        headerBeeIcon?.setImageDrawable(NaosOverlayActionIcon(OverlayGlyph.BEE,
+            BeeLogoPolicy.tint(dark, true, lastPhase), dp(30)))
+        logoAnimator?.cancel()
+        logoAnimator = null
+        val bee = beeIcon ?: return
+        bee.translationY = 0f
+        bee.rotation = 0f
+        if (expanded || !ValueAnimator.areAnimatorsEnabled()) return
+        val motion = BeeLogoPolicy.motion(lastPhase)
+        if (motion == BeeLogoPolicy.Motion.STILL) return
+        val floatPixels = if (motion == BeeLogoPolicy.Motion.FLYING) dp(5) else dp(2)
+        val time = if (motion == BeeLogoPolicy.Motion.FLYING) 730L else 1450L
+        val bob = ObjectAnimator.ofFloat(bee, View.TRANSLATION_Y, 0f, -floatPixels.toFloat())
+            .apply {
+                duration = time
+                repeatCount = ValueAnimator.INFINITE
+                repeatMode = ValueAnimator.REVERSE
+                interpolator = AccelerateDecelerateInterpolator()
+            }
+        val animations = mutableListOf<android.animation.Animator>(bob)
+        if (motion == BeeLogoPolicy.Motion.FLYING) {
+            animations.add(ObjectAnimator.ofFloat(bee, View.ROTATION, -6f, 6f).apply {
+                duration = time
+                repeatCount = ValueAnimator.INFINITE
+                repeatMode = ValueAnimator.REVERSE
+                interpolator = AccelerateDecelerateInterpolator()
+            })
+        }
+        logoAnimator = AnimatorSet().apply { playTogether(animations); start() }
     }
 
     fun show() {
         if (root != null) return
         val container = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            background = glass()
-            elevation = dp(13).toFloat()
-            setPadding(dp(7), dp(5), dp(7), dp(5))
+            // The collapsed bee is a free-standing logo, not a rounded button.
+            background = null
+            elevation = 0f
+            setPadding(0, 0, 0, 0)
         }
         val bee = ImageView(context).apply {
             setImageDrawable(NaosOverlayActionIcon(OverlayGlyph.BEE, colors().ink.toArgb(), dp(28)))
-            background = softButtonBackground()
-            scaleType = ImageView.ScaleType.CENTER
-            setPadding(dp(9), dp(9), dp(9), dp(9))
-            contentDescription = "PikminBee 蜜蜂控制，點一下展開，拖曳移動"
+            background = null
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+            contentDescription = "PikminBee 蜜蜂 Logo：點一下展開控制，拖曳移動位置"
             isClickable = true
             isFocusable = true
         }
         val beeShell = FrameLayout(context).apply {
             addView(bee, FrameLayout.LayoutParams(dp(54), dp(54)))
-            addView(View(context).apply {
-                background = GradientDrawable().apply {
-                    shape = GradientDrawable.OVAL
-                    setColor(colors().accent.toArgb())
-                }
-            }, FrameLayout.LayoutParams(dp(8), dp(8), Gravity.BOTTOM or Gravity.END).apply {
-                marginEnd = dp(5)
-                bottomMargin = dp(5)
-            })
         }
         container.addView(beeShell)
         beeButton = beeShell
@@ -378,12 +416,14 @@ class FloatingControls(
         }
         header.addView(description, LinearLayout.LayoutParams(0, dp(45), 1f))
         header.addView(ImageView(context).apply {
-            setImageDrawable(NaosOverlayActionIcon(OverlayGlyph.MORE,
-                colors().ink.toArgb(), dp(22)))
-            setPadding(dp(12), dp(12), dp(12), dp(12))
-            contentDescription = "收合懸浮控制，保持在背景執行"
+            setImageDrawable(NaosOverlayActionIcon(OverlayGlyph.BEE,
+                BeeLogoPolicy.HONEY, dp(30)))
+            setPadding(dp(6), dp(6), dp(6), dp(6))
+            contentDescription = "收合懸浮控制，保持目前行走狀態"
             isClickable = true
+            isFocusable = true
             setOnClickListener { toggleExpanded() }
+            headerBeeIcon = this
         }, LinearLayout.LayoutParams(dp(48), dp(48)))
         actions.addView(header)
 
@@ -483,6 +523,8 @@ class FloatingControls(
         var initialX = 0f
         var initialY = 0f
         var moved = false
+        // performClick() needs a real listener; without it taps were silently discarded.
+        bee.setOnClickListener { toggleExpanded() }
         bee.setOnTouchListener { view, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
@@ -536,6 +578,12 @@ class FloatingControls(
 
     private fun toggleExpanded() {
         expanded = !expanded
+        root?.apply {
+            background = if (expanded) glass() else null
+            elevation = if (expanded) dp(13).toFloat() else 0f
+            if (expanded) setPadding(dp(7), dp(5), dp(7), dp(5))
+            else setPadding(0, 0, 0, 0)
+        }
         panel?.animate()?.cancel()
         panel?.visibility = if (expanded) View.VISIBLE else View.GONE
         beeButton?.visibility = if (expanded) View.GONE else View.VISIBLE
@@ -560,6 +608,7 @@ class FloatingControls(
                 view.post { keepVisible(view, placement) }
             }
         }
+        refreshBeeLogo()
     }
 
     fun update(
@@ -582,6 +631,9 @@ class FloatingControls(
 
     fun dismiss() {
         stepsHandler.removeCallbacks(stepRefresh)
+        logoAnimator?.cancel()
+        logoAnimator = null
+        logoRenderKey = ""
         root?.let { runCatching { windows.removeView(it) } }
         root = null
         panel = null
@@ -589,6 +641,7 @@ class FloatingControls(
         quickSummary = null
         quickSteps = null
         beeIcon = null
+        headerBeeIcon = null
         quickActions.clear()
         lastPhase = WalkPhase.IDLE
         lastMode = null

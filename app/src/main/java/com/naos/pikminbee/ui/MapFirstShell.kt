@@ -72,6 +72,7 @@ fun MapFirstShell(
     onCurrentLocation: () -> Unit,
     onHome: () -> Unit,
     openDetailsRequest: Int = 0,
+    closeDetailsRequest: Int = 0,
     onMode: (Int) -> Unit,
     onSettings: () -> Unit,
     onPermissions: () -> Unit,
@@ -94,6 +95,9 @@ fun MapFirstShell(
     var detailsOpen by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(openDetailsRequest) {
         if (openDetailsRequest > 0) detailsOpen = true
+    }
+    LaunchedEffect(closeDetailsRequest) {
+        if (closeDetailsRequest > 0) detailsOpen = false
     }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val p = NaosDesignSystem.palette(LocalNaosVisualState.current.family, dark)

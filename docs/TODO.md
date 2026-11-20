@@ -1,5 +1,17 @@
 # PikminBee TODO
 
+## V4-B · UAT 0.5.1 user-reported regressions (20 Nov 2026)
+- [x] **Source fix / not yet device accepted:** collapsed bee was consuming touch UP and calling `performClick()` without a registered click listener; wire `setOnClickListener` so tapping really expands the panel. Dragging remains separate.
+- [x] **Source fix / not yet device accepted:** remove the decorative collapsed button/background and status dot. Keep a 54dp invisible touch target around an original outline-only bee logo. Idle: near black on Light / near white on Dark; expanded: honey; walking: green with gentle flying motion; paused: amber with slight hover; stopped: neutral/no motion. Respect Android reduced-motion settings and cancel animators on dismiss.
+- [x] **Source fix / not yet device accepted:** retaining route preview no longer depends on whether JourneyControls is currently composed; remove its mount-time `onPreviewRoad(emptyList())`. Ignore harmless phone GPS jitter while an asynchronous routing request is in flight. On successful pedestrian preview, fit the road and close the bottom sheet. Never move GPS on a preview-only click. Explicit route/loop edits still invalidate the relevant preview.
+- [x] **Source fix / not yet device accepted:** preserve a translucent mineral glass material and subtle edge highlights while moving the map, then blend back to genuine map-snapshot optics when idle. No claim of continuous real-time pixel refraction during camera motion; no costly per-frame map snapshots.
+- [x] **Source fix:** remove theme-family and Regular/Clear/Blur selectors; the product now uses fixed Mineral + Regular with restrained Honey logo accents. Only Light/Dark are selectable; old SYSTEM/family/material preferences are migrated/ignored.
+- [x] MSI network diagnostic: Valhalla's pedestrian routing test request returned HTTP 200 with one route leg, so the server was reachable from MSI; this does not prove reachability from a POCO phone.
+- [x] Editable OpenPencil design preview `C:\Naos\02.Git\personal\design-previews\PikminBee-V4-B-Mineral-Honey-Logo-20261120.fig` and same-name PNG, Light/Dark and 4 logo states.
+- [x] MSI local `:app:compileDebugKotlin :app:testDebugUnitTest :app:lintDebug --offline` passed; 161 / 161 JVM tests with 0 failures or skipped, Gradle exit 0. Diff check clean. New BeeLogoPolicy regression tests cover all logo states.
+- [ ] Create `fix/* → develop` PR and follow normal squash merge after checks; this is a DEV-only source fix, not an APK/UAT release.
+- [ ] POCO UAT: validate touch/drag, logo motion and idle colours, map glass on continuous pan, route preview line and pan, light/dark, accessibility, Android overlay permission and real/virtual location state. Then proceed through the next explicit staging UAT release gate; do not modify production `main`.
+
 ## V4-A follow-up · Icon-only floating controls and map refinements (20 Nov 2026)
 - [x] DEV source: compact draggable bee and 2 × 4 icon-only single-level toolbar with status and separate virtual/real Steps. User approved removing the old 「進階操作」 area entirely; coordinate entry, route edits and favourites are available only in the main App. No duplicate overlay editor or keyboard input.
 - [x] DEV source: dynamic start / pause / resume; independent stop; temporary speed-cycle 0.8 → 1.4 → 10.8 km/h; opening the map never stops walking; closing the overlay is separate from stopping the GPS route.
