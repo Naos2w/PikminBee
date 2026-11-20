@@ -5,7 +5,7 @@
 - [x] Main route quick button is now Plan → Start on the exact confirmed preview geometry; no location modification or mock-service start on preview. GPS jitter up to 30 m preserves preview; edited waypoints or moved starting point invalidate it.
 - [x] Main sheet and map quick button now use a single route-primary handler; during travel the global quick bar offers Pause/Resume and independent Stop even after switching map modes. Expanded main sheet adds shared real/virtual GPS, flower vision and speed shortcuts while the floating panel stays lightweight.
 - [x] Pure JVM regression cases cover nearby vs far snap and preview freshness across jitter/edit/moved origin.
-- [ ] Confirm GitHub Android source CI: compilation, relevant JVM tests and lint. MSI OpenChatX was offline at the start of this task, so no local Android build or live-device evaluation is claimed.
+- [x] GitHub Android verify (PR #59, run 44776752065) passed: Kotlin compile, JVM unit tests and Android Lint; no APK packaging. MSI OpenChatX was offline at the start of this task, so no local Android build or live-device evaluation is claimed.
 - [ ] Physical POCO acceptance: snap taps in parks/courtyards, verify nearby footpath choice and ≤200 m displacement; check 2-stage preview/start, rapid tap guard, active Pause/Resume/Stop in all map tabs, overlay parity and route switch with mock/real GPS. Routing provider may still refuse genuinely disconnected areas.
 - [ ] Promote only through normal PR gates when ready; existing UAT 0.7.1 on staging is not this DEV change, and main must remain untouched.
 
