@@ -16,7 +16,9 @@ object ValhallaPlanner {
     class RouteException(message: String) : Exception(message)
     private const val ENDPOINT = "https://valhalla1.openstreetmap.de/route"
     private const val MAX_RESPONSE_BYTES = 3_000_000
-    private const val MAX_SNAP_METERS = 45.0
+    // Valhalla may correlate a tap in a park or courtyard to the closest walkable edge.
+    // Never silently choose an arbitrarily distant road.
+    internal const val MAX_SNAP_METERS = 200.0
     private val cache = LinkedHashMap<String, Pair<Long, List<Coordinate>>>()
     private var lastRequestMillis = 0L
 
@@ -35,7 +37,10 @@ object ValhallaPlanner {
             lastRequestMillis = now
         }
         val locations = JSONArray()
-        points.forEach { locations.put(JSONObject().put("lat", it.latitude).put("lon", it.longitude)) }
+        points.forEach { point ->
+            locations.put(JSONObject().put("lat", point.latitude).put("lon", point.longitude)
+                .put("radius", MAX_SNAP_METERS.toInt()).put("rank_candidates", true))
+        }
         val json = JSONObject().put("locations", locations)
             .put("costing", "pedestrian").put("directions_type", "none")
             .put("shape_format", "polyline6").put("units", "km").toString()
@@ -93,9 +98,9 @@ object ValhallaPlanner {
         repeat(legs.length()) { leg ->
             val vertices = decodePolyline6(legs.getJSONObject(leg).optString("shape"))
             if (vertices.size < 2) throw RouteException("路線缺少有效節點")
-            if (WalkingGeometry.distanceMeters(vertices.first(), stops[leg]) > 45.0 ||
-                WalkingGeometry.distanceMeters(vertices.last(), stops[leg + 1]) > 45.0) {
-                throw RouteException("有路點距離可步行道路太遠，請改選道路上位置")
+            if (WalkingGeometry.distanceMeters(vertices.first(), stops[leg]) > MAX_SNAP_METERS ||
+                WalkingGeometry.distanceMeters(vertices.last(), stops[leg + 1]) > MAX_SNAP_METERS) {
+                throw RouteException("附近 200 公尺內找不到可步行的道路或步道，請稍微調整路點")
             }
             vertices.forEach { point ->
                 if (result.isEmpty() || WalkingGeometry.distanceMeters(result.last(), point) > 0.30) {

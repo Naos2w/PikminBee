@@ -61,6 +61,9 @@ fun JourneyControls(
     onAskLocation: () -> Unit,
     onPreviewRoad: (List<Coordinate>) -> Unit = {},
     onPreviewShown: () -> Unit = {},
+    preparedRoad: List<Coordinate> = emptyList(),
+    routePlanning: Boolean = false,
+    onRoutePrimary: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -194,7 +197,8 @@ fun JourneyControls(
             label = { Text("循環路線", fontSize = 12.sp) },
         )
 
-        run {
+        val controlling = active && phase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)
+        if (flower) {
             OutlinedButton(
                 onClick = { previewOrStart(startWalking = false) },
                 enabled = !planning && canPlan &&
@@ -203,52 +207,69 @@ fun JourneyControls(
             ) { Text(if (planning) "道路規劃中…" else "先預覽步行道路（不移動）", fontSize = 12.sp) }
             if (!canPlan) {
                 Text(
-                    if (origin == null) "尚未取得路線起點：請先授權目前定位或設定尋花起點。"
-                    else "請先在地圖選取至少一個不同於起點的目的地。",
+                    if (origin == null) "尚未取得起點，請先設定尋花起點。"
+                    else "請先在地圖選取至少一個目的地。",
                     color = muted, fontSize = 12.sp,
                 )
             }
-            previewNotice?.let { notice ->
-                Text(notice, color = foreground, fontSize = 12.sp)
-            }
+            previewNotice?.let { Text(it, color = foreground, fontSize = 12.sp) }
             previewDistance?.let { metres ->
                 val estimate = RouteEstimate.fromDistance(metres, speedPreset)
-                Text(
-                    "道路距離 ${estimate.distanceLabel} · 預估行走 ${estimate.durationLabel}",
-                    color = foreground, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
-                )
-                Text(
-                    "依 ${speedPreset.kilometresPerHour} km/h 估算，不含休息及系統延遲；改變速度會同步更新。",
-                    color = muted, fontSize = 12.sp,
-                )
+                Text("道路距離 ${estimate.distanceLabel} · 預估 ${estimate.durationLabel}",
+                    color = foreground, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            }
+        } else {
+            when {
+                controlling -> Text(if (phase == WalkPhase.PAUSED) "已暫停行走" else "道路行走中",
+                    color = foreground, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                routePlanning -> Text("正在規劃道路…", color = muted, fontSize = 12.sp)
+                preparedRoad.size >= 2 -> {
+                    val estimate = RouteEstimate.fromDistance(
+                        WalkingGeometry.lengthMeters(preparedRoad), speedPreset)
+                    Text("已規劃 · ${estimate.distanceLabel} · 預估 ${estimate.durationLabel}",
+                        color = foreground, fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold)
+                    Text("確認地圖道路後，再按「開始行走」。", color = muted, fontSize = 12.sp)
+                }
+                !canPlan -> Text(
+                    if (origin == null) "尚未取得起點，請先授權定位。"
+                    else "請先在地圖加入目的地。",
+                    color = muted, fontSize = 12.sp)
+                else -> Text("先規劃路徑，不會自動行走。", color = muted, fontSize = 12.sp)
             }
         }
-        val controlling = active && phase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             // Main-app and floating controls use the same semantic colour/state policy.
             Button(
                 onClick = {
-                    if (controlling) {
+                    if (!flower) onRoutePrimary()
+                    else if (controlling) {
                         context.startService(MockLocationService.command(context,
                             if (phase == WalkPhase.PAUSED)
                                 MockLocationService.ACTION_RESUME_ROUTE
                             else MockLocationService.ACTION_PAUSE_ROUTE))
                     } else previewOrStart(startWalking = true)
                 },
-                enabled = controlling || (!planning && canPlan &&
-                    phase !in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)),
+                enabled = controlling || (
+                    phase !in listOf(WalkPhase.MOVING, WalkPhase.PAUSED) &&
+                        canPlan && (if (flower) !planning else !routePlanning)
+                    ),
                 modifier = Modifier.weight(1.4f).height(48.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(BeeActionColors.primary(
+                    containerColor = if (!flower && !controlling && preparedRoad.size < 2)
+                        Color(0xFF4D737E) else Color(BeeActionColors.primary(
                         if (controlling) phase else WalkPhase.IDLE)),
-                    contentColor = Color(BeeActionColors.ON_BRIGHT),
+                    contentColor = if (!flower && !controlling && preparedRoad.size < 2)
+                        Color.White else Color(BeeActionColors.ON_BRIGHT),
                     disabledContainerColor = muted.copy(alpha = .14f),
                     disabledContentColor = muted,
                 ),
             ) {
-                Text(if (planning && !controlling) "規劃中…"
-                    else if (controlling && phase == WalkPhase.MOVING) "Ⅱ 暫停"
-                    else if (controlling) "▶ 繼續" else "▶ 開始行走",
+                Text(if (controlling && phase == WalkPhase.MOVING) "Ⅱ 暫停"
+                    else if (controlling) "▶ 繼續"
+                    else if ((!flower && routePlanning) || (flower && planning)) "規劃中…"
+                    else if (!flower && preparedRoad.size < 2) "規劃路徑"
+                    else "▶ 開始行走",
                     fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             }
 
@@ -269,7 +290,8 @@ fun JourneyControls(
             ) { Text("■ 停止", fontSize = 13.sp, fontWeight = FontWeight.SemiBold) }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            TextButton(onClick = onUndo, enabled = stops.isNotEmpty()) { Text("上一步 · 重選") }
+            TextButton(onClick = onUndo,
+                enabled = stops.isNotEmpty() && phase !in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)) { Text("上一步 · 重選") }
             TextButton(onClick = {
                 if (active) {
                     context.startService(MockLocationService.command(context, MockLocationService.ACTION_CLEAR_ROUTE))
