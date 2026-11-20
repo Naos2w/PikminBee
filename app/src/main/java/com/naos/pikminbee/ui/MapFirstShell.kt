@@ -75,6 +75,8 @@ fun MapFirstShell(
     closeDetailsRequest: Int = 0,
     onMode: (Int) -> Unit,
     onSettings: () -> Unit,
+    overlayVisible: Boolean,
+    onToggleOverlay: () -> Unit,
     onPermissions: () -> Unit,
     mapExplore: Boolean,
     onCloseExplore: () -> Unit,
@@ -307,6 +309,14 @@ fun MapFirstShell(
                     onClick = { detailsOpen = false; onSettings() },
                     modifier = Modifier.size(48.dp).semantics { contentDescription = "開啟設定" },
                 ) { NaosUtilityIcon(0, p.ink) }
+                IconButton(
+                    onClick = onToggleOverlay,
+                    modifier = Modifier.size(48.dp)
+                        .background(if (overlayVisible) p.soft else Color.Transparent,
+                            RoundedCornerShape(14.dp))
+                        .semantics { contentDescription = if (overlayVisible)
+                            "隱藏懸浮控制" else "開啟懸浮控制" },
+                ) { NaosBeeHomeIcon(if (overlayVisible) p.accent else p.ink) }
                 IconButton(
                     onClick = { detailsOpen = false; onPermissions() },
                     modifier = Modifier.size(48.dp).semantics { contentDescription = "檢查權限" },

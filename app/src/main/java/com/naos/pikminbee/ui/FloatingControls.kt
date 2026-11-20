@@ -7,8 +7,10 @@ import android.content.Context
 import android.content.res.ColorStateList
 import androidx.compose.ui.graphics.toArgb
 import android.graphics.PixelFormat
+import android.graphics.Color
 import android.os.Build
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.LayerDrawable
 import android.graphics.drawable.RippleDrawable
 import android.view.Gravity
 import android.view.MotionEvent
@@ -168,6 +170,7 @@ class FloatingControls(
         repaint(holder)
         quickSteps?.setTextColor(palette.muted.toArgb())
         beeIcon?.background = null
+        beeButton?.background = beeGlassRim()
         // Re-render semantic actions only after appearance changes, not every step tick.
         quickActions.values.forEach { it.tag = null }
         logoRenderKey = ""
@@ -198,12 +201,35 @@ class FloatingControls(
         AppPreferences(context).naosThemeFamily(), isDark())
 
     /** Cross-app overlays cannot sample another application's secure pixels. */
-    private fun glass() = GradientDrawable().apply {
+    private fun glass() = GradientDrawable(
+        GradientDrawable.Orientation.TL_BR,
+        intArrayOf(
+            colors().surface.copy(alpha = if (isDark()) .86f else .83f).toArgb(),
+            colors().soft.copy(alpha = if (isDark()) .79f else .70f).toArgb(),
+            colors().surface.copy(alpha = if (isDark()) .88f else .82f).toArgb(),
+        ),
+    ).apply {
         cornerRadius = dp(26).toFloat()
-        val p = colors()
-        setColor(p.surface.copy(alpha = if (isDark()) .91f else .88f).toArgb())
-        setStroke(dp(1), p.stroke.toArgb())
+        setStroke(dp(1).coerceAtLeast(1), colors().stroke.toArgb())
     }
+
+    /** A subtle lens rim around the lone bee logo, not a second status badge. */
+    private fun beeGlassRim() = LayerDrawable(arrayOf(
+        GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(
+            colors().surface.copy(alpha = if (isDark()) .67f else .57f).toArgb(),
+            colors().soft.copy(alpha = if (isDark()) .56f else .44f).toArgb(),
+        )).apply {
+            shape = GradientDrawable.OVAL
+            setStroke(dp(1).coerceAtLeast(1), if (isDark())
+                Color.argb(210, 245, 252, 255) else Color.argb(210, 255, 255, 255))
+        },
+        GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(Color.TRANSPARENT)
+            setStroke(dp(1).coerceAtLeast(1),
+                colors().ink.copy(alpha = if (isDark()) .32f else .38f).toArgb())
+        },
+    )).apply { setLayerInset(1, dp(2), dp(2), dp(2), dp(2)) }
 
     private fun softButtonBackground() = GradientDrawable().apply {
         cornerRadius = dp(14).toFloat()
@@ -409,7 +435,7 @@ class FloatingControls(
         if (root != null) return
         val container = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            // The collapsed bee is a free-standing logo, not a rounded button.
+            // The collapsed bee stays icon-first; its rim is drawn by the 54dp shell.
             background = null
             elevation = 0f
             setPadding(0, 0, 0, 0)
@@ -424,6 +450,7 @@ class FloatingControls(
             isFocusable = true
         }
         val beeShell = FrameLayout(context).apply {
+            background = beeGlassRim()
             addView(bee, FrameLayout.LayoutParams(dp(54), dp(54)))
         }
         container.addView(beeShell)
