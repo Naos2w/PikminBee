@@ -197,6 +197,7 @@ fun JourneyControls(
             label = { Text("循環路線", fontSize = 12.sp) },
         )
 
+        val controlling = active && phase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)
         if (flower) {
             OutlinedButton(
                 onClick = { previewOrStart(startWalking = false) },
@@ -219,6 +220,8 @@ fun JourneyControls(
             }
         } else {
             when {
+                controlling -> Text(if (phase == WalkPhase.PAUSED) "已暫停行走" else "道路行走中",
+                    color = foreground, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 routePlanning -> Text("正在規劃道路…", color = muted, fontSize = 12.sp)
                 preparedRoad.size >= 2 -> {
                     val estimate = RouteEstimate.fromDistance(
@@ -235,7 +238,6 @@ fun JourneyControls(
                 else -> Text("先規劃路徑，不會自動行走。", color = muted, fontSize = 12.sp)
             }
         }
-        val controlling = active && phase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             // Main-app and floating controls use the same semantic colour/state policy.
             Button(
@@ -288,7 +290,8 @@ fun JourneyControls(
             ) { Text("■ 停止", fontSize = 13.sp, fontWeight = FontWeight.SemiBold) }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            TextButton(onClick = onUndo, enabled = stops.isNotEmpty()) { Text("上一步 · 重選") }
+            TextButton(onClick = onUndo,
+                enabled = stops.isNotEmpty() && phase !in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)) { Text("上一步 · 重選") }
             TextButton(onClick = {
                 if (active) {
                     context.startService(MockLocationService.command(context, MockLocationService.ACTION_CLEAR_ROUTE))
