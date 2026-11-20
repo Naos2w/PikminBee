@@ -182,8 +182,8 @@ private fun PikminBeeScreen() {
     var provider by remember { mutableStateOf(prefs.provider()) }
     var freeMapStyle by remember { mutableStateOf(prefs.freeMapStyle()) }
     var appearance by remember { mutableStateOf(prefs.appearance()) }
-    var naosFamily by remember { mutableStateOf(prefs.naosThemeFamily()) }
-    var naosMaterial by remember { mutableStateOf(prefs.naosGlassMaterial()) }
+    val naosFamily = NaosThemeFamily.MINERAL
+    val naosMaterial = NaosGlassMaterial.REGULAR
     var mapBackdrop by remember { mutableStateOf<Bitmap?>(null) }
     val dark = when (appearance) {
         MapAppearance.SYSTEM -> systemDark
@@ -510,6 +510,7 @@ private fun PikminBeeScreen() {
         if ((context as? MainActivity)?.intent
                 ?.getBooleanExtra(MainActivity.EXTRA_OPEN_FLOWER_VISION, false) == true) 1 else 0
     ) }
+    var closeDetailsRequest by remember { mutableIntStateOf(0) }
     var guideEnabled by remember { mutableStateOf(prefs.overlayFirstUseGuideEnabled()) }
     var holdHints by remember { mutableStateOf(prefs.overlayLongPressTips()) }
     LaunchedEffect(settingsRequest) {
@@ -680,8 +681,6 @@ private fun PikminBeeScreen() {
                 provider = provider,
                 freeMapStyle = freeMapStyle,
                 appearance = appearance,
-                naosFamily = naosFamily,
-                glassMaterial = naosMaterial,
                 defaultSpeed = defaultSpeedPreset,
                 overlayVisible = overlayVisible,
                 mockActive = mockPosition != null,
@@ -702,22 +701,6 @@ private fun PikminBeeScreen() {
                         context.startService(MockLocationService.command(
                             context, MockLocationService.ACTION_REFRESH_OVERLAY_APPEARANCE))
                     }.onFailure { message = "已切換主題，浮窗更新失敗：${it.message}" }
-                },
-                onNaosFamily = {
-                    naosFamily = it
-                    prefs.setNaosThemeFamily(it)
-                    if (overlayVisible) runCatching {
-                        context.startService(MockLocationService.command(
-                            context, MockLocationService.ACTION_REFRESH_OVERLAY_APPEARANCE))
-                    }
-                },
-                onGlassMaterial = {
-                    naosMaterial = it
-                    prefs.setNaosGlassMaterial(it)
-                    if (overlayVisible) runCatching {
-                        context.startService(MockLocationService.command(
-                            context, MockLocationService.ACTION_REFRESH_OVERLAY_APPEARANCE))
-                    }
                 },
                 onDefaultSpeed = ::setDefaultWalkSpeed,
                 onPermissions = { activePage = BeePage.PERMISSIONS },
@@ -777,6 +760,7 @@ private fun PikminBeeScreen() {
                     goToCurrentMapPosition()
                 },
                 openDetailsRequest = openDetailsRequest,
+                closeDetailsRequest = closeDetailsRequest,
                 onMode = { index ->
                     tab = ToolTab.entries[index]
                     routeEditingStopIndex = null
@@ -1098,6 +1082,7 @@ private fun PikminBeeScreen() {
                                     },
                                     onMessage = { message = it },
                                     onAskLocation = { requestLocation.launch(Manifest.permission.ACCESS_FINE_LOCATION) },
+                                    onPreviewShown = { closeDetailsRequest++ },
                                     onPreviewRoad = { geometry ->
                                         routeRoadPreview = geometry
                                         if (geometry.size >= 2) {
@@ -1222,6 +1207,7 @@ private fun PikminBeeScreen() {
                                     onClear = { prefs.saveFlowerDraft(emptyList()) },
                                     onMessage = { message = it },
                                     onAskLocation = { requestLocation.launch(Manifest.permission.ACCESS_FINE_LOCATION) },
+                                    onPreviewShown = { closeDetailsRequest++ },
                                     onPreviewRoad = { geometry ->
                                         flowerRoadPreview = geometry
                                         if (geometry.size >= 2) {
