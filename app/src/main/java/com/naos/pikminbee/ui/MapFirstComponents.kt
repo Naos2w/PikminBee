@@ -71,8 +71,9 @@ fun MapGlass(
         else NaosDesignSystem.palette(visual.family, dark)
     val shape = RoundedCornerShape(25.dp)
     val glassMaterial = visual.material
-    // Retain one last stationary sample only for a short optical-to-frosted fade.
-    // A moving map is never continuously captured, keeping native pan responsive.
+    // A bounded camera sampler now refreshes genuine map pixels during pan and
+    // zoom. Keep the last valid sample between captures; fade to mineral frost
+    // only if the source has genuinely stalled or the map view is disposed.
     var previousSnapshot by remember { androidx.compose.runtime.mutableStateOf<Bitmap?>(null) }
     LaunchedEffect(backdrop) { if (backdrop != null) previousSnapshot = backdrop }
     val glassBlend by animateFloatAsState(

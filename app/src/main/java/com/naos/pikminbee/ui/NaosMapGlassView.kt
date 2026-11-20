@@ -15,9 +15,9 @@ import android.view.View
 import androidx.compose.ui.graphics.toArgb
 
 /**
- * Glass over MapLibre/Google map: snapshot only AFTER camera idle, then sample
- * pixels from THAT MAP BITMAP. AndroidView/SurfaceView backdrops must not be
- * treated as Compose graphics-layer pixels.
+ * Glass over MapLibre/Google map: sample the latest native-map bitmap during
+ * camera movement (bounded by the provider's capture gate) and again at idle.
+ * AndroidView/SurfaceView backdrops cannot be sampled as Compose layers.
  *
  * Android 13+ uses AGSL with rounded-edge pixel displacement. Older devices,
  * missing snapshots, or invalid dimensions use the canonical safe frosted tint
@@ -88,9 +88,8 @@ internal class NaosMapGlassView(context: Context) : View(context) {
             cachedBitmap = null
             null
         }
-        // During camera motion the real map snapshot is unavailable. Preserve a
-        // translucent glass surface (not a near-solid card), without falsely
-        // claiming the moving background was refracted.
+        // Consistent translucent mineral backing under both live and idle
+        // snapshot refraction, and during any provider capture stall.
         val dark = palette.ink.red > .6f
         val topTint = palette.surface.copy(alpha = if (dark) .76f else .69f).toArgb()
         val bottomTint = palette.soft.copy(alpha = if (dark) .64f else .62f).toArgb()

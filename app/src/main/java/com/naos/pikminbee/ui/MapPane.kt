@@ -127,6 +127,8 @@ private fun OpenFreeMapPane(
     var shownFlowers by remember { mutableStateOf(emptyList<FlowerSpot>()) }
     var line by remember { mutableStateOf<org.maplibre.android.annotations.Polyline?>(null) }
     DisposableEffect(view, lifecycleOwner) {
+        var disposed = false
+        var glassSampler: MapGlassSnapshotBridge? = null
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_START -> view.onStart()
@@ -138,6 +140,7 @@ private fun OpenFreeMapPane(
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         view.getMapAsync { ready ->
+            if (disposed) return@getMapAsync
             map = ready
             ready.uiSettings.isCompassEnabled = false
             ready.uiSettings.isScrollGesturesEnabled = true
@@ -167,27 +170,26 @@ private fun OpenFreeMapPane(
                     } else false
                 }
             }
-            // Snapshot map pixels only after the camera settles. The snapshot is
-            // sampled in the Naos glass AGSL material; do not capture Compose chrome.
-            ready.addOnCameraMoveStartedListener {
-                latestGlassSnapshot(null) // stale pixels must never be warped onto a moving map
-            }
-            ready.addOnCameraIdleListener {
-                if (view.width > 0 && view.height > 0 && map === ready) {
-                    runCatching {
-                        ready.snapshot { bitmap ->
-                            if (map === ready && view.isAttachedToWindow)
-                                latestGlassSnapshot(bitmap)
-                        }
-                    }.onFailure { latestGlassSnapshot(null) }
-                }
-            }
+            // Bounded live snapshots keep refracted map pixels fresh while panning.
+            glassSampler = MapGlassSnapshotBridge(
+                isAttached = {
+                    map === ready && view.isAttachedToWindow &&
+                        view.width > 0 && view.height > 0
+                },
+                capture = { onBitmap -> ready.snapshot { bitmap -> onBitmap(bitmap) } },
+                deliver = { bitmap -> latestGlassSnapshot(bitmap) },
+            )
+            ready.addOnCameraMoveStartedListener { glassSampler?.cameraStarted() }
+            ready.addOnCameraMoveListener { glassSampler?.cameraMoved() }
+            ready.addOnCameraIdleListener { glassSampler?.cameraIdle() }
             ready.moveCamera(org.maplibre.android.camera.CameraUpdateFactory.newCameraPosition(
                 LibreCameraPosition.Builder()
                     .target(LibreLatLng(selected.latitude, selected.longitude)).zoom(14.5).build()
             ))
         }
         onDispose {
+            disposed = true
+            glassSampler?.close()
             lifecycleOwner.lifecycle.removeObserver(observer)
             latestGlassSnapshot(null)
             map = null
@@ -346,6 +348,8 @@ private fun GoogleMapsPane(
     var shownFlowers by remember { mutableStateOf(emptyList<FlowerSpot>()) }
     var line by remember { mutableStateOf<com.google.android.gms.maps.model.Polyline?>(null) }
     DisposableEffect(view, lifecycleOwner) {
+        var disposed = false
+        var glassSampler: MapGlassSnapshotBridge? = null
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_START -> view.onStart()
@@ -357,6 +361,7 @@ private fun GoogleMapsPane(
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         view.getMapAsync { ready ->
+            if (disposed) return@getMapAsync
             map = ready
             ready.uiSettings.isMapToolbarEnabled = false
             ready.uiSettings.isScrollGesturesEnabled = true
@@ -384,21 +389,23 @@ private fun GoogleMapsPane(
                     } else false
                 }
             }
-            ready.setOnCameraMoveStartedListener { latestGlassSnapshot(null) }
-            ready.setOnCameraIdleListener {
-                if (view.width > 0 && view.height > 0 && map === ready) {
-                    runCatching {
-                        ready.snapshot { bitmap ->
-                            if (map === ready && view.isAttachedToWindow)
-                                latestGlassSnapshot(bitmap)
-                        }
-                    }.onFailure { latestGlassSnapshot(null) }
-                }
-            }
+            glassSampler = MapGlassSnapshotBridge(
+                isAttached = {
+                    map === ready && view.isAttachedToWindow &&
+                        view.width > 0 && view.height > 0
+                },
+                capture = { onBitmap -> ready.snapshot { bitmap -> onBitmap(bitmap) } },
+                deliver = { bitmap -> latestGlassSnapshot(bitmap) },
+            )
+            ready.setOnCameraMoveStartedListener { _ -> glassSampler?.cameraStarted() }
+            ready.setOnCameraMoveListener { glassSampler?.cameraMoved() }
+            ready.setOnCameraIdleListener { glassSampler?.cameraIdle() }
             ready.moveCamera(CameraUpdateFactory.newLatLngZoom(
                 GoogleLatLng(selected.latitude, selected.longitude), 14.5f))
         }
         onDispose {
+            disposed = true
+            glassSampler?.close()
             lifecycleOwner.lifecycle.removeObserver(observer)
             latestGlassSnapshot(null)
             map = null
