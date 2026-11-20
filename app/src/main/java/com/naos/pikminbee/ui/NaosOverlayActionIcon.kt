@@ -101,13 +101,16 @@ internal class NaosOverlayActionIcon(
                 canvas.drawPath(p, pen)
             }
             OverlayGlyph.BEE, OverlayGlyph.BEE_PAUSED -> {
-                canvas.drawOval(4f, 6f, 13f, 13f, pen)
-                canvas.drawOval(11f, 5f, 20f, 13f, pen)
-                canvas.drawOval(7f, 10f, 17f, 22f, pen)
-                canvas.drawLine(8.7f, 14f, 15.3f, 14f, pen)
-                canvas.drawLine(8f, 18f, 16f, 18f, pen)
-                canvas.drawLine(10f, 10f, 9f, 6f, pen)
-                canvas.drawLine(14f, 10f, 15f, 6f, pen)
+                // Preserve the original bee, but make the two wings lower and
+                // wider so they read as wings rather than round bear ears.
+                // All paths use the same 24-unit grid and rounded stroke.
+                canvas.drawOval(2.8f, 7.6f, 10.6f, 13f, pen)
+                canvas.drawOval(13.4f, 7.6f, 21.2f, 13f, pen)
+                canvas.drawOval(7.2f, 9.8f, 16.8f, 21.4f, pen)
+                canvas.drawLine(8.0f, 14.1f, 16f, 14.1f, pen)
+                canvas.drawLine(8.1f, 17.5f, 15.9f, 17.5f, pen)
+                canvas.drawLine(10.2f, 10.0f, 8.8f, 5.5f, pen)
+                canvas.drawLine(13.8f, 10.0f, 15.2f, 5.5f, pen)
                 if (glyph == OverlayGlyph.BEE_PAUSED) {
                     // Integrated pause mark; no surrounding button or badge.
                     canvas.drawLine(18f, 16f, 18f, 22f, pen)
