@@ -12,7 +12,7 @@
 - [x] Editable focused UI preview: `C:\Naos\02.Git\personal\design-previews\PikminBee-V4-A-Overlay-Icons-20261120.fig` (Light/Dark). Removed advanced-actions labels after user approval; re-exported reviewed PNG as `PikminBee-V4-A-Overlay-SingleLevel-20261120.png` in the same folder.
 - [x] Final MSI local `:app:compileDebugKotlin :app:testDebugUnitTest :app:lintDebug --offline` passed (Gradle exit 0, 158/158 JVM tests, 0 failures or skipped, Android Lint successful) for the source revision. Git diff --check passed. No GitHub CI wait, new APK/UAT promotion or `main` change.
 - [ ] Real POCO UAT: panel size/drag/edge clipping and animations, permissions and projection prompt, external-app overlay, real→virtual GPS return after service lifecycle changes, Health Connect/steps, responsive map gestures, real shader optical effect and accessibility/font scales. No connected physical phone; compile/preview is not UAT.
-- [ ] Only after POCO acceptance: next UAT release through normal `develop → staging` with explicitly requested signing/build, separate from this source-only development.
+- [ ] UAT 0.5.1 candidate: after PR #49 source merge, explicitly prepare the version PR, promote `develop → staging` by merge commit after checks, then manually request the stable-signed APK from staging for POCO acceptance. The APK is the test candidate, not proof of device acceptance. Never promote to `main` before user acceptance.
 
 ## Naos Liquid Glass V3 · User-approved A/map-first Android UI (20 Nov 2026)
 - [x] DEV 0.3.3: canonical Naos six theme families with Light/Dark and Regular/Clear/Blur, persistent settings, vector icons and low-saturation controls.
