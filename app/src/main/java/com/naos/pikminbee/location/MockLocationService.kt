@@ -291,13 +291,7 @@ class MockLocationService : Service() {
                                 }
                                 startService(command(this, actionName))
                             },
-                            onTeleport = { point -> startService(teleportIntent(this, point)) },
                             onStartRoute = { startService(command(this, ACTION_START_DRAFT_ROUTE)) },
-                            onOpenSettings = {
-                                startActivity(Intent(this, MainActivity::class.java)
-                                    .putExtra(MainActivity.EXTRA_OPEN_SETTINGS, true)
-                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
-                            },
                             onSpeedSelected = { preset ->
                                 startService(speedIntent(this, preset))
                             },

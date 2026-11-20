@@ -1,7 +1,7 @@
 # PikminBee TODO
 
 ## V4-A follow-up · Icon-only floating controls and map refinements (20 Nov 2026)
-- [x] DEV source: compact, draggable bee with subtle state dot; expanded quick toolbar has 2 × 4 vector-only actions, short status and separately labelled physical/virtual steps. Original long-form route editor is secondary, not the default interface.
+- [x] DEV source: compact draggable bee and 2 × 4 icon-only single-level toolbar with status and separate virtual/real Steps. User approved removing the old 「進階操作」 area entirely; coordinate entry, route edits and favourites are available only in the main App. No duplicate overlay editor or keyboard input.
 - [x] DEV source: dynamic start / pause / resume; independent stop; temporary speed-cycle 0.8 → 1.4 → 10.8 km/h; opening the map never stops walking; closing the overlay is separate from stopping the GPS route.
 - [x] DEV source: real/virtual GPS toggle remembers only the last virtual coordinate for up to 12 hours and restores it as PARKED without route auto-resume; mock-location permissions still gate changes. Real GPS restore keeps the overlay available.
 - [x] DEV source: flower-vision quick action opens the main App's existing consent-gated vision panel, or stops an already active capture. No screenshot/MediaProjection permission is bypassed, and no new capture engine is created.
@@ -9,7 +9,7 @@
 - [x] DEV source: map header bee/Home action recentres to the currently available position and collapses the editor; bottom sheet Settings/Permissions use vector icons. Motion includes subtle selected-tab and panel transitions.
 - [x] DEV source: route playback progress (ordered next stop / distance / remaining ETA / speed / visual progress) and compact overlay status. Fraction and ETA are derived from existing road geometry, not invented values.
 - [x] DEV source: optical-to-frosted map glass transition over 160 ms when a camera moves; never perform continuous expensive pixel capture while panning. Native Android 13+ AGSL support and fallback remain unchanged.
-- [x] Editable focused UI preview: `C:\Naos\02.Git\personal\design-previews\PikminBee-V4-A-Overlay-Icons-20261120.fig` (Light/Dark). Export PNG of the same name, checked fonts and icon rendering.
+- [x] Editable focused UI preview: `C:\Naos\02.Git\personal\design-previews\PikminBee-V4-A-Overlay-Icons-20261120.fig` (Light/Dark). Removed advanced-actions labels after user approval; re-exported reviewed PNG as `PikminBee-V4-A-Overlay-SingleLevel-20261120.png` in the same folder.
 - [x] Final MSI local `:app:compileDebugKotlin :app:testDebugUnitTest :app:lintDebug --offline` passed (Gradle exit 0, 158/158 JVM tests, 0 failures or skipped, Android Lint successful) for the source revision. Git diff --check passed. No GitHub CI wait, new APK/UAT promotion or `main` change.
 - [ ] Real POCO UAT: panel size/drag/edge clipping and animations, permissions and projection prompt, external-app overlay, real→virtual GPS return after service lifecycle changes, Health Connect/steps, responsive map gestures, real shader optical effect and accessibility/font scales. No connected physical phone; compile/preview is not UAT.
 - [ ] Only after POCO acceptance: next UAT release through normal `develop → staging` with explicitly requested signing/build, separate from this source-only development.
