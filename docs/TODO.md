@@ -1,5 +1,13 @@
 # PikminBee TODO
 
+## P0 · Live Liquid Glass during native-map gestures (20 Nov 2026)
+- [x] PR #52 Squash Merged to `develop`: commit `ffa69d8`, GitHub Android verify passed.
+- [x] Both MapLibre and Google Maps now request genuine native-map snapshots during camera movement instead of clearing optics at movement start. The existing AGSL border-refraction shader samples these changing map pixels.
+- [x] `MapGlassCaptureGate` limits capture requests to at most one every 320 ms, permits only one outstanding request, prioritises the final idle snapshot, discards late/obsolete callbacks, and recovers after stalled native callbacks.
+- [x] `MapGlassSnapshotBridge` marshals bitmap results back to the UI thread, rejects disposed views, and drops samples that are too stale while retaining the low-cost translucent mineral fallback.
+- [ ] Verify on POCO: map drag, continuous zoom, both available providers, AGSL refraction line distortion during gestures, screenshot latency and frame pacing, memory allocation and thermal load. Never claim 60 FPS optical refraction from SDK snapshots. If live capture cannot keep up, safely use frosted glass without blocking map touch.
+- [x] MSI local `:app:compileDebugKotlin :app:testDebugUnitTest :app:lintDebug --offline` passed: **171 / 171 JVM tests**, zero failures/skips. `git diff --check` clean; no connected POCO device. Changes prepared on `fix/map-glass-live-camera-sampling` for a standard DEV squash PR. No APK or promotion to `staging`/`main`.
+
 ## V4-B · UAT 0.5.1 user-reported regressions (20 Nov 2026)
 - [x] **Source fix / not yet device accepted:** collapsed bee was consuming touch UP and calling `performClick()` without a registered click listener; wire `setOnClickListener` so tapping really expands the panel. Dragging remains separate.
 - [x] **Source fix / not yet device accepted:** remove the decorative collapsed button/background and status dot. Keep a 54dp invisible touch target around an original outline-only bee logo. Idle: near black on Light / near white on Dark; expanded: honey; walking: vivid green with gentle flying motion; **paused: clearly distinct blue with an integrated Ⅱ glyph** and slight hover; stopped: neutral/no motion. Respect Android reduced-motion settings and cancel animators on dismiss.
@@ -10,7 +18,7 @@
 - [x] Editable OpenPencil design preview `C:\Naos\02.Git\personal\design-previews\PikminBee-V4-B-Mineral-Honey-Logo-20261120.fig`. The updated frame `PikminBee-V4-B-Main-Overlay-States-20261120.png` now shows **both main App and floating overlay**, Light/Dark, running/paused and all four bee-logo states; repository copy at `docs/pikminbee-v4b-mineral-honey.png`.
 - [x] **DEV colour/state refinement:** main App's map route quick controls and detailed JourneyControls now share one action palette with the icon-only floating panel: vivid green Start/Resume, amber Pause, red enabled Stop; unavailable Stop stays muted. Expanded honey is not conflated with paused blue logo + Ⅱ. Controls retain labels/glyphs for non-colour recognition.
 - [x] MSI local `:app:compileDebugKotlin :app:testDebugUnitTest :app:lintDebug --offline` passed; **164 / 164** JVM tests with 0 failures or skipped. New BeeActionColors tests cover primary/stop semantics and distinct expanded/paused appearance; Gradle exit 0.
-- [x] PR #52 (`fix/* → develop`) created; updated with the shared main-App/overlay action states and combined Light/Dark preview. Final merge still requires branch checks and squash; this is DEV-only, not an APK/UAT release.
+- [x] PR #52 (`fix/* → develop`) passed GitHub checks and was Squash Merged to `develop` as `ffa69d8`. Main App and overlay share action-state colours; this remains separate from UAT APK promotion.
 - [ ] POCO UAT: validate touch/drag, logo motion and idle colours, map glass on continuous pan, route preview line and pan, light/dark, accessibility, Android overlay permission and real/virtual location state. Then proceed through the next explicit staging UAT release gate; do not modify production `main`.
 
 ## V4-A follow-up · Icon-only floating controls and map refinements (20 Nov 2026)
