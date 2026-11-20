@@ -194,30 +194,43 @@ fun MapFirstShell(
                             color = p.muted, fontSize = 11.sp, maxLines = 1)
                         Text(if (activeWalking) (if (routePaused) "已暫停" else "進行中")
                             else "第 ${modeStopsCount + 1} 點",
-                            color = p.ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                            color = if (activeWalking) Color(
+                                if (routePaused) BeeActionColors.PAUSED_BLUE
+                                else BeeActionColors.START_GREEN
+                            ) else p.ink,
+                            fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                     }
                     Surface(
                         onClick = if (activeWalking) onRouteStop else onRouteUndo,
                         enabled = activeWalking || modeStopsCount > 0,
                         shape = RoundedCornerShape(13.dp),
-                        color = p.soft,
+                        color = if (activeWalking)
+                            Color(BeeActionColors.STOP_RED) else p.soft,
+                        contentColor = if (activeWalking)
+                            Color(BeeActionColors.ON_DANGER) else p.ink,
                         modifier = Modifier.height(48.dp),
                     ) {
                         Box(Modifier.padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
-                            Text(if (activeWalking) "停止" else "↶ 上一步",
-                                color = p.ink, fontSize = 12.sp,
+                            Text(if (activeWalking) "■ 停止" else "↶ 上一步",
+                                color = if (activeWalking) Color(BeeActionColors.ON_DANGER)
+                                else p.ink, fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold)
                         }
                     }
                     Surface(
                         onClick = onRoutePrimary,
                         shape = RoundedCornerShape(13.dp),
-                        color = p.accent,
+                        color = Color(
+                            BeeActionColors.primary(if (activeWalking && !routePaused)
+                                com.naos.pikminbee.domain.WalkPhase.MOVING
+                            else com.naos.pikminbee.domain.WalkPhase.IDLE)
+                        ),
+                        contentColor = Color(BeeActionColors.ON_BRIGHT),
                         modifier = Modifier.height(48.dp),
                     ) {
                         Box(Modifier.padding(horizontal = 15.dp), contentAlignment = Alignment.Center) {
                             Text(if (!activeWalking) "▷ 開始" else if (routePaused) "▷ 繼續" else "Ⅱ 暫停",
-                                color = p.onAccent, fontSize = 12.sp,
+                                color = Color(BeeActionColors.ON_BRIGHT), fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold)
                         }
                     }

@@ -168,12 +168,8 @@ class FloatingControls(
         repaint(holder)
         quickSteps?.setTextColor(palette.muted.toArgb())
         beeIcon?.background = null
-        quickActions.values.forEach {
-            it.background = RippleDrawable(
-                ColorStateList.valueOf(palette.accent.copy(alpha = .20f).toArgb()),
-                softButtonBackground(), null,
-            )
-        }
+        // Re-render semantic actions only after appearance changes, not every step tick.
+        quickActions.values.forEach { it.tag = null }
         logoRenderKey = ""
         refreshQuick()
         holder.invalidate()
@@ -213,6 +209,18 @@ class FloatingControls(
         cornerRadius = dp(14).toFloat()
         setColor(colors().soft.toArgb())
         // No repeated strokes or glowing/neon borders.
+    }
+
+    private fun actionBackground(which: OverlayQuickAction, enabled: Boolean): GradientDrawable {
+        val color = when (which) {
+            OverlayQuickAction.PRIMARY -> BeeActionColors.primary(lastPhase)
+            OverlayQuickAction.STOP -> BeeActionColors.stop(enabled)
+            else -> null
+        }
+        return GradientDrawable().apply {
+            cornerRadius = dp(14).toFloat()
+            setColor(color ?: colors().soft.toArgb())
+        }
     }
 
     private fun onStartRouteOrFlowers(mode: WalkMode) {
@@ -273,8 +281,28 @@ class FloatingControls(
         which: OverlayQuickAction, icon: OverlayGlyph, label: String, enabled: Boolean = true,
     ) {
         quickActions[which]?.apply {
-            setImageDrawable(NaosOverlayActionIcon(
-                icon, if (enabled) colors().ink.toArgb() else colors().muted.toArgb(), dp(24)))
+            val ink = when {
+                !enabled -> colors().muted.toArgb()
+                which == OverlayQuickAction.PRIMARY -> BeeActionColors.ON_BRIGHT
+                which == OverlayQuickAction.STOP -> BeeActionColors.ON_DANGER
+                else -> colors().ink.toArgb()
+            }
+            val paint = colors()
+            val fill = when (which) {
+                OverlayQuickAction.PRIMARY -> BeeActionColors.primary(lastPhase)
+                OverlayQuickAction.STOP -> BeeActionColors.stop(enabled)
+                else -> null
+            } ?: paint.soft.toArgb()
+            val ripple = paint.ink.copy(alpha = .12f).toArgb()
+            val renderKey = "$icon:$ink:$fill:$ripple:$enabled"
+            if (tag != renderKey) {
+                setImageDrawable(NaosOverlayActionIcon(icon, ink, dp(24)))
+                background = RippleDrawable(
+                    ColorStateList.valueOf(ripple),
+                    actionBackground(which, enabled), null,
+                )
+                tag = renderKey
+            }
             contentDescription = label
             isEnabled = enabled
             alpha = if (enabled) 1f else .42f
@@ -343,8 +371,10 @@ class FloatingControls(
         if (renderKey == logoRenderKey) return
         logoRenderKey = renderKey
         val tint = BeeLogoPolicy.tint(dark, expanded, lastPhase)
-        beeIcon?.setImageDrawable(NaosOverlayActionIcon(OverlayGlyph.BEE, tint, dp(42)))
-        headerBeeIcon?.setImageDrawable(NaosOverlayActionIcon(OverlayGlyph.BEE,
+        val glyph = if (lastPhase == WalkPhase.PAUSED)
+            OverlayGlyph.BEE_PAUSED else OverlayGlyph.BEE
+        beeIcon?.setImageDrawable(NaosOverlayActionIcon(glyph, tint, dp(42)))
+        headerBeeIcon?.setImageDrawable(NaosOverlayActionIcon(glyph,
             BeeLogoPolicy.tint(dark, true, lastPhase), dp(30)))
         logoAnimator?.cancel()
         logoAnimator = null

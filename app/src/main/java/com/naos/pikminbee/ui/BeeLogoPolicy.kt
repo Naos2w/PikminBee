@@ -4,9 +4,10 @@ import com.naos.pikminbee.domain.WalkPhase
 
 /** Product-specific honey/green accents over a fixed Mineral + Regular palette. */
 internal object BeeLogoPolicy {
-    const val HONEY = 0xFFD9AC4E.toInt()
-    const val MOVING = 0xFF78A58C.toInt()
-    const val PAUSED = 0xFFE2BB71.toInt()
+    const val HONEY = BeeActionColors.HONEY_EXPANDED
+    const val MOVING = BeeActionColors.START_GREEN
+    // Paused = distinctly cool blue, not the yellow reserved for expansion.
+    const val PAUSED = BeeActionColors.PAUSED_BLUE
     const val DARK_IDLE = 0xFFF5F7F7.toInt()
     const val LIGHT_IDLE = 0xFF202B30.toInt()
 

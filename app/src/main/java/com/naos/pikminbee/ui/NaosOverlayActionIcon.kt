@@ -11,7 +11,7 @@ import kotlin.math.sin
 
 /** Single low-contrast, vector-only icon language for the floating toolbar. */
 internal enum class OverlayGlyph {
-    BEE, PLAY, PAUSE, RESUME, STOP, REAL, VIRTUAL, FLOWER, SPEED, MAP, CLOSE, MORE
+    BEE, BEE_PAUSED, PLAY, PAUSE, RESUME, STOP, REAL, VIRTUAL, FLOWER, SPEED, MAP, CLOSE, MORE
 }
 
 internal class NaosOverlayActionIcon(
@@ -100,7 +100,7 @@ internal class NaosOverlayActionIcon(
                 }
                 canvas.drawPath(p, pen)
             }
-            OverlayGlyph.BEE -> {
+            OverlayGlyph.BEE, OverlayGlyph.BEE_PAUSED -> {
                 canvas.drawOval(4f, 6f, 13f, 13f, pen)
                 canvas.drawOval(11f, 5f, 20f, 13f, pen)
                 canvas.drawOval(7f, 10f, 17f, 22f, pen)
@@ -108,6 +108,11 @@ internal class NaosOverlayActionIcon(
                 canvas.drawLine(8f, 18f, 16f, 18f, pen)
                 canvas.drawLine(10f, 10f, 9f, 6f, pen)
                 canvas.drawLine(14f, 10f, 15f, 6f, pen)
+                if (glyph == OverlayGlyph.BEE_PAUSED) {
+                    // Integrated pause mark; no surrounding button or badge.
+                    canvas.drawLine(18f, 16f, 18f, 22f, pen)
+                    canvas.drawLine(21.5f, 16f, 21.5f, 22f, pen)
+                }
             }
         }
         canvas.restoreToCount(saved)
