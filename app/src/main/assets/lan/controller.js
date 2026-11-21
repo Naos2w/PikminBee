@@ -119,7 +119,11 @@ function selectMode(next) {
   for (const [id,value] of [
     ["mode-teleport","TELEPORT"],["mode-route","ROUTE"],
     ["mode-flowers","FLOWERS"],["mode-saved","SAVED"]
-  ]) $("" + id).classList.toggle("mode-active", mode === value);
+  ]) {
+    const tab = $("" + id);
+    tab.classList.toggle("mode-active", mode === value);
+    tab.setAttribute("aria-pressed", mode === value ? "true" : "false");
+  }
   $("location-panel").classList.toggle("hidden", mode === "SAVED");
   $("teleport-panel").classList.toggle("hidden", mode !== "TELEPORT");
   $("route-panel").classList.toggle("hidden", mode !== "ROUTE" && mode !== "FLOWERS");
@@ -129,12 +133,37 @@ function selectMode(next) {
   if (mode === "SAVED") refreshSaved();
   updateRouteControls();
   renderMap();
+  // The map keeps its own pan/pinch gestures; only navigate the control content.
+  if (connected && matchMedia("(max-width: 760px)").matches) {
+    $("control-panel").scrollIntoView({behavior:"smooth",block:"start"});
+  }
 }
 for (const [id,value] of [
   ["mode-teleport","TELEPORT"],["mode-route","ROUTE"],
   ["mode-flowers","FLOWERS"],["mode-saved","SAVED"]
 ]) $(id).addEventListener("click", () => selectMode(value));
 selectMode("TELEPORT");
+// Match Android's four-mode horizontal swipe without stealing map gestures or form input.
+const swipeArea = $("mode-content");
+const modeOrder = ["TELEPORT", "ROUTE", "FLOWERS", "SAVED"];
+let swipeStart = null;
+swipeArea.addEventListener("touchstart", event => {
+  swipeStart = null;
+  if (event.touches.length !== 1 ||
+      event.target.closest("button, input, select, textarea, a, summary, label")) return;
+  swipeStart = {x:event.touches[0].clientX,y:event.touches[0].clientY};
+}, {passive:true});
+swipeArea.addEventListener("touchend", event => {
+  const start = swipeStart;
+  swipeStart = null;
+  if (!start || event.changedTouches.length !== 1) return;
+  const dx = event.changedTouches[0].clientX - start.x;
+  const dy = event.changedTouches[0].clientY - start.y;
+  if (Math.abs(dx) < 72 || Math.abs(dx) <= Math.abs(dy) * 1.4) return;
+  const index = modeOrder.indexOf(mode);
+  const next = index + (dx < 0 ? 1 : -1);
+  if (next >= 0 && next < modeOrder.length) selectMode(modeOrder[next]);
+}, {passive:true});
 $("loop").addEventListener("change", () => {
   if (mode === "ROUTE" || mode === "FLOWERS") loops[mode] = $("loop").value === "true";
   $("confirm-snap").checked = false;
@@ -468,6 +497,11 @@ function updateStatus() {
       ", " + latest.position.lon.toFixed(5) : "");
   $("mobile-state").textContent = names[phase] || "手機待命";
   $("mobile-steps").textContent = "本次估算 " + count + " 步";
+  const activeWalk = phase === "MOVING" || phase === "PAUSED";
+  $("motion-controls").classList.toggle("is-active", activeWalk);
+  document.body.classList.toggle("has-active-controls", activeWalk);
+  $("pause").classList.toggle("is-current-action", phase === "MOVING");
+  $("resume").classList.toggle("is-current-action", phase === "PAUSED");
   updateExternalMapLink();
   if (latest?.note && /失敗|無法/.test(latest.note)) setMessage(latest.note);
 }
