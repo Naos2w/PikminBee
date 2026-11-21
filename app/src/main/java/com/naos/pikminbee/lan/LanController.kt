@@ -155,6 +155,12 @@ class LanController(private val context: Context) {
         if (req.method == "GET" && req.path == "/vendor/maplibre-gl.mjs") {
             return asset("lan/vendor/maplibre-gl/maplibre-gl.mjs", "application/javascript; charset=utf-8")
         }
+        // MapLibre GL 6.x uses a dedicated ES-module worker for vector tiles.
+        // Serve the exact same-version local worker, never an external CDN URL.
+        if (req.method == "GET" && req.path == "/vendor/maplibre-gl-worker.mjs") {
+            return asset("lan/vendor/maplibre-gl/maplibre-gl-worker.mjs",
+                "application/javascript; charset=utf-8")
+        }
         if (req.method == "GET" && req.path == "/vendor/maplibre-gl.css") {
             return asset("lan/vendor/maplibre-gl/maplibre-gl.css", "text/css; charset=utf-8")
         }

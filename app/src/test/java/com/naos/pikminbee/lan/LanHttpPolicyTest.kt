@@ -54,6 +54,10 @@ class LanHttpPolicyTest {
         assertTrue(policy.contains("frame-ancestors 'none'"))
         assertFalse(policy.contains("unpkg.com"))
         assertFalse(policy.contains("script-src 'unsafe-inline'"))
+        // MapLibre 6.18.x requires same-origin/Blob images and a worker URL.
+        assertTrue(policy.contains("img-src 'self' data: blob:"))
+        assertTrue(policy.contains("worker-src 'self' blob:"))
+        assertTrue(policy.contains("connect-src 'self' https://tiles.openfreemap.org"))
     }
 
     @Test fun browserBundlesTheExactReviewedMaplibreAssetsLocally() {
@@ -67,6 +71,7 @@ class LanHttpPolicyTest {
         val client = File(directory, "controller.js").readText(Charsets.UTF_8)
         assertTrue(html.contains("href=\"/vendor/maplibre-gl.css\""))
         assertTrue(client.contains("import(\"/vendor/maplibre-gl.mjs\")"))
+        assertTrue(client.contains("maplibre.setWorkerUrl(\"/vendor/maplibre-gl-worker.mjs\")"))
         assertFalse(html.contains("unpkg.com"))
         assertFalse(client.contains("unpkg.com"))
 
@@ -75,8 +80,10 @@ class LanHttpPolicyTest {
             "Copyright (c) 2023, MapLibre contributors"))
         val js = File(vendor, "maplibre-gl.mjs")
         val css = File(vendor, "maplibre-gl.css")
+        val worker = File(vendor, "maplibre-gl-worker.mjs")
         assertTrue(js.length() > 1_000_000L)
         assertTrue(css.length() > 40_000L)
+        assertTrue("Exact-version MapLibre worker must be packaged", worker.length() > 400_000L)
         assertEquals(
             "1e0a68844041aec6621a10d4725c9970c3b19cf7e1605d98b01dbc993e1058b2",
             sha256(js),
@@ -84,6 +91,10 @@ class LanHttpPolicyTest {
         assertEquals(
             "a90798a1953017790e590f7e1bd35ff103a8a4263972cb47290b78adf86f8c20",
             sha256(css),
+        )
+        assertEquals(
+            "c8998a2616612ebc7afc3a6f83e31ad1c5f6187550a018b4fd0561779c33015b",
+            sha256(worker),
         )
     }
 
@@ -99,6 +110,16 @@ class LanHttpPolicyTest {
         assertTrue(html.contains("id=\"set-origin\""))
         assertTrue(html.contains("id=\"mode-saved\""))
         assertTrue(html.contains("id=\"confirm-snap\""))
+        assertTrue(html.contains("id=\"map-status\""))
+        assertTrue(html.contains("id=\"map-warning\""))
+        assertTrue(html.contains("id=\"retry-map\""))
+        assertTrue(html.contains("id=\"external-map\""))
+        assertTrue(html.contains("id=\"mobile-state\""))
+        assertTrue(html.contains("id=\"mobile-steps\""))
+        assertTrue(js.contains("map.on(\"error\""))
+        assertTrue(js.contains("map.on(\"webglcontextlost\""))
+        assertTrue(js.contains("map.resize()"))
+        assertTrue(html.contains("clamp(240px,33svh,330px)"))
         assertTrue(js.contains("/api/route/preview"))
         assertTrue(js.contains("previewId: prepared.id"))
         assertTrue(js.contains("/api/route/start"))

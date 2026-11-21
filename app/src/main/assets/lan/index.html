@@ -36,13 +36,33 @@ button:disabled{opacity:.44;cursor:not-allowed}button:focus-visible,input:focus-
 #message{min-height:23px;color:var(--gold);font-size:13px;margin:9px 0}
 #pointcount{margin:9px 0}.layout .glass:nth-child(2){max-height:750px;overflow:auto}
 #saved-list{display:grid;gap:8px}#saved-list button{text-align:left}#selected{margin:9px 0}
-@media(max-width:760px){.page{padding:12px 11px}.layout{display:flex;flex-direction:column}#controls.is-visible{display:flex}.glass{padding:13px;border-radius:17px;width:100%}#map{height:340px}.layout .glass:nth-child(2){max-height:none}.head{align-items:start}h1{font-size:21px}.tabs button{font-size:12px}}
+#map-wrap{position:relative}#map-status{font-size:11px;color:var(--sub);padding:4px 8px;border:1px solid var(--line);border-radius:999px;white-space:nowrap}
+#map-status[data-state=error]{color:var(--danger);border-color:var(--danger)}
+#map-status[data-state=ready]{color:var(--sub)}
+.map-alert{position:absolute;bottom:12px;left:10px;right:10px;z-index:5;padding:12px;border:1px solid var(--gold);border-radius:14px;background:var(--card);color:var(--text);box-shadow:0 3px 12px #0002}
+.map-alert p{font-size:12px;color:var(--sub);margin:3px 0 9px}
+.map-alert .row{margin:0}.map-alert .row a{color:var(--text);background:var(--soft);border:1px solid var(--line);border-radius:11px;text-decoration:none;text-align:center;padding:10px 8px;min-height:44px;white-space:nowrap}
+.mobile-overview{display:none}.help-details summary{font-size:12px;color:var(--sub);cursor:pointer;min-height:36px;padding:7px 0}.help-details p{margin:2px 0 0;font-size:12px;color:var(--sub)}
+.head svg{display:inline-block;width:30px;height:30px;vertical-align:-5px;stroke:var(--gold);fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+@media(max-width:760px){
+ .page{padding:12px 11px 28px}.layout{display:flex;flex-direction:column;gap:10px}#controls.is-visible{display:flex}
+ .glass{padding:12px;border-radius:17px;width:100%}#map{height:clamp(240px,33svh,330px)}
+ .layout .glass:nth-child(2){max-height:none}.head{align-items:center;gap:8px}h1{font-size:21px}
+ .tabs button{font-size:12px}.head .stamp{font-size:12px;padding:6px 8px}
+ .mobile-overview{display:flex;align-items:center;justify-content:space-between;gap:8px;background:var(--soft);border-radius:12px;padding:7px 9px;margin-bottom:9px;font-size:12px}
+ .mobile-overview strong{font-size:13px}.map-alert{bottom:8px;left:8px;right:8px}
+ .map-alert .row{flex-wrap:wrap}.map-alert .row>*{min-width:110px}
+ .map-header{gap:8px}.map-header select{max-width:135px!important;padding:7px;min-height:40px}
+ .map-header #map-status{font-size:10px;padding:3px 6px}
+ #selected{font-size:11px}.row{margin:7px 0}.tabs{margin:8px 0 12px}
+ #follow{min-height:42px}
+}
 </style>
 </head>
 <body>
 <main class="page">
 <header class="head">
- <div><h1>🐝 PikminBee</h1><div class="sub">電腦網頁控制 · Android 手機執行</div></div>
+ <div><h1><svg aria-hidden="true" viewBox="0 0 24 24"><ellipse cx="6.7" cy="10.3" rx="3.9" ry="2.7"/><ellipse cx="17.3" cy="10.3" rx="3.9" ry="2.7"/><ellipse cx="12" cy="15.6" rx="4.8" ry="5.8"/><path d="M8 14.1h8M8.1 17.5h7.8M10.2 10 8.8 5.5M13.8 10 15.2 5.5"/></svg> PikminBee</h1><div class="sub">瀏覽器控制 · Android 手機執行</div></div>
  <div class="stamp"><span class="dot"></span><span id="connection">等待配對</span></div>
 </header>
 <section class="glass" id="pairbox">
@@ -55,17 +75,32 @@ button:disabled{opacity:.44;cursor:not-allowed}button:focus-visible,input:focus-
 </section>
 <div class="layout" id="controls">
 <section class="glass">
- <div class="inline" style="margin-bottom:9px"><strong>控制地圖</strong>
+ <div class="inline map-header" style="margin-bottom:9px"><strong>控制地圖</strong>
+  <span id="map-status" data-state="loading" role="status" aria-live="polite">載入中</span>
   <select id="theme" style="max-width:170px" aria-label="地圖樣式">
    <option value="auto">跟隨系統</option><option value="liberty">Liberty</option>
    <option value="bright">Bright</option><option value="positron">Positron</option>
    <option value="dark">Dark</option>
   </select>
  </div>
- <div id="map" aria-label="點地圖選座標，需按下方按鈕才會變更手機位置"></div>
- <div id="selected" class="muted">點一下地圖以選擇位置</div>
- <div class="row"><button id="follow">定位至手機目前位置</button></div>
- <p class="muted">選取地點不會自動瞬移或開始行走。圖磚來自 OpenFreeMap／OpenStreetMap，需要網路載入。</p>
+ <div id="mobile-overview" class="mobile-overview" aria-live="polite">
+  <strong id="mobile-state">手機待命</strong><span id="mobile-steps">本次估算 0 步</span>
+ </div>
+ <div id="map-wrap">
+  <div id="map" aria-label="點地圖選座標，需按下方按鈕才會變更手機位置"></div>
+  <div id="map-warning" class="map-alert hidden" role="alert" aria-live="polite">
+   <strong>地圖資料尚未載入</strong>
+   <p id="map-warning-text">請確認手機可連上地圖服務，或點擊重新載入。</p>
+   <div class="row"><button id="retry-map" class="primary">重新載入地圖</button>
+    <a id="external-map" href="https://www.openstreetmap.org/" target="_blank" rel="noopener noreferrer">外部查看地圖</a></div>
+  </div>
+ </div>
+ <div id="selected" class="muted">尚未選取位置 · 點地圖或輸入座標</div>
+ <div class="row"><button id="follow">顯示手機模擬位置</button></div>
+ <details class="help-details">
+  <summary>地圖操作說明</summary>
+  <p>選位置不會自動瞬移或開始行走。底圖由 OpenFreeMap 提供，需要手機與瀏覽器可連線到圖磚服務；地圖失敗時仍可在控制區輸入經緯度。</p>
+ </details>
 </section>
 <section class="glass">
  <h2>手機狀態</h2>
