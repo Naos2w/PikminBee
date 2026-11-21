@@ -7,10 +7,8 @@ import android.content.Context
 import android.content.res.ColorStateList
 import androidx.compose.ui.graphics.toArgb
 import android.graphics.PixelFormat
-import android.graphics.Color
 import android.os.Build
 import android.graphics.drawable.GradientDrawable
-import android.graphics.drawable.LayerDrawable
 import android.graphics.drawable.RippleDrawable
 import android.view.Gravity
 import android.view.MotionEvent
@@ -201,36 +199,19 @@ class FloatingControls(
     private fun colors(): NaosPalette = NaosDesignSystem.palette(
         AppPreferences(context).naosThemeFamily(), isDark())
 
-    /** Cross-app overlays cannot sample another application's secure pixels. */
-    private fun glass() = GradientDrawable(
-        GradientDrawable.Orientation.TL_BR,
-        intArrayOf(
-            colors().surface.copy(alpha = if (isDark()) .86f else .83f).toArgb(),
-            colors().soft.copy(alpha = if (isDark()) .79f else .70f).toArgb(),
-            colors().surface.copy(alpha = if (isDark()) .88f else .82f).toArgb(),
-        ),
-    ).apply {
-        cornerRadius = dp(26).toFloat()
+    /** Opaque, light-weight matte surfaces. No backdrop sampling or blur. */
+    private fun glass() = GradientDrawable().apply {
+        cornerRadius = dp(22).toFloat()
+        setColor(colors().surface.toArgb())
         setStroke(dp(1).coerceAtLeast(1), colors().stroke.toArgb())
     }
 
-    /** A subtle lens rim around the lone bee logo, not a second status badge. */
-    private fun beeGlassRim() = LayerDrawable(arrayOf(
-        GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(
-            colors().surface.copy(alpha = if (isDark()) .67f else .57f).toArgb(),
-            colors().soft.copy(alpha = if (isDark()) .56f else .44f).toArgb(),
-        )).apply {
-            shape = GradientDrawable.OVAL
-            setStroke(dp(1).coerceAtLeast(1), if (isDark())
-                Color.argb(210, 245, 252, 255) else Color.argb(210, 255, 255, 255))
-        },
-        GradientDrawable().apply {
-            shape = GradientDrawable.OVAL
-            setColor(Color.TRANSPARENT)
-            setStroke(dp(1).coerceAtLeast(1),
-                colors().ink.copy(alpha = if (isDark()) .32f else .38f).toArgb())
-        },
-    )).apply { setLayerInset(1, dp(2), dp(2), dp(2), dp(2)) }
+    /** The original outline bee with a visible but inexpensive circular rim. */
+    private fun beeGlassRim() = GradientDrawable().apply {
+        shape = GradientDrawable.OVAL
+        setColor(colors().surface.toArgb())
+        setStroke(dp(2).coerceAtLeast(1), colors().stroke.toArgb())
+    }
 
     private fun softButtonBackground() = GradientDrawable().apply {
         cornerRadius = dp(14).toFloat()
@@ -651,7 +632,7 @@ class FloatingControls(
         expanded = !expanded
         root?.apply {
             background = if (expanded) glass() else null
-            elevation = if (expanded) dp(13).toFloat() else 0f
+            elevation = if (expanded) dp(6).toFloat() else 0f
             if (expanded) setPadding(dp(7), dp(5), dp(7), dp(5))
             else setPadding(0, 0, 0, 0)
         }
