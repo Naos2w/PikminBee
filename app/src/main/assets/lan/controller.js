@@ -1,6 +1,8 @@
 const $ = id => document.getElementById(id);
 let token = null;
 let mode = "TELEPORT";
+let settingsOpen = false;
+let savedRecords = null;
 const initialCenter = {lat: 25.033, lon: 121.5654};
 let chosen = null; // A map centre is not a user-selected teleport destination.
 let current = null;
@@ -115,39 +117,53 @@ function readCoordinate() {
   return point;
 }
 
-function selectMode(next) {
-  mode = next;
+function updateModeView() {
   for (const [id,value] of [
-    ["mode-teleport","TELEPORT"],["mode-route","ROUTE"],
-    ["mode-flowers","FLOWERS"],["mode-saved","SAVED"]
+    ["mode-teleport","TELEPORT"],["mode-route","ROUTE"],["mode-flowers","FLOWERS"]
   ]) {
-    const tab = $("" + id);
-    tab.classList.toggle("mode-active", mode === value);
-    tab.setAttribute("aria-pressed", mode === value ? "true" : "false");
+    const tab = $(id);
+    const active = !settingsOpen && mode === value;
+    tab.classList.toggle("mode-active", active);
+    tab.setAttribute("aria-pressed", active ? "true" : "false");
   }
-  $("location-panel").classList.toggle("hidden", mode === "SAVED");
-  $("teleport-panel").classList.toggle("hidden", mode !== "TELEPORT");
-  $("route-panel").classList.toggle("hidden", mode !== "ROUTE" && mode !== "FLOWERS");
-  $("saved-panel").classList.toggle("hidden", mode !== "SAVED");
-  $("flower-guide").classList.toggle("hidden", mode !== "FLOWERS");
+  $("mode-settings").classList.toggle("mode-active", settingsOpen);
+  $("mode-settings").setAttribute("aria-pressed", settingsOpen ? "true" : "false");
+  $("location-panel").classList.toggle("hidden", settingsOpen);
+  $("teleport-panel").classList.toggle("hidden", settingsOpen || mode !== "TELEPORT");
+  $("route-panel").classList.toggle("hidden", settingsOpen ||
+    (mode !== "ROUTE" && mode !== "FLOWERS"));
+  $("web-settings").classList.toggle("hidden", !settingsOpen);
+  $("flower-guide").classList.toggle("hidden", settingsOpen || mode !== "FLOWERS");
+  $("flower-catalogue").classList.toggle("hidden", settingsOpen || mode !== "FLOWERS");
+}
+function selectMode(next) {
+  if (!["TELEPORT","ROUTE","FLOWERS"].includes(next)) return;
+  mode = next;
+  settingsOpen = false;
+  updateModeView();
   if (mode === "ROUTE" || mode === "FLOWERS") $("loop").value = String(loops[mode]);
   $("confirm-snap").checked = false;
-  if (mode === "SAVED") refreshSaved();
   updateRouteControls();
   renderMap();
-  // The map keeps its own pan/pinch gestures; only navigate the control content.
-  if (connected && matchMedia("(max-width: 760px)").matches) {
+  // Only the panel scrolls into view on small screens, never the interactive map gestures.
+  if (connected && matchMedia("(max-width: 760px)").matches)
     $("control-panel").scrollIntoView({behavior:"smooth",block:"start"});
-  }
 }
 for (const [id,value] of [
-  ["mode-teleport","TELEPORT"],["mode-route","ROUTE"],
-  ["mode-flowers","FLOWERS"],["mode-saved","SAVED"]
+  ["mode-teleport","TELEPORT"],["mode-route","ROUTE"],["mode-flowers","FLOWERS"]
 ]) $(id).addEventListener("click", () => selectMode(value));
+$("mode-settings").addEventListener("click", () => {
+  settingsOpen = !settingsOpen;
+  updateModeView();
+});
+$("web-settings-close").addEventListener("click", () => {
+  settingsOpen = false;
+  updateModeView();
+});
 selectMode("TELEPORT");
-// Match Android's four-mode horizontal swipe without stealing map gestures or form input.
+// Horizontal swipe switches only the three functional modes, never Settings or the map.
 const swipeArea = $("mode-content");
-const modeOrder = ["TELEPORT", "ROUTE", "FLOWERS", "SAVED"];
+const modeOrder = ["TELEPORT", "ROUTE", "FLOWERS"];
 let swipeStart = null;
 swipeArea.addEventListener("touchstart", event => {
   swipeStart = null;
@@ -172,6 +188,64 @@ $("loop").addEventListener("change", () => {
   updateRouteControls();
 });
 $("confirm-snap").addEventListener("change", updateRouteControls);
+
+async function searchFlowers() {
+  if (!token || mode !== "FLOWERS") return;
+  const origin = chosen || latest?.origin || latest?.realPosition || latest?.position;
+  const list = $("flower-list");
+  if (!origin) {
+    $("flower-status").textContent="請先在地圖選擇搜尋中心或指定起點";
+    return;
+  }
+  $("flower-search").disabled=true;
+  $("flower-status").textContent="正在查詢手機已記錄的花點（非官方即時資料）…";
+  list.replaceChildren();
+  try {
+    const response=await call("/api/flowers/nearby","POST",{
+      lat:origin.lat, lon:origin.lon,
+      radiusMetres:Number($("flower-radius").value),
+      onlyChecked:$("flower-filter").value==="checked"
+    });
+    const matches=response.flowers||[];
+    $("flower-status").textContent="附近已記錄 "+matches.length+
+      " 個花點 · 距離為直線距離，非道路最短路徑";
+    if(!matches.length){
+      const none=document.createElement("small");none.className="muted";
+      none.textContent="此範圍沒有符合條件的花點；可先在 Android 記錄或匯入";
+      list.append(none);
+    }
+    for(const flower of matches){
+      const row=document.createElement("article");row.className="flower-item";
+      const info=document.createElement("div");info.className="stop-detail";
+      const name=document.createElement("strong");name.textContent=flower.name;
+      const detail=document.createElement("small");
+      const unverified=flower.evidence==="UNVERIFIED_IMPORT";
+      detail.textContent=(unverified?"匯入候選 · 尚未確認":"本人確認")+
+        " · 約 "+Math.round(flower.distanceMetres)+" 公尺";
+      info.append(name,detail);
+      const add=document.createElement("button");add.type="button";
+      add.textContent="加入路線";
+      add.disabled=!latest?.origin||["MOVING","PAUSED"].includes(latest?.phase);
+      add.addEventListener("click",async()=>{
+        if(unverified&&!confirm("此花點僅是匯入候選，尚未確認為遊戲大花。確定加入尋花路線？"))
+          return;
+        if(await act("/api/flowers/add",{id:flower.id,confirmUnverified:unverified})){
+          $("flower-status").textContent="已加入花點；請確認順序並重新預覽道路";
+          updateRouteControls();
+        }
+      });
+      row.append(info,add);list.append(row);
+    }
+  }catch(error){
+    $("flower-status").textContent=error.message||"無法讀取花點";
+  }finally{$("flower-search").disabled=false;}
+}
+$("flower-search").addEventListener("click",searchFlowers);
+$("flower-optimize").addEventListener("click",async()=>{
+  if(!confirm("使用 Valhalla 步行道路距離建議尋花順序？路點不會被加入或刪除，仍須重新預覽才能開始。"))return;
+  if(await act("/api/flowers/optimise",{loop:$("loop").value==="true"}))
+    $("flower-status").textContent="正在計算步行道路順序，請查看完成後的路點順序及狀態";
+});
 
 async function act(path, body, note = "") {
   try {
@@ -586,6 +660,8 @@ function updateRouteControls() {
   $("undo").disabled = !navigating || busy || stops.length === 0;
   $("clear").disabled = !navigating || busy || stops.length === 0;
   $("plan").disabled = !navigating || busy || !hasOrigin || stops.length === 0;
+  $("flower-optimize").disabled = mode !== "FLOWERS" || busy || !hasOrigin ||
+    stops.length < (loop ? 2 : 3);
   $("start").disabled = !navigating || busy || !ready ||
     (needSnap && !$("confirm-snap").checked) ||
     !latest?.mockPermissionReady;
@@ -689,53 +765,134 @@ $("follow").addEventListener("click", () => {
   else setMessage("地圖未載入，仍可使用手機提供的座標或外部地圖。");
 });
 
-async function refreshSaved() {
-  if (!token || mode !== "SAVED") return;
-  const list = $("saved-list");
-  list.textContent = "正在讀取收藏…";
+function zoneParts(zone, date = new Date()) {
+  if (typeof zone !== "string" || !zone || zone.length > 90) return null;
   try {
-    const records = await call("/api/saved");
-    list.replaceChildren();
-    const addTitle = title => {
-      const line = document.createElement("strong");
-      line.textContent = title;
-      list.appendChild(line);
+    const format = new Intl.DateTimeFormat("en-GB", {
+      timeZone:zone, year:"numeric", month:"2-digit", day:"2-digit",
+      hour:"2-digit", minute:"2-digit", hourCycle:"h23"
+    });
+    const values = Object.fromEntries(format.formatToParts(date)
+      .filter(part=>part.type!=="literal").map(part=>[part.type,Number(part.value)]));
+    if (!["year","month","day","hour","minute"].every(key=>Number.isFinite(values[key])))
+      return null;
+    return {
+      clock:String(values.hour).padStart(2,"0")+":"+String(values.minute).padStart(2,"0"),
+      // Same physical instant, calculated in this zone; offset can include DST.
+      offsetMinutes:Math.round((Date.UTC(values.year,values.month-1,values.day,
+        values.hour,values.minute)-date.getTime())/60000)
     };
-    addTitle("收藏地點");
-    const places = records.places || [];
-    if (!places.length) {
-      const note = document.createElement("span"); note.className="muted";
-      note.textContent="尚未收藏地點"; list.appendChild(note);
-    }
-    for (const place of places) {
-      const button = document.createElement("button");
-      button.textContent = place.name + " · 選取位置";
-      button.addEventListener("click", () => {
-        showCoordinate(place.position);
-        selectMode("TELEPORT");
-        map?.flyTo({center:[place.position.lon,place.position.lat],zoom:15});
-      });
-      list.appendChild(button);
-    }
-    addTitle("收藏路線");
-    const routes = records.routes || [];
-    if (!routes.length) {
-      const note = document.createElement("span"); note.className="muted";
-      note.textContent="尚未收藏路線"; list.appendChild(note);
-    }
-    for (const route of routes) {
-      const button = document.createElement("button");
-      button.textContent = route.name + " · " + route.stops.length + " 點 · 載入草稿";
-      button.addEventListener("click", async () => {
-        if (await act("/api/saved/load",{id:route.id})) {
-          selectMode(route.mode);
-          setMessage("收藏路線已載入，請先預覽再開始");
-        }
-      });
-      list.appendChild(button);
-    }
-  } catch (error) { list.textContent = error.message || "無法讀取收藏"; }
+  } catch (_) { return null; }
 }
+function destinationTime(zone, realZone) {
+  const date = new Date();
+  const destination = zoneParts(zone, date);
+  if (!destination) return "當地時間待確認 · 時差待確認";
+  const reference = latest?.realGpsState==="ready" && latest?.realPosition &&
+    !latest?.mockActive ? zoneParts(realZone,date) : null;
+  if (!reference) return "當地 "+destination.clock+" · 時差待確認";
+  const delta = destination.offsetMinutes-reference.offsetMinutes;
+  if (!delta) return "當地 "+destination.clock+" · 與目前所在地同時區";
+  const a=Math.abs(delta),hours=Math.floor(a/60),mins=a%60;
+  const duration=(hours?hours+" 小時 ":"")+(mins?mins+" 分鐘":"");
+  return "當地 "+destination.clock+" · 比目前所在地"+(delta>0?"快 ":"慢 ")+duration.trim();
+}
+function labelledText(textValue, tag = "small") {
+  const element = document.createElement(tag);
+  element.textContent = textValue;
+  return element;
+}
+function renderSaved() {
+  const list = $("saved-list");
+  list.replaceChildren();
+  if (!savedRecords) return;
+  const query = $("saved-search").value.trim().toLocaleLowerCase();
+  const places = (savedRecords.places || []).filter(item =>
+    [item.name,item.countryName,item.city,item.countryCode]
+      .some(value=>String(value||"").toLocaleLowerCase().includes(query)));
+  const routes = (savedRecords.routes||[]).filter(item=>
+    String(item.name||"").toLocaleLowerCase().includes(query));
+  list.append(labelledText("收藏地點（"+places.length+"）","strong"));
+  for (const place of places) {
+    if (!Number.isFinite(place?.position?.lat) ||
+        !Number.isFinite(place?.position?.lon)) continue;
+    const card=document.createElement("article"); card.className="saved-card";
+    card.append(labelledText(place.name||"未命名位置","strong"));
+    const code=String(place.countryCode||"").toUpperCase();
+    const flag=/^[A-Z]{2}$/.test(code) ? String.fromCodePoint(...[...code]
+      .map(ch=>0x1F1E6+ch.charCodeAt(0)-65)) : "";
+    card.append(labelledText([flag,place.countryName||place.countryCode,place.city]
+      .filter(Boolean).join(" · ")||"國家／城市待確認"));
+    card.append(labelledText(destinationTime(place.timeZoneId,latest?.realTimeZoneId)));
+    const details=document.createElement("details");details.className="saved-details";
+    details.append(labelledText("座標及收藏日期","summary"));
+    details.append(labelledText("GPS: "+place.position.lat.toFixed(6)+", "+
+      place.position.lon.toFixed(6)));
+    if(Number.isFinite(place.createdAtMillis)&&place.createdAtMillis>0)
+      details.append(labelledText("收藏於 "+
+        new Date(place.createdAtMillis).toLocaleDateString("zh-TW")));
+    card.append(details);
+    const buttons=document.createElement("div");buttons.className="row";
+    const view=document.createElement("button");
+    view.textContent="在地圖選取";view.addEventListener("click",()=>{
+      showCoordinate(place.position);selectMode("TELEPORT");
+      $("saved-dialog").close();
+      map?.flyTo({center:[place.position.lon,place.position.lat],zoom:15});
+      setMessage("已選取收藏位置；沒有自動瞬移");
+    });
+    const rename=document.createElement("button");rename.type="button";
+    rename.textContent="改名";
+    rename.addEventListener("click",async()=>{
+      const proposed=prompt("修改收藏地點名稱",place.name||"");
+      if(proposed===null)return;
+      const name=proposed.trim();
+      if(!name||name.length>80){setMessage("地點名稱需為 1 到 80 字");return;}
+      if(await act("/api/saved/place/rename",{id:place.id,name}))await refreshSaved();
+    });
+    const remove=document.createElement("button");remove.type="button";
+    remove.textContent="刪除";
+    remove.addEventListener("click",async()=>{
+      if(!confirm("確定刪除「"+place.name+"」？不會變更 GPS"))return;
+      if(await act("/api/saved/place/delete",{id:place.id}))await refreshSaved();
+    });
+    buttons.append(view,rename,remove);card.append(buttons);list.append(card);
+  }
+  if (!places.length) list.append(labelledText("沒有符合條件的收藏地點"));
+  list.append(labelledText("收藏路線（"+routes.length+"）","strong"));
+  for(const route of routes){
+    const card=document.createElement("article");card.className="saved-card";
+    card.append(labelledText(route.name||"未命名路線","strong"));
+    card.append(labelledText((route.stops||[]).length+" 個路點 · "+
+      (route.mode==="FLOWERS"?"尋花":"道路")));
+    const button=document.createElement("button");
+    button.textContent="載入草稿（仍須預覽）";
+    button.addEventListener("click",async()=>{
+      if(await act("/api/saved/load",{id:route.id})){
+        $("saved-dialog").close();
+        selectMode(route.mode==="FLOWERS"?"FLOWERS":"ROUTE");
+        setMessage("收藏路線已載入，請先預覽步行道路");
+      }
+    });
+    card.append(button);list.append(card);
+  }
+  if (!routes.length) list.append(labelledText("沒有符合條件的收藏路線"));
+}
+async function refreshSaved() {
+  if (!token || !$("saved-dialog").open) return;
+  $("saved-list").textContent="正在讀取收藏…";
+  try {
+    savedRecords=await call("/api/saved");
+    renderSaved();
+  } catch(error){$("saved-list").textContent=error.message||"無法讀取收藏";}
+}
+$("show-saved").addEventListener("click",()=>{
+  $("saved-dialog").showModal();
+  $("saved-search").value="";
+  refreshSaved();
+});
+$("close-saved").addEventListener("click",()=>$("saved-dialog").close());
+$("saved-search").addEventListener("input",renderSaved);
+setInterval(()=>{if(!document.hidden&&$("saved-dialog").open)renderSaved();},60000);
 setInterval(() => { if (!document.hidden && connected && token) refresh(); }, 2000);
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden && token) refresh();

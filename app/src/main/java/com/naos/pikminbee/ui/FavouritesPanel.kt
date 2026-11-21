@@ -42,11 +42,15 @@ fun FavouritesPanel(
     foreground: Color,
     muted: Color,
     onSelectPlace: (SavedPlace) -> Unit,
+    onRenamePlace: (SavedPlace, String) -> Unit,
     onDeletePlace: (SavedPlace) -> Unit,
     routeContent: @Composable (String) -> Unit,
 ) {
     var search by remember { mutableStateOf("") }
     var deleting by remember { mutableStateOf<SavedPlace?>(null) }
+    var renaming by remember { mutableStateOf<SavedPlace?>(null) }
+    var newName by remember { mutableStateOf("") }
+    var detailId by remember { mutableStateOf<Long?>(null) }
     var nowMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
         while (true) {
@@ -102,14 +106,23 @@ fun FavouritesPanel(
                     Text(if (local == null) "當地時間待確認"
                         else "當地 $local · ${difference ?: "時差待確認"}",
                         color = foreground, fontSize = 12.sp)
-                    Text("收藏 ${SavedPlaceTimePolicy.savedDate(place.createdAtMillis)}",
-                        color = muted, fontSize = 11.sp)
+                    TextButton(onClick = {
+                        detailId = if (detailId == place.id) null else place.id
+                    }) { Text(if (detailId == place.id) "收起詳細資訊" else "詳細資訊", fontSize = 12.sp) }
+                    if (detailId == place.id) {
+                        Text("GPS：${place.coordinate.label()}", color = muted, fontSize = 11.sp)
+                        Text("收藏 ${SavedPlaceTimePolicy.savedDate(place.createdAtMillis)}",
+                            color = muted, fontSize = 11.sp)
+                    }
                     Row(Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(onClick = { onSelectPlace(place) },
                             modifier = Modifier.weight(1f)) {
                             NaosActionIcon(NaosActionGlyph.VIRTUAL_GPS, foreground)
                             Text("地圖選取", fontSize = 12.sp)
+                        }
+                        TextButton(onClick = { renaming = place; newName = place.name }) {
+                            Text("改名", fontSize = 12.sp)
                         }
                         TextButton(onClick = { deleting = place }) {
                             Text("刪除", fontSize = 12.sp, color = Color(0xFFC45A4A))
@@ -123,6 +136,31 @@ fun FavouritesPanel(
                 routeContent(search.trim())
             }
         }
+    }
+    renaming?.let { place ->
+        AlertDialog(
+            onDismissRequest = { renaming = null },
+            title = { Text("修改收藏地名") },
+            text = {
+                OutlinedTextField(
+                    value = newName, onValueChange = { newName = it.take(80) },
+                    label = { Text("地點名稱") }, singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = newName.trim().isNotEmpty(),
+                    onClick = {
+                        onRenamePlace(place, newName.trim())
+                        renaming = null
+                    },
+                ) { Text("儲存") }
+            },
+            dismissButton = {
+                TextButton(onClick = { renaming = null }) { Text("取消") }
+            },
+        )
     }
     deleting?.let { place ->
         AlertDialog(

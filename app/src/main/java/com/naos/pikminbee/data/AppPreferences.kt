@@ -217,6 +217,16 @@ class AppPreferences(private val context: Context) {
 
     fun removePlace(id: Long) { savePlaces(places().filterNot { it.id == id }) }
 
+    /** Manual names are user-owned; renaming never invokes geocoding or alters metadata. */
+    fun renamePlace(id: Long, name: String): Boolean {
+        val trimmed = name.trim()
+        if (trimmed.isBlank() || trimmed.length > 80) return false
+        val items = places()
+        if (items.none { it.id == id }) return false
+        savePlaces(items.map { if (it.id == id) it.copy(name = trimmed) else it })
+        return true
+    }
+
     /** Route and flower waypoint drafts are separate from saved places. */
     fun routeDraft(): List<Coordinate> = RouteDraftState.routeStops.value
     fun flowerDraft(): List<Coordinate> = RouteDraftState.flowerStops.value
