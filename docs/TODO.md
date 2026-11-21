@@ -8,8 +8,9 @@
 - [x] Apply restrained mineral blue / muted honey surfaces, dark/light system palette, edge highlights, accessible focus, 48px controls, reduced-motion/transparency fallbacks. CSS backdrop blur is a visual fallback, **not claimed true pixel-displacement refraction**.
 - [x] Collapse secondary default-speed settings without hiding speed/loop/route preview; preserve mobile progress and map load/error/retry.
 - [x] Update HTML/JS source contract assertions; manually check unique IDs and all referenced DOM IDs.
-- [ ] Run Node syntax and local loopback Playwright visual regression at desktop/tablet/mobile breakpoints; no live GPS/start in harness.
-- [ ] Run Gradle Android compile, JVM tests and Lint; require checked develop PR before merge.
+- [x] MSI Node syntax and loopback-only mock pairing Playwright: map loaded, 0 console errors, no horizontal overflow at 390×844 / 834×1112 / 1440×900, mobile viewport-fixed modes and no overlap with tested active motion dock; no live GPS/start.
+- [x] MSI offline Gradle `:app:testDebugUnitTest`: Kotlin compile + JVM unit tests BUILD SUCCESSFUL; no app/route permission changes.
+- [ ] MSI `:app:lintDebug` exceeded the local 3-minute hard limit during `lintAnalyzeDebugUnitTest` (no pass/fail result); require GitHub PR `android / verify` and Lint success before merge.
 - [ ] Real LAN acceptance on POCO + PC after a separately approved UAT version bump and staging promotion; confirm fixed bottom controls, WebGL responsiveness, 2 → 3, permission gating, routing preview/start, pairing/revocation.
 - [ ] Web actual refractive edge shader is **not implemented**; consider only behind capability/visual QA gating, retain high-contrast matte fallback.
 
