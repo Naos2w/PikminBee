@@ -5,57 +5,142 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="referrer" content="no-referrer">
 <title>PikminBee · 電腦控制</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 64 64%27%3E%3Crect width=%2764%27 height=%2764%27 rx=%2716%27 fill=%27%23101b22%27/%3E%3Ccircle cx=%2732%27 cy=%2735%27 r=%2717%27 fill=%27%23e8b76c%27/%3E%3Cpath d=%27M22 31h20M23 39h18%27 stroke=%27%23101b22%27 stroke-width=%275%27/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/vendor/maplibre-gl.css">
 <style>
-:root{color-scheme:dark;--bg:#131d25;--card:#26343d;--soft:#30434f;--line:#435762;--text:#ecf4f5;--sub:#c2d0d3;--gold:#e4b257;--button:#527887;--danger:#af4550}
-@media(prefers-color-scheme:light){:root{color-scheme:light;--bg:#eef3f2;--card:#fff;--soft:#e5edee;--line:#c6d4d7;--text:#202f34;--sub:#586b70;--gold:#956219;--button:#d8e7ec;--danger:#b4515a}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,BlinkMacSystemFont,"Noto Sans TC",sans-serif}
-.page{max-width:1240px;margin:auto;padding:18px 18px 36px}.head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 15px}
-h1{font-size:24px;letter-spacing:-.6px;margin:0}h2{font-size:16px;margin:0 0 10px}.sub,.muted{color:var(--sub);font-size:12px}
-.stamp{display:inline-flex;gap:7px;align-items:center;background:var(--card);padding:7px 12px;border:1px solid var(--line);border-radius:999px}
-.dot{background:var(--gold);border-radius:50%;width:8px;height:8px}.layout{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(315px,1fr);gap:14px;align-items:start}
-.glass{background:var(--card);border:1px solid var(--line);border-radius:22px;padding:17px;box-shadow:0 6px 18px #00000010}
-#map{height:570px;border-radius:14px;overflow:hidden;background:#d7e4e7}
-.inline{display:flex;gap:9px;align-items:center;flex-wrap:wrap}.inline>*{flex:1;min-width:0}
+:root {
+  color-scheme: dark;
+  --bg:#101b22;--text:#eaf2f2;--sub:#c2d0d4;--subtle:#9fb1b8;
+  --surface:#1c2b34;--solid:#1b2a33;--soft:rgba(133,163,174,.13);
+  --line:rgba(220,237,242,.17);--rim:rgba(255,255,255,.23);
+  --accent:#e8b76c;--accent-ink:#221b10;--accent-soft:rgba(232,183,108,.15);
+  --button:#446a79;--danger:#aa4351;--shadow:0 2px 8px rgba(0,0,0,.10);
+}
+@media (prefers-color-scheme:light) {
+  :root {
+    color-scheme:light;
+    --bg:#e9eff0;--text:#20313a;--sub:#4f626a;--subtle:#5e727a;
+    --surface:#ffffff;--solid:#fff;--soft:rgba(81,123,137,.09);
+    --line:rgba(53,91,104,.16);--rim:rgba(255,255,255,.85);
+    --accent:#8a5715;--accent-ink:#fff;--accent-soft:rgba(174,122,45,.12);
+    --button:#d6e6ea;--danger:#b34551;--shadow:0 2px 8px rgba(40,64,74,.08);
+  }
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;min-width:320px;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,BlinkMacSystemFont,"Noto Sans TC",sans-serif}
+.page{max-width:1536px;margin:0 auto;padding:20px 22px 34px}
+.head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 17px;flex-wrap:wrap}
+h1{font-size:24px;letter-spacing:-.6px;margin:0}
+h2{font-size:17px;margin:0 0 10px;letter-spacing:-.2px}
+.sub,.muted{color:var(--sub);font-size:12px}
+.head svg{display:inline-block;width:30px;height:30px;vertical-align:-5px;stroke:var(--accent);fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.stamp{display:inline-flex;gap:7px;align-items:center;background:var(--surface);padding:8px 12px;border:1px solid var(--line);border-radius:999px;font-size:12px}
+.dot{background:var(--accent);border-radius:50%;width:8px;height:8px}
+.layout{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(340px,.85fr);gap:16px;align-items:start}
+.glass{min-width:0;background:var(--surface);border:1px solid var(--rim);border-radius:24px;padding:18px;box-shadow:var(--shadow)}
+.map-panel{position:sticky;top:16px}
+.control-panel{scroll-margin-top:15px}
+.map-header{justify-content:space-between;min-width:0}
+.map-header strong{font-size:16px}
+#map-wrap{position:relative;isolation:isolate;border-radius:18px;overflow:hidden;border:1px solid var(--line);background:#cbd9dd}
+#map{height:clamp(440px,69svh,780px);overflow:hidden;background:#cbd9dd}
+.inline{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+.inline>*{flex:1;min-width:0}
 label{display:block;color:var(--sub);font-size:12px;margin-bottom:5px}
-input,select,button{font:inherit}input,select{width:100%;padding:11px;border:1px solid var(--line);border-radius:11px;background:var(--soft);color:var(--text);min-height:46px}
-button{padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:var(--soft);color:var(--text);cursor:pointer;min-height:46px}
+input,select,button{font:inherit}
+input,select{width:100%;padding:11px;border:1px solid var(--line);border-radius:12px;background:var(--soft);color:var(--text);min-height:48px}
+button{padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:var(--soft);color:var(--text);cursor:pointer;min-height:48px}
+button:hover:not(:disabled){border-color:var(--subtle);background:var(--accent-soft)}
+button:active:not(:disabled){border-color:var(--accent)}
 button.primary{background:var(--button);color:var(--text);border-color:var(--button);font-weight:700}
-button.danger{background:var(--danger);border-color:var(--danger);color:white}
-button:disabled{opacity:.44;cursor:not-allowed}button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
-.row{display:flex;gap:8px;flex-wrap:wrap;margin:9px 0}.row>*{flex:1}
-.tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px;margin:10px 0 17px}
-.tabs button{padding:10px 3px;font-size:13px}.mode-active{border-color:var(--gold);color:var(--gold);background:var(--soft);font-weight:700}
-.spacer{height:12px}.hidden{display:none!important}
-#pairbox{max-width:520px;margin:40px auto}#controls{display:none}#controls.is-visible{display:grid}
+button.danger{background:var(--danger);border-color:var(--danger);color:#fff}
+button:disabled{opacity:.44;cursor:not-allowed}
+button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible,a:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin:9px 0}
+.row>*{flex:1;min-width:0}
+.tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px;margin:16px 0;padding:5px;background:var(--soft);border:1px solid var(--line);border-radius:18px}
+.tabs button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:8px 2px;font-size:12px;min-height:66px;border:1px solid transparent;border-radius:13px;background:transparent;color:var(--sub)}
+.tabs svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.tabs .mode-active{border-color:var(--rim);background:var(--accent-soft);color:var(--accent);font-weight:750;box-shadow:inset 0 1px 0 var(--rim)}
+.tabs button[aria-pressed=true]{color:var(--accent)}
+.mode-content{min-width:0}
+.spacer{height:8px}
+.hidden{display:none!important}
+#pairbox{max-width:540px;margin:42px auto}
+#controls{display:none}
+#controls.is-visible{display:grid}
 .hint{background:var(--soft);border:1px solid var(--line);border-radius:12px;padding:11px;margin-top:10px;color:var(--sub);font-size:12px}
-.warning{border-color:var(--gold);color:var(--text)}.metric{font-size:16px;font-weight:650}
-#progress{padding:10px 12px;background:var(--soft);border-radius:12px;margin:9px 0;font-size:14px}
-#progressmeter{height:5px;border-radius:4px;background:var(--line);overflow:hidden;margin-top:9px}
-#progressbar{height:100%;width:0;background:var(--gold)}
-#message{min-height:23px;color:var(--gold);font-size:13px;margin:9px 0}
-#pointcount{margin:9px 0}.layout .glass:nth-child(2){max-height:750px;overflow:auto}
-#saved-list{display:grid;gap:8px}#saved-list button{text-align:left}#selected{margin:9px 0}
-#map-wrap{position:relative}#map-status{font-size:11px;color:var(--sub);padding:4px 8px;border:1px solid var(--line);border-radius:999px;white-space:nowrap}
+.warning{border-color:var(--accent);color:var(--text)}
+.metric{font-size:16px;font-weight:650}
+#progress{padding:13px;background:var(--soft);border:1px solid var(--line);border-radius:15px;margin:10px 0;font-size:14px}
+#stepstatus{font-weight:700}
+#legstatus{margin:4px 0}
+#progressmeter{height:6px;border-radius:4px;background:var(--line);overflow:hidden;margin-top:10px}
+#progressbar{height:100%;width:0;background:var(--accent)}
+#status{line-height:1.5}
+#message{min-height:23px;color:var(--accent);font-size:13px;margin:9px 0}
+#pointcount{margin:10px 0}
+#saved-list{display:grid;gap:8px}
+#saved-list button{text-align:left}
+#selected{margin:11px 0;overflow-wrap:anywhere}
+#map-status{font-size:11px;color:var(--sub);padding:4px 8px;border:1px solid var(--line);border-radius:999px;white-space:nowrap}
 #map-status[data-state=error]{color:var(--danger);border-color:var(--danger)}
 #map-status[data-state=ready]{color:var(--sub)}
-.map-alert{position:absolute;bottom:12px;left:10px;right:10px;z-index:5;padding:12px;border:1px solid var(--gold);border-radius:14px;background:var(--card);color:var(--text);box-shadow:0 3px 12px #0002}
+.map-alert{position:absolute;bottom:12px;left:10px;right:10px;z-index:5;padding:12px;border:1px solid var(--accent);border-radius:14px;background:var(--solid);color:var(--text);box-shadow:0 3px 12px #0002}
 .map-alert p{font-size:12px;color:var(--sub);margin:3px 0 9px}
-.map-alert .row{margin:0}.map-alert .row a{color:var(--text);background:var(--soft);border:1px solid var(--line);border-radius:11px;text-decoration:none;text-align:center;padding:10px 8px;min-height:44px;white-space:nowrap}
-.mobile-overview{display:none}.help-details summary{font-size:12px;color:var(--sub);cursor:pointer;min-height:36px;padding:7px 0}.help-details p{margin:2px 0 0;font-size:12px;color:var(--sub)}
-.head svg{display:inline-block;width:30px;height:30px;vertical-align:-5px;stroke:var(--gold);fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.map-alert .row{margin:0}
+.map-alert .row a{color:var(--text);background:var(--soft);border:1px solid var(--line);border-radius:11px;text-decoration:none;text-align:center;padding:10px 8px;min-height:48px;white-space:nowrap}
+.mobile-overview{display:none}
+.help-details summary,.advanced-details summary{font-size:12px;color:var(--sub);cursor:pointer;min-height:40px;padding:8px 0}
+.help-details p{margin:2px 0 0;font-size:12px;color:var(--sub)}
+.advanced-details{margin:7px 0}
+.eyebrow{display:block;color:var(--subtle);font-size:10px;font-weight:700;letter-spacing:.12em;margin-bottom:3px}
+.control-title{display:flex;justify-content:space-between;align-items:start}
+.motion-title{margin-top:14px}
+.motion-controls button{font-weight:700}
+.motion-controls .is-current-action{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.motion-controls #stop:not(:disabled){color:#fff;background:var(--danger);border-color:var(--danger)}
+@media(max-width:1060px){
+ .layout{grid-template-columns:1fr}
+ .map-panel{position:relative;top:auto}
+ #map{height:clamp(380px,53svh,630px)}
+}
 @media(max-width:760px){
- .page{padding:12px 11px 28px}.layout{display:flex;flex-direction:column;gap:10px}#controls.is-visible{display:flex}
- .glass{padding:12px;border-radius:17px;width:100%}#map{height:clamp(240px,33svh,330px)}
- .layout .glass:nth-child(2){max-height:none}.head{align-items:center;gap:8px}h1{font-size:21px}
- .tabs button{font-size:12px}.head .stamp{font-size:12px;padding:6px 8px}
- .mobile-overview{display:flex;align-items:center;justify-content:space-between;gap:8px;background:var(--soft);border-radius:12px;padding:7px 9px;margin-bottom:9px;font-size:12px}
- .mobile-overview strong{font-size:13px}.map-alert{bottom:8px;left:8px;right:8px}
- .map-alert .row{flex-wrap:wrap}.map-alert .row>*{min-width:110px}
- .map-header{gap:8px}.map-header select{max-width:135px!important;padding:7px;min-height:40px}
+ .page{padding:12px 11px calc(105px + env(safe-area-inset-bottom))}
+ .layout{display:flex;flex-direction:column;gap:11px}
+ #controls.is-visible{display:flex}
+ .glass{padding:13px;border-radius:21px;width:100%}
+ #map{height:clamp(290px,45svh,500px)}
+ .head{align-items:center;gap:8px;margin-bottom:12px}
+ h1{font-size:21px}
+ .head .stamp{font-size:11px;padding:6px 8px}
+ .map-header{gap:7px}
+ .map-header select{max-width:135px!important;min-height:42px;padding:7px;font-size:12px}
  .map-header #map-status{font-size:10px;padding:3px 6px}
- #selected{font-size:11px}.row{margin:7px 0}.tabs{margin:8px 0 12px}
- #follow{min-height:42px}
+ #selected{font-size:12px}
+ .row{margin:8px 0}
+ .mobile-overview{display:flex;align-items:center;justify-content:space-between;gap:8px;background:var(--soft);border:1px solid var(--line);border-radius:12px;padding:8px 10px;margin-bottom:10px;font-size:12px}
+ .mobile-overview strong{font-size:13px}
+ .tabs{position:fixed;z-index:40;left:11px;right:11px;bottom:calc(8px + env(safe-area-inset-bottom));margin:0;padding:6px;gap:4px;border:1px solid var(--rim);background:var(--surface);border-radius:22px;box-shadow:0 2px 8px #0002}
+ .tabs button{min-height:60px;font-size:11px;gap:1px}
+ .tabs svg{width:21px;height:21px}
+ .motion-controls.is-active{position:fixed;z-index:39;bottom:calc(90px + env(safe-area-inset-bottom));left:11px;right:11px;padding:8px;background:var(--surface);border:1px solid var(--rim);border-radius:18px;box-shadow:0 2px 8px #0002}
+ .motion-controls.is-active button{min-height:52px}
+ body.has-active-controls .page{padding-bottom:calc(175px + env(safe-area-inset-bottom))}
+ .map-alert{bottom:8px;left:8px;right:8px}
+ .map-alert .row{flex-wrap:wrap}
+ .map-alert .row>*{min-width:110px}
+ #follow{min-height:48px}
+}
+@media(max-width:380px){
+ .tabs button{font-size:10px}
+ .tabs svg{width:19px;height:19px}
+ .head .stamp{max-width:160px}
+}
+@media(prefers-reduced-motion:reduce){
+ html{scroll-behavior:auto}
+ button,#progressbar{transition:none}
 }
 </style>
 </head>
@@ -74,7 +159,7 @@ button:disabled{opacity:.44;cursor:not-allowed}button:focus-visible,input:focus-
  <div id="pairmessage" aria-live="polite"></div>
 </section>
 <div class="layout" id="controls">
-<section class="glass">
+<section class="glass map-panel">
  <div class="inline map-header" style="margin-bottom:9px"><strong>控制地圖</strong>
   <span id="map-status" data-state="loading" role="status" aria-live="polite">載入中</span>
   <select id="theme" style="max-width:170px" aria-label="地圖樣式">
@@ -95,27 +180,28 @@ button:disabled{opacity:.44;cursor:not-allowed}button:focus-visible,input:focus-
     <a id="external-map" href="https://www.openstreetmap.org/" target="_blank" rel="noopener noreferrer">外部查看地圖</a></div>
   </div>
  </div>
- <div id="selected" class="muted">尚未選取位置 · 點地圖或輸入座標</div>
+ <div id="selected" class="muted" aria-live="polite">尚未選取位置 · 點地圖或輸入座標</div>
  <div class="row"><button id="follow">顯示手機模擬位置</button></div>
  <details class="help-details">
   <summary>地圖操作說明</summary>
   <p>選位置不會自動瞬移或開始行走。底圖由 OpenFreeMap 提供，需要手機與瀏覽器可連線到圖磚服務；地圖失敗時仍可在控制區輸入經緯度。</p>
  </details>
 </section>
-<section class="glass">
- <h2>手機狀態</h2>
+<section class="glass control-panel" id="control-panel">
+ <div class="control-title"><div><span class="eyebrow">ANDROID · REMOTE</span><h2>手機狀態</h2></div></div>
  <div id="status" class="muted" aria-live="polite">正在讀取…</div>
- <div id="progress" aria-live="polite">
+ <div id="progress" class="progress-card" aria-live="polite">
   <div id="stepstatus">目前沒有行走中的路線</div>
   <div class="sub" id="legstatus"></div>
   <div id="progressmeter"><div id="progressbar"></div></div>
  </div>
- <div class="tabs" aria-label="PikminBee 四個模式">
-  <button id="mode-teleport" class="mode-active">瞬移</button>
-  <button id="mode-route">路徑</button>
-  <button id="mode-flowers">尋花</button>
-  <button id="mode-saved">收藏</button>
- </div>
+ <nav class="tabs" aria-label="PikminBee 四個模式">
+  <button type="button" id="mode-teleport" class="mode-active" aria-pressed="true"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 21s7-5.2 7-12a7 7 0 0 0-14 0c0 6.8 7 12 7 12Z"/><circle cx="12" cy="9" r="2.5"/></svg><span>瞬移</span></button>
+  <button type="button" id="mode-route" aria-pressed="false"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="6" cy="18" r="2"/><circle cx="18" cy="6" r="2"/><path d="M8 18h5a5 5 0 0 0 5-5V8M6 16V5h6"/></svg><span>路徑</span></button>
+  <button type="button" id="mode-flowers" aria-pressed="false"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2"/><path d="M12 10c-3-6 3-9 5-5 1 2 0 4-3 6m0 1c6-4 9 2 5 5-2 1-4 0-6-3m-1 0c3 6-3 9-5 5-1-2 0-4 3-6m0-1c-6 4-9-2-5-5 2-1 4 0 6 3"/></svg><span>尋花</span></button>
+  <button type="button" id="mode-saved" aria-pressed="false"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 4h12v17l-6-4-6 4z"/></svg><span>收藏</span></button>
+ </nav>
+ <div id="mode-content" class="mode-content">
  <div id="location-panel">
   <div class="inline">
    <div><label for="lat">緯度 Latitude</label><input type="number" id="lat" step="any" placeholder="25.033000"></div>
@@ -134,7 +220,7 @@ button:disabled{opacity:.44;cursor:not-allowed}button:focus-visible,input:focus-
    <div><label for="loop">循環路線</label><select id="loop">
     <option value="false">不循環</option><option value="true">循環</option></select></div>
   </div>
-  <div class="row"><span id="default-speed" class="muted">目前預設：走路</span><button id="make-speed-default">設為預設速度</button></div>
+  <details class="advanced-details"><summary>進階：設定預設速度</summary><div class="row"><span id="default-speed" class="muted">目前預設：走路</span><button id="make-speed-default">設為預設速度</button></div></details>
   <div id="pointcount" class="muted">0 個路點</div>
   <div id="routehint" class="sub">選擇起點及目的地，先規劃道路再開始。</div>
   <div class="row"><button id="add">加入路點</button><button id="undo">撤銷上一點</button><button id="clear">清除全部</button></div>
@@ -150,9 +236,10 @@ button:disabled{opacity:.44;cursor:not-allowed}button:focus-visible,input:focus-
   <h2>已收藏地點與路線</h2>
   <div id="saved-list" aria-live="polite">正在讀取…</div>
  </div>
+ </div>
  <div class="spacer"></div>
- <h2>行走操作</h2>
- <div class="row"><button id="pause">暫停</button><button id="resume">繼續</button><button class="danger" id="stop">停止</button></div>
+ <h2 class="motion-title">行走操作</h2>
+ <div id="motion-controls" class="row motion-controls" aria-label="行走控制"><button id="pause">暫停</button><button id="resume">繼續</button><button class="danger" id="stop">停止</button></div>
  <div class="row"><button id="real">恢復真實 GPS</button></div>
  <div id="message" aria-live="polite"></div>
  <div class="hint">開始前必須先預覽路線。暫停與停止都由 Android App 執行；網頁斷線不會自動停止路線。GPS 模擬仍需在手機授予系統權限。</div>
