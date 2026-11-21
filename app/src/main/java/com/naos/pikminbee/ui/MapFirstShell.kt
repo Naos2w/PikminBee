@@ -57,7 +57,7 @@ import androidx.compose.ui.unit.sp
  * The map owns the entire viewport. No navigation drawer, full-screen drag
  * detector, or BottomSheetScaffold over the map's gesture area. Only dedicated
  * controls consume touches. Glass captures the map's own idle screenshot,
- * never another app's pixels. Native failure falls back to frosted material.
+ * never another app's pixels. Uses opaque Compose controls for fluid map gestures.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -90,6 +90,13 @@ fun MapFirstShell(
     routeSpeedKmh: Double = 1.4,
     routeActive: Boolean = false,
     routePaused: Boolean = false,
+    routePreviewReady: Boolean = false,
+    routePlanning: Boolean = false,
+    routeSnapMetres: Double = 0.0,
+    onRestoreRealGps: () -> Unit,
+    onRestoreVirtualGps: () -> Unit,
+    onCycleSpeed: () -> Unit,
+    onFlowerVision: () -> Unit,
     onRouteUndo: () -> Unit = {},
     onRoutePrimary: () -> Unit = {},
     onRouteStop: () -> Unit = {},
@@ -106,6 +113,9 @@ fun MapFirstShell(
     val heightDp = LocalConfiguration.current.screenHeightDp
     val labels = listOf("瞬移", "路徑", "尋花", "收藏")
     val active = modeIndex.coerceIn(0, 3)
+    // Ongoing walking must remain controllable even after changing map tabs.
+    val showQuick = (modeIndex == 1 && routeStopsCount > 0) ||
+        (modeIndex == 2 && flowerStopsCount > 0) || routeActive || flowerActive
 
     Box(Modifier.fillMaxSize().background(p.bg)) {
         mapContent()
@@ -174,10 +184,14 @@ fun MapFirstShell(
             }
         }
 
-        if ((modeIndex == 1 && (routeStopsCount > 0 || routeActive)) ||
-            (modeIndex == 2 && flowerActive)) {
+        if (showQuick) {
             val activeWalking = routeActive || flowerActive
-            val modeStopsCount = if (modeIndex == 2) flowerStopsCount else routeStopsCount
+            val modeStopsCount = when {
+                flowerActive -> flowerStopsCount
+                routeActive -> routeStopsCount
+                modeIndex == 2 -> flowerStopsCount
+                else -> routeStopsCount
+            }
             MapGlass(
                 dark,
                 Modifier.align(Alignment.BottomCenter).navigationBarsPadding()
@@ -195,6 +209,8 @@ fun MapFirstShell(
                         Text(if (activeWalking) (if (flowerActive) "尋花行走中" else "道路行走中") else "下一個路點",
                             color = p.muted, fontSize = 11.sp, maxLines = 1)
                         Text(if (activeWalking) (if (routePaused) "已暫停" else "進行中")
+                            else if (routePlanning) "正在規劃…"
+                            else if (routePreviewReady) "已規劃 · 請確認"
                             else "第 ${modeStopsCount + 1} 點",
                             color = if (activeWalking) Color(
                                 if (routePaused) BeeActionColors.PAUSED_BLUE
@@ -204,7 +220,7 @@ fun MapFirstShell(
                     }
                     Surface(
                         onClick = if (activeWalking) onRouteStop else onRouteUndo,
-                        enabled = activeWalking || modeStopsCount > 0,
+                        enabled = activeWalking || (!routePlanning && modeStopsCount > 0),
                         shape = RoundedCornerShape(13.dp),
                         color = if (activeWalking)
                             Color(BeeActionColors.STOP_RED) else p.soft,
@@ -221,21 +237,35 @@ fun MapFirstShell(
                     }
                     Surface(
                         onClick = onRoutePrimary,
+                        enabled = activeWalking || (!routePlanning && modeStopsCount > 0),
                         shape = RoundedCornerShape(13.dp),
-                        color = Color(
-                            BeeActionColors.primary(if (activeWalking && !routePaused)
-                                com.naos.pikminbee.domain.WalkPhase.MOVING
-                            else com.naos.pikminbee.domain.WalkPhase.IDLE)
-                        ),
-                        contentColor = Color(BeeActionColors.ON_BRIGHT),
+                        color = if (activeWalking && !routePaused) Color(BeeActionColors.PAUSE_AMBER)
+                            else if (!activeWalking && !routePreviewReady) p.accent
+                            else Color(BeeActionColors.START_GREEN),
+                        contentColor = if (!activeWalking && !routePreviewReady) p.onAccent
+                            else Color(BeeActionColors.ON_BRIGHT),
                         modifier = Modifier.height(48.dp),
                     ) {
-                        Box(Modifier.padding(horizontal = 15.dp), contentAlignment = Alignment.Center) {
-                            Text(if (!activeWalking) "▷ 開始" else if (routePaused) "▷ 繼續" else "Ⅱ 暫停",
-                                color = Color(BeeActionColors.ON_BRIGHT), fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold)
+                        Box(Modifier.padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
+                            Text(when {
+                                activeWalking && routePaused -> "▷ 繼續"
+                                activeWalking -> "Ⅱ 暫停"
+                                routePlanning -> "規劃中…"
+                                routePreviewReady -> "▷ 開始行走"
+                                else -> "規劃路徑"
+                            }, color = if (!activeWalking && !routePreviewReady) p.onAccent
+                                else Color(BeeActionColors.ON_BRIGHT),
+                                fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                         }
                     }
+                }
+                if (!activeWalking && routePreviewReady && routeSnapMetres > 40.0) {
+                    Text("路點最大吸附 ${routeSnapMetres.toInt()} 公尺 · 開始前會再次確認",
+                        color = p.muted, fontSize = 11.sp, maxLines = 1)
+                } else if (!activeWalking &&
+                    (message.contains("失敗") || message.contains("無法"))) {
+                    Text(message, color = Color(BeeActionColors.STOP_RED),
+                        fontSize = 11.sp, maxLines = 2)
                 }
                 if (activeWalking && walkingProgress.totalMetres > 0.0) {
                     val total = walkingProgress.totalMetres / 1000.0
@@ -268,6 +298,8 @@ fun MapFirstShell(
             value = coordinateInput,
             onValueChange = onCoordinateChange,
             onTeleport = onCoordinateTeleport,
+            teleportEnabled = active == 0,
+            modeTitle = modeTitle,
             onHome = {
                 detailsOpen = false
                 onHome()
@@ -284,8 +316,7 @@ fun MapFirstShell(
             dark = dark,
             modifier = Modifier.align(Alignment.BottomEnd)
                 .navigationBarsPadding().padding(end = 16.dp,
-                    bottom = if ((modeIndex == 1 && (routeStopsCount > 0 || routeActive)) ||
-                        (modeIndex == 2 && flowerActive)) 224.dp else 132.dp),
+                    bottom = if (showQuick) 224.dp else 132.dp),
             backdrop = backdrop,
         )
     }
@@ -329,6 +360,28 @@ fun MapFirstShell(
                     .padding(horizontal = 17.dp, vertical = 5.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) { modeContent() }
+            // The main app exposes the overlay's convenience actions too.
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = onRestoreRealGps, modifier = Modifier.weight(1f)) {
+                    Text("真實 GPS", fontSize = 11.sp)
+                }
+                TextButton(onClick = onRestoreVirtualGps, modifier = Modifier.weight(1f)) {
+                    Text("虛擬 GPS", fontSize = 11.sp)
+                }
+                TextButton(onClick = onFlowerVision, modifier = Modifier.weight(1f)) {
+                    Text("花朵辨識", fontSize = 11.sp)
+                }
+                TextButton(onClick = onCycleSpeed,
+                    modifier = Modifier.weight(1f).semantics {
+                        contentDescription = "切換速度，目前 ${routeSpeedKmh} km/h"
+                    }) {
+                    Text("切換速度", fontSize = 11.sp)
+                }
+            }
             Spacer(Modifier.height(8.dp))
         }
     }

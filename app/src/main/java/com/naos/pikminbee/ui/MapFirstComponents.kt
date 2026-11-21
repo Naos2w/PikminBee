@@ -1,8 +1,6 @@
 package com.naos.pikminbee.ui
 
 import android.graphics.Bitmap
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -26,11 +24,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -43,65 +36,36 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.key.onKeyEvent
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInRoot
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
 
 /**
- * Naos Universal Liquid Glass V3. Pixel refraction is only claimed when a
- * real map snapshot can be sampled. On unsupported/missing source, a frosted
- * semantic-colour fallback is used. No fake edge-displacement decoration.
+ * Low-overhead opaque mineral surface.
+ * No native map snapshot, AGSL refraction, shader, backdrop blur or animated
+ * transparency. The map alone renders its own tiles; controls are just Compose.
  */
 @Composable
 fun MapGlass(
     dark: Boolean,
     modifier: Modifier = Modifier,
-    backdrop: Bitmap? = null,
+    @Suppress("UNUSED_PARAMETER") backdrop: Bitmap? = null,
     content: @Composable () -> Unit,
 ) {
     val visual = LocalNaosVisualState.current
     val palette = if (visual.dark == dark) visual.palette
         else NaosDesignSystem.palette(visual.family, dark)
-    val shape = RoundedCornerShape(25.dp)
-    val glassMaterial = visual.material
-    // A bounded camera sampler now refreshes genuine map pixels during pan and
-    // zoom. Keep the last valid sample between captures; fade to mineral frost
-    // only if the source has genuinely stalled or the map view is disposed.
-    var previousSnapshot by remember { androidx.compose.runtime.mutableStateOf<Bitmap?>(null) }
-    LaunchedEffect(backdrop) { if (backdrop != null) previousSnapshot = backdrop }
-    val glassBlend by animateFloatAsState(
-        targetValue = if (backdrop != null) 1f else 0f,
-        animationSpec = tween(NaosDesignSystem.FAST_MS),
-        label = "glassOpticalBlend",
-    )
-    var originX by remember { mutableFloatStateOf(0f) }
-    var originY by remember { mutableFloatStateOf(0f) }
-    Box(modifier.shadow(8.dp, shape).clip(shape)) {
-        AndroidView(
-            modifier = Modifier.matchParentSize().onGloballyPositioned { coordinates ->
-                val location = coordinates.positionInRoot()
-                originX = location.x
-                originY = location.y
-            },
-            factory = { NaosMapGlassView(it) },
-            update = {
-                it.snapshot = previousSnapshot
-                it.opticalBlend = glassBlend
-                it.glassMode = glassMaterial
-                it.palette = palette
-                it.originX = originX
-                it.originY = originY
-            },
-        )
-        content()
-    }
+    val shape = RoundedCornerShape(22.dp)
+    Box(
+        modifier
+            .shadow(2.dp, shape)
+            .clip(shape)
+            .background(palette.surface)
+            .border(1.dp, palette.stroke, shape),
+    ) { content() }
 }
 
 /** Custom vector glyphs, one consistent 24dp style (no emoji or font-dependent icons). */
@@ -162,12 +126,18 @@ fun NaosModeIcon(index: Int, tint: Color, modifier: Modifier = Modifier) {
 fun NaosBeeHomeIcon(tint: Color, modifier: Modifier = Modifier) {
     Canvas(modifier.size(24.dp)) {
         val s = size.minDimension / 24f
-        val outline = Stroke(width = 1.8f * s, cap = StrokeCap.Round)
-        drawOval(tint, topLeft = Offset(3.5f*s, 5f*s), size = Size(9f*s, 8f*s), style = outline)
-        drawOval(tint, topLeft = Offset(11.5f*s, 5f*s), size = Size(9f*s, 8f*s), style = outline)
-        drawOval(tint, topLeft = Offset(7f*s, 10f*s), size = Size(10f*s, 12f*s), style = outline)
-        drawLine(tint, Offset(7f*s, 15f*s), Offset(17f*s, 15f*s), 1.7f*s)
-        drawLine(tint, Offset(8f*s, 19f*s), Offset(16f*s, 19f*s), 1.7f*s)
+        // Same original bee silhouette as the draggable overlay icon.
+        val outline = Stroke(width = 1.9f * s, cap = StrokeCap.Round)
+        drawOval(tint, topLeft = Offset(2.8f*s, 7.6f*s),
+            size = Size(7.8f*s, 5.4f*s), style = outline)
+        drawOval(tint, topLeft = Offset(13.4f*s, 7.6f*s),
+            size = Size(7.8f*s, 5.4f*s), style = outline)
+        drawOval(tint, topLeft = Offset(7.2f*s, 9.8f*s),
+            size = Size(9.6f*s, 11.6f*s), style = outline)
+        drawLine(tint, Offset(8f*s, 14.1f*s), Offset(16f*s, 14.1f*s), 1.9f*s, StrokeCap.Round)
+        drawLine(tint, Offset(8.1f*s, 17.5f*s), Offset(15.9f*s, 17.5f*s), 1.9f*s, StrokeCap.Round)
+        drawLine(tint, Offset(10.2f*s, 10f*s), Offset(8.8f*s, 5.5f*s), 1.9f*s, StrokeCap.Round)
+        drawLine(tint, Offset(13.8f*s, 10f*s), Offset(15.2f*s, 5.5f*s), 1.9f*s, StrokeCap.Round)
     }
 }
 
@@ -212,6 +182,8 @@ fun CoordinateTopBar(
     onValueChange: (String) -> Unit,
     onTeleport: () -> Unit,
     onHome: () -> Unit,
+    teleportEnabled: Boolean = true,
+    modeTitle: String = "瞬移",
     dark: Boolean,
     modifier: Modifier = Modifier,
     backdrop: Bitmap? = null,
@@ -219,7 +191,7 @@ fun CoordinateTopBar(
     val palette = NaosDesignSystem.palette(LocalNaosVisualState.current.family, dark)
     MapGlass(dark, modifier, backdrop) {
         Row(
-            Modifier.fillMaxWidth().heightIn(min = 66.dp).padding(start = 14.dp, end = 9.dp),
+            Modifier.fillMaxWidth().heightIn(min = 58.dp).padding(start = 12.dp, end = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
@@ -229,15 +201,26 @@ fun CoordinateTopBar(
                     .semantics { contentDescription = "回到目前定位並收起選單" },
             ) { NaosBeeHomeIcon(palette.accent) }
             Column(Modifier.weight(1f)) {
-                Text("經緯度 · 點地圖選取", fontSize = 11.sp, color = palette.muted)
+                Text(if (teleportEnabled) "瞬移 · 選取座標" else "$modeTitle · 地圖選點",
+                    fontSize = 11.sp, color = palette.muted)
                 BasicTextField(
                     value = value,
                     onValueChange = { onValueChange(it.take(65)) },
+                    readOnly = !teleportEnabled,
+                    decorationBox = { inner ->
+                        Box {
+                            if (value.isEmpty()) {
+                                Text(if (teleportEnabled) "點地圖或輸入座標" else "點地圖選擇位置",
+                                    color = palette.muted, fontSize = 14.sp)
+                            }
+                            inner()
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth()
                         .semantics { contentDescription = "輸入緯度、經度" },
                     singleLine = true,
                     textStyle = androidx.compose.ui.text.TextStyle(
-                        fontSize = 17.sp, fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
                         color = palette.ink,
                     ),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
@@ -245,18 +228,20 @@ fun CoordinateTopBar(
                     cursorBrush = androidx.compose.ui.graphics.SolidColor(palette.accent),
                 )
             }
-            Box(
-                modifier = Modifier.size(width = 52.dp, height = 49.dp)
-                    .clip(RoundedCornerShape(15.dp)).background(palette.accent),
-                contentAlignment = Alignment.Center,
-            ) {
-                IconButton(
-                    onClick = onTeleport,
-                    modifier = Modifier.matchParentSize()
-                        .semantics { contentDescription = "立即瞬移到輸入的座標" },
+            if (teleportEnabled) {
+                Box(
+                    modifier = Modifier.size(width = 48.dp, height = 47.dp)
+                        .clip(RoundedCornerShape(14.dp)).background(palette.accent),
+                    contentAlignment = Alignment.Center,
                 ) {
-                    Text("↗", fontSize = 26.sp, fontWeight = FontWeight.Bold,
-                        color = palette.onAccent)
+                    IconButton(
+                        onClick = onTeleport,
+                        modifier = Modifier.matchParentSize()
+                            .semantics { contentDescription = "瞬移到所選座標" },
+                    ) {
+                        Text("↗", fontSize = 24.sp, fontWeight = FontWeight.SemiBold,
+                            color = palette.onAccent)
+                    }
                 }
             }
         }

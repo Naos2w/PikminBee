@@ -1,7 +1,6 @@
 package com.naos.pikminbee.ui
 
 import androidx.compose.foundation.layout.Box
-import android.graphics.Bitmap
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -58,6 +57,7 @@ fun LocationMap(
     provider: MapProvider,
     dark: Boolean,
     selected: Coordinate,
+    selectionActive: Boolean,
     current: Coordinate?,
     currentIsMock: Boolean,
     start: Coordinate?,
@@ -72,34 +72,34 @@ fun LocationMap(
     onPick: (Coordinate) -> Unit,
     onFlowerPick: (FlowerSpot) -> Unit,
     onStopPick: ((Int) -> Unit)? = null,
-    onGlassSnapshot: (Bitmap?) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     when (provider) {
-        MapProvider.OPEN_FREE_MAP -> OpenFreeMapPane(dark, selected, current, currentIsMock, start, stops, road, previewRoad, flowerSpots,
+        MapProvider.OPEN_FREE_MAP -> OpenFreeMapPane(dark, selected, selectionActive, current, currentIsMock, start, stops, road, previewRoad, flowerSpots,
             freeMapStyle, cameraRequest, mapExplore, onCameraFailure,
-            onPick, onFlowerPick, onStopPick, onGlassSnapshot, modifier)
+            onPick, onFlowerPick, onStopPick, modifier)
         MapProvider.GOOGLE_MAPS -> if (BuildConfig.HAS_GOOGLE_MAPS_KEY) {
-            GoogleMapsPane(dark, selected, current, currentIsMock, start, stops, road, previewRoad, flowerSpots,
-                cameraRequest, mapExplore, onCameraFailure, onPick, onFlowerPick, onStopPick, onGlassSnapshot, modifier)
+            GoogleMapsPane(dark, selected, selectionActive, current, currentIsMock, start, stops, road, previewRoad, flowerSpots,
+                cameraRequest, mapExplore, onCameraFailure, onPick, onFlowerPick, onStopPick, modifier)
         } else {
-            OpenFreeMapPane(dark, selected, current, currentIsMock, start, stops, road, previewRoad, flowerSpots,
+            OpenFreeMapPane(dark, selected, selectionActive, current, currentIsMock, start, stops, road, previewRoad, flowerSpots,
                 freeMapStyle, cameraRequest, mapExplore, onCameraFailure,
-                onPick, onFlowerPick, onStopPick, onGlassSnapshot, modifier)
+                onPick, onFlowerPick, onStopPick, modifier)
         }
     }
 }
 
 @Composable
 private fun OpenFreeMapPane(
-    dark: Boolean, selected: Coordinate, current: Coordinate?, currentIsMock: Boolean,
+    dark: Boolean, selected: Coordinate, selectionActive: Boolean,
+    current: Coordinate?, currentIsMock: Boolean,
     start: Coordinate?, stops: List<Coordinate>,
     road: List<Coordinate>, previewRoad: Boolean, flowerSpots: List<FlowerSpot>,
     freeMapStyle: FreeMapStyle, cameraRequest: MapCameraRequest?, mapExplore: Boolean,
     onCameraFailure: (String) -> Unit,
     onPick: (Coordinate) -> Unit, onFlowerPick: (FlowerSpot) -> Unit,
     onStopPick: ((Int) -> Unit)?,
-    onGlassSnapshot: (Bitmap?) -> Unit, modifier: Modifier,
+    modifier: Modifier,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -108,12 +108,10 @@ private fun OpenFreeMapPane(
     val latestOnStopPick by rememberUpdatedState(onStopPick)
     val latestStops by rememberUpdatedState(stops)
     val latestOnCameraFailure by rememberUpdatedState(onCameraFailure)
-    val latestGlassSnapshot by rememberUpdatedState(onGlassSnapshot)
     val view = remember(context) {
         MapLibre.getInstance(context)
         LibreMapView(context).apply { onCreate(null) }
     }
-    var glassSampler by remember(view) { mutableStateOf<MapGlassSnapshotBridge?>(null) }
     var map by remember { mutableStateOf<MapLibreMap?>(null) }
     var styleVersion by remember { mutableIntStateOf(0) }
     var currentMarker by remember { mutableStateOf<org.maplibre.android.annotations.Marker?>(null) }
@@ -170,18 +168,6 @@ private fun OpenFreeMapPane(
                     } else false
                 }
             }
-            // Bounded live snapshots keep refracted map pixels fresh while panning.
-            glassSampler = MapGlassSnapshotBridge(
-                isAttached = {
-                    map === ready && view.isAttachedToWindow &&
-                        view.width > 0 && view.height > 0
-                },
-                capture = { onBitmap -> ready.snapshot { bitmap -> onBitmap(bitmap) } },
-                deliver = { bitmap -> latestGlassSnapshot(bitmap) },
-            )
-            ready.addOnCameraMoveStartedListener { glassSampler?.cameraStarted() }
-            ready.addOnCameraMoveListener { glassSampler?.cameraMoved() }
-            ready.addOnCameraIdleListener { glassSampler?.cameraIdle() }
             ready.moveCamera(org.maplibre.android.camera.CameraUpdateFactory.newCameraPosition(
                 LibreCameraPosition.Builder()
                     .target(LibreLatLng(selected.latitude, selected.longitude)).zoom(14.5).build()
@@ -189,10 +175,7 @@ private fun OpenFreeMapPane(
         }
         onDispose {
             disposed = true
-            glassSampler?.close()
-            glassSampler = null
             lifecycleOwner.lifecycle.removeObserver(observer)
-            latestGlassSnapshot(null)
             map = null
             view.onPause()
             view.onStop()
@@ -205,26 +188,24 @@ private fun OpenFreeMapPane(
             MapBasemapPolicy.openFreeMapStyleUrl(freeMapStyle, dark)
         )) {
             styleVersion++
-            // Initial camera-idle can fire before tiles have rendered. Refresh
-            // once after the style settles so a static map also has real optics.
-            view.postDelayed({
-                if (view.isAttachedToWindow && map === loadedMap) {
-                    glassSampler?.cameraIdle()
-                }
-            }, 380L)
         }
     }
     // The moving position is updated in place. Do not recreate the whole route every second.
-    LaunchedEffect(map, styleVersion, selected) {
+    LaunchedEffect(map, styleVersion, selected, selectionActive) {
         val m = map ?: return@LaunchedEffect
         if (styleVersion == 0) return@LaunchedEffect
-        val position = LibreLatLng(selected.latitude, selected.longitude)
-        if (currentMarker == null || currentStyleVersion != styleVersion) {
+        if (!selectionActive) {
             currentMarker?.let { m.removeMarker(it) }
-            currentMarker = m.addMarker(LibreMarkerOptions()
-                .position(position).title("選取位置"))
-            currentStyleVersion = styleVersion
-        } else currentMarker?.position = position
+            currentMarker = null
+        } else {
+            val position = LibreLatLng(selected.latitude, selected.longitude)
+            if (currentMarker == null || currentStyleVersion != styleVersion) {
+                currentMarker?.let { m.removeMarker(it) }
+                currentMarker = m.addMarker(LibreMarkerOptions()
+                    .position(position).title("選取位置"))
+                currentStyleVersion = styleVersion
+            } else currentMarker?.position = position
+        }
     }
     LaunchedEffect(map, styleVersion, current, currentIsMock) {
         val m = map ?: return@LaunchedEffect
@@ -329,14 +310,15 @@ private fun OpenFreeMapPane(
 
 @Composable
 private fun GoogleMapsPane(
-    dark: Boolean, selected: Coordinate, current: Coordinate?, currentIsMock: Boolean,
+    dark: Boolean, selected: Coordinate, selectionActive: Boolean,
+    current: Coordinate?, currentIsMock: Boolean,
     start: Coordinate?, stops: List<Coordinate>,
     road: List<Coordinate>, previewRoad: Boolean, flowerSpots: List<FlowerSpot>,
     cameraRequest: MapCameraRequest?, mapExplore: Boolean,
     onCameraFailure: (String) -> Unit,
     onPick: (Coordinate) -> Unit, onFlowerPick: (FlowerSpot) -> Unit,
     onStopPick: ((Int) -> Unit)?,
-    onGlassSnapshot: (Bitmap?) -> Unit, modifier: Modifier,
+    modifier: Modifier,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -345,9 +327,7 @@ private fun GoogleMapsPane(
     val latestOnStopPick by rememberUpdatedState(onStopPick)
     val latestStops by rememberUpdatedState(stops)
     val latestOnCameraFailure by rememberUpdatedState(onCameraFailure)
-    val latestGlassSnapshot by rememberUpdatedState(onGlassSnapshot)
     val view = remember(context) { GoogleMapView(context).apply { onCreate(null) } }
-    var glassSampler by remember(view) { mutableStateOf<MapGlassSnapshotBridge?>(null) }
     var map by remember { mutableStateOf<GoogleMap?>(null) }
     var currentMarker by remember { mutableStateOf<com.google.android.gms.maps.model.Marker?>(null) }
     var liveMarker by remember { mutableStateOf<com.google.android.gms.maps.model.Marker?>(null) }
@@ -398,27 +378,12 @@ private fun GoogleMapsPane(
                     } else false
                 }
             }
-            glassSampler = MapGlassSnapshotBridge(
-                isAttached = {
-                    map === ready && view.isAttachedToWindow &&
-                        view.width > 0 && view.height > 0
-                },
-                capture = { onBitmap -> ready.snapshot { bitmap -> onBitmap(bitmap) } },
-                deliver = { bitmap -> latestGlassSnapshot(bitmap) },
-            )
-            ready.setOnCameraMoveStartedListener { _ -> glassSampler?.cameraStarted() }
-            ready.setOnCameraMoveListener { glassSampler?.cameraMoved() }
-            ready.setOnCameraIdleListener { glassSampler?.cameraIdle() }
-            ready.setOnMapLoadedCallback { glassSampler?.cameraIdle() }
             ready.moveCamera(CameraUpdateFactory.newLatLngZoom(
                 GoogleLatLng(selected.latitude, selected.longitude), 14.5f))
         }
         onDispose {
             disposed = true
-            glassSampler?.close()
-            glassSampler = null
             lifecycleOwner.lifecycle.removeObserver(observer)
-            latestGlassSnapshot(null)
             map = null
             view.onPause()
             view.onStop()
@@ -428,12 +393,18 @@ private fun GoogleMapsPane(
     LaunchedEffect(map, dark) {
         map?.setMapStyle(if (dark) MapStyleOptions(GOOGLE_DARK_STYLE) else null)
     }
-    LaunchedEffect(map, selected) {
+    LaunchedEffect(map, selected, selectionActive) {
         val m = map ?: return@LaunchedEffect
-        val position = GoogleLatLng(selected.latitude, selected.longitude)
-        if (currentMarker == null) {
-            currentMarker = m.addMarker(GoogleMarkerOptions().position(position).title("選取位置"))
-        } else currentMarker?.position = position
+        if (!selectionActive) {
+            currentMarker?.remove()
+            currentMarker = null
+        } else {
+            val position = GoogleLatLng(selected.latitude, selected.longitude)
+            if (currentMarker == null) {
+                currentMarker = m.addMarker(GoogleMarkerOptions()
+                    .position(position).title("選取位置"))
+            } else currentMarker?.position = position
+        }
     }
     LaunchedEffect(map, current, currentIsMock) {
         val m = map ?: return@LaunchedEffect
