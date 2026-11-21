@@ -122,6 +122,11 @@ class LanHttpPolicyTest {
         assertTrue(html.contains("clamp(290px,45svh,500px)"))
         assertTrue(html.contains("id=\"mode-content\""))
         assertTrue(html.contains("id=\"motion-controls\""))
+        // Performance-first UAT: glass blur/sampling must not return to the LAN UI.
+        assertTrue(html.contains("--surface:#1c2b34"))
+        assertTrue(html.contains("--surface:#ffffff"))
+        assertFalse(html.contains("backdrop-filter"))
+        assertFalse(html.contains("blur("))
         assertTrue(html.contains("aria-pressed=\"true\""))
         assertTrue(js.contains("setAttribute(\"aria-pressed\""))
         assertTrue(js.contains("swipeArea.addEventListener(\"touchend\""))
