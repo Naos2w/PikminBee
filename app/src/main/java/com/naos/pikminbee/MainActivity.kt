@@ -4,7 +4,6 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
-import android.graphics.Bitmap
 import android.net.Uri
 import android.provider.Settings
 import androidx.activity.ComponentActivity
@@ -186,7 +185,6 @@ private fun PikminBeeScreen() {
     var appearance by remember { mutableStateOf(prefs.appearance()) }
     val naosFamily = NaosThemeFamily.MINERAL
     val naosMaterial = NaosGlassMaterial.REGULAR
-    var mapBackdrop by remember { mutableStateOf<Bitmap?>(null) }
     val dark = when (appearance) {
         MapAppearance.SYSTEM -> systemDark
         MapAppearance.LIGHT -> false
@@ -613,8 +611,10 @@ private fun PikminBeeScreen() {
             message = "請在花朵辨識面板取得 Android 畫面擷取同意"
         }
     }
-    var coordinateInput by remember { mutableStateOf(selected.label()) }
-    LaunchedEffect(selected) { coordinateInput = selected.label() }
+    var coordinateInput by remember { mutableStateOf("") }
+    LaunchedEffect(selected, selectionExplicit) {
+        coordinateInput = if (selectionExplicit) selected.label() else ""
+    }
     fun teleportTo(coordinate: Coordinate) {
         selected = coordinate
         selectionExplicit = true
@@ -849,7 +849,6 @@ private fun PikminBeeScreen() {
                 onPermissions = { activePage = BeePage.PERMISSIONS },
                 mapExplore = mapExplore,
                 onCloseExplore = { mapExplore = false },
-                backdrop = mapBackdrop,
                 routeStopsCount = roadStops.size,
                 flowerStopsCount = flowerStops.size,
                 flowerActive = walkMode == WalkMode.FLOWERS &&
@@ -890,7 +889,9 @@ private fun PikminBeeScreen() {
                 mapContent = {
             LocationMap(
                 provider = provider, dark = dark,
-                selected = selected,
+                selected = if (selectionExplicit) selected
+                    else mockPosition ?: phonePosition ?: selected,
+                selectionActive = selectionExplicit,
                 current = mockPosition ?: phonePosition,
                 currentIsMock = mockPosition != null,
                 start = if (tab == ToolTab.FLOWERS) mockPosition ?: flowerStart else null,
@@ -988,7 +989,6 @@ private fun PikminBeeScreen() {
                     }
                     else -> null
                 },
-                onGlassSnapshot = { mapBackdrop = it },
                 modifier = Modifier.fillMaxSize()
             )
                 },
