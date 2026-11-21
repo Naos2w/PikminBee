@@ -26,7 +26,17 @@ object MapAppearancePolicy {
     }
 }
 
-data class SavedPlace(val id: Long, val name: String, val coordinate: Coordinate)
+/** Local saved coordinate with optional resolved metadata. Null means unknown, never inferred. */
+data class SavedPlace(
+    val id: Long,
+    val name: String,
+    val coordinate: Coordinate,
+    val countryCode: String? = null,
+    val countryName: String? = null,
+    val city: String? = null,
+    val timeZoneId: String? = null,
+    val createdAtMillis: Long = id,
+)
 
 /** One in-process draft state, observed by the phone UI, web API and GPS planner. */
 object RouteDraftState {
@@ -174,14 +184,35 @@ class AppPreferences(private val context: Context) {
             val lon = item.optDouble("lon", Double.NaN)
             val coordinate = runCatching { Coordinate(lat, lon) }.getOrNull()
                 ?: return@mapNotNull null
-            SavedPlace(item.optLong("id"), item.optString("name"), coordinate)
+            val id = item.optLong("id")
+            fun optional(key: String): String? =
+                item.optString(key).takeUnless { it.isBlank() || it.equals("null", true) }
+            SavedPlace(
+                id, item.optString("name"), coordinate,
+                countryCode = optional("countryCode"),
+                countryName = optional("countryName"),
+                city = optional("city"),
+                timeZoneId = optional("timeZoneId"),
+                createdAtMillis = item.optLong("createdAt", id),
+            )
         }
     }.getOrDefault(emptyList())
 
-    fun addPlace(name: String, coordinate: Coordinate) {
+    fun addPlace(
+        name: String, coordinate: Coordinate,
+        countryCode: String? = null, countryName: String? = null,
+        city: String? = null, timeZoneId: String? = null,
+    ) {
         val list = places()
-        val id = System.currentTimeMillis()
-        savePlaces(list + SavedPlace(id, name.trim().take(60).ifBlank { "收藏地點" }, coordinate))
+        val id = (System.currentTimeMillis()).let { now ->
+            if (list.any { it.id == now }) now + 1 else now
+        }
+        val saved = SavedPlace(
+            id, name.trim().take(60).ifBlank { "收藏地點" }, coordinate,
+            countryCode?.takeIf { it.length == 2 }?.uppercase(java.util.Locale.ROOT),
+            countryName?.take(100), city?.take(100), timeZoneId?.take(100),
+        )
+        savePlaces(list + saved)
     }
 
     fun removePlace(id: Long) { savePlaces(places().filterNot { it.id == id }) }
@@ -304,7 +335,12 @@ class AppPreferences(private val context: Context) {
         val values = JSONArray().apply {
             places.forEach { place ->
                 put(JSONObject().put("id", place.id).put("name", place.name)
-                    .put("lat", place.coordinate.latitude).put("lon", place.coordinate.longitude))
+                    .put("lat", place.coordinate.latitude).put("lon", place.coordinate.longitude)
+                    .put("countryCode", place.countryCode ?: JSONObject.NULL)
+                    .put("countryName", place.countryName ?: JSONObject.NULL)
+                    .put("city", place.city ?: JSONObject.NULL)
+                    .put("timeZoneId", place.timeZoneId ?: JSONObject.NULL)
+                    .put("createdAt", place.createdAtMillis))
             }
         }
         prefs.edit().putString("places", values.toString()).apply()

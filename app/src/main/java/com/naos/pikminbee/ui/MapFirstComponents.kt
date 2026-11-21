@@ -295,6 +295,7 @@ fun CoordinateTopBar(
     onValueChange: (String) -> Unit,
     onTeleport: () -> Unit,
     onHome: () -> Unit,
+    onFavourites: () -> Unit,
     teleportEnabled: Boolean = true,
     dismissEditingToken: Int = 0,
     editingBlocked: Boolean = false,
@@ -342,7 +343,7 @@ fun CoordinateTopBar(
         Row(
             Modifier.fillMaxWidth().heightIn(min = 58.dp).padding(start = 12.dp, end = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             IconButton(
                 onClick = { dismissEditor(); onHome() },
@@ -428,6 +429,11 @@ fun CoordinateTopBar(
                     }
                 }
             }
+            IconButton(
+                onClick = { dismissEditor(); onFavourites() },
+                modifier = Modifier.size(44.dp)
+                    .semantics { contentDescription = "開啟收藏地點與路線" },
+            ) { NaosModeIcon(3, palette.ink) }
         }
     }
 }

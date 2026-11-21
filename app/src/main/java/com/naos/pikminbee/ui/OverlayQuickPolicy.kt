@@ -27,6 +27,10 @@ object OverlayQuickPolicy {
         else -> OverlayPrimaryState.START
     }
 
+    /** Exactly one GPS mode is highlighted from confirmed provider state, never the last tap. */
+    fun selectedGps(mockActive: Boolean): OverlayQuickAction =
+        if (mockActive) OverlayQuickAction.VIRTUAL_GPS else OverlayQuickAction.REAL_GPS
+
     fun nextSpeed(current: WalkSpeedPreset): WalkSpeedPreset {
         val entries = WalkSpeedPreset.entries
         return entries[(entries.indexOf(current) + 1) % entries.size]

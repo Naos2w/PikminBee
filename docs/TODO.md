@@ -1,5 +1,29 @@
 # PikminBee TODO
 
+## P0 · Approved UI/UX & favourites redesign — 2026-11-22
+**Settled scope:** Keep existing low-saturation mineral blue/honey theme and lightweight opaque matte components. Android and Web are deliberately platform-specific, not identical layouts. No automated UAT or main promotion in feature PRs.
+
+### Android interaction
+- [x] Replace both shared 4-button map docks (main bottom and expanded sheet) with **瞬移 / 路徑 / 尋花 / 設定**. First 3 may swipe inside dock/details; Settings **tap only**, opens existing BeePage.SETTINGS and returns to previous mode. Never steal map pan/pinch; preserve current route and ongoing movement.
+- [x] Put a **收藏 bookmark action in the map top-right**. Tap opens a lightweight independently scrollable favourites sheet; group places and saved routes, with search/filter and clear select/load/view actions; selecting a place only previews the map, **never teleports without separate confirmation**. Ensure this still works on small POCO displays.
+- [x] In floating overlay, keep existing **2 × 4 icons** and no permanent GPS text. Highlight exactly one of REAL_GPS / VIRTUAL_GPS according to **confirmed Android mock-provider state**, not last button tapped; use existing accent/border, no new theme colour. Do not signal real fix availability merely because mock is off. Document icon meaning in existing overlay guide and preserve TalkBack/long-press.
+- [x] Audit text-only actions (initial priority: teleport, restore real GPS and save place now show native vector icons; secondary text actions intentionally remain); add vector icons to high-priority functional buttons without crowding Confirm/Cancel or shrinking touch targets.
+- [x] Fix horizontal mode swipe in code (3-mode policy boundary and actual gesture ownership unchanged; physical POCO swipe acceptance still pending) on actual detail content; Settings remains tap-only. Add tests for 3-mode boundary.
+
+### Favourites data / local time / suggested names
+- [x] **Geocoding is user-triggered** (on saving/editing a selected place), never called on GPS ticks. Landmark/business/POI first **only if close enough**, then street, district/city, finally raw coordinates. Allow editing and preserve explicit user names. Implement bounded cache/failure fallback and document service/privacy/rate limits.
+- [x] Add backward-compatible `countryCode`, display city/area, `timeZoneId`, explicit `createdAtMillis` to saved places; maintain all old favourites on migration. Saved routes retain existing creation timestamp and should get suitable origin metadata without guessing.
+- [x] Destination local time is computed using IANA zone (DST aware) and compared with **the phone's last verified real physical GPS time zone**, **never mock GPS nor permanent Taiwan default**. On missing/expired physical fix or unresolved zone display "時差待確認", never a fabricated comparison. Cache verified real reference conservatively; no indefinite last-known zone.
+- [ ] Favourites list compact: place name / country (flag if resolved), city, local clock and difference from real fix where confidently available. Dates, coordinates, edits/deletes in details; avoid excessive repaint/time-based updates.
+- [ ] Android confirmed first, Web is **map-first RWD**: desktop wide map + right sidebar, tablet adaptable, mobile map + compact controls, separate top-right favourite access; preserve independent browser mock pairing/security and preview→start gates. No new colour theme or expensive glass/blur.
+
+### Flower detection (separate phase, do not falsely claim fully automatic GPS)
+- [ ] Keep existing consented screen/image bloom-candidate detection, manual pixel→GPS calibration, confirmed/unverified flower catalogue, and Valhalla route preview. Document that candidates **cannot yet automatically become verified GPS flower routes**; future work requires real POCO calibration evidence, explicit confirmation and ordered route optimisation.
+
+### Quality gates
+- [x] Local Kotlin/JVM tests (navigation, location state, saved-place migration) and Android Lint; Web Node/Playwright desktop/tablet/mobile when Web touched.
+- [ ] Feature PR → `develop` after CI; real POCO touch/visual tests still needed; later version bump and fixed-key signed UAT only upon explicit release request.
+
 ## P0 · UAT 0.13.1 LAN Web feedback — true GPS, numbered route, dark Edge options (21 Nov 2026)
 - [x] Source diagnosis: `/api/state.position` is virtual GPS, `restore-real` only ends mock provider; the default Taipei map centre is **not** a phone GPS fix. Never report a mock or stale fix as real.
 - [x] Add paired, explicit on-demand real-phone GPS query only with fine-location permission and no active mock provider; reject Android mock fixes, expire old fixes, show separate real/virtual map markers and a status/readiness message. The browser must never move the phone by merely viewing or selecting coordinates.

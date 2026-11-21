@@ -29,6 +29,11 @@ class OverlayQuickPolicyTest {
         assertEquals(8, (OverlayQuickPolicy.topRow + OverlayQuickPolicy.bottomRow).distinct().size)
     }
 
+    @Test fun gpsModeIndicatorReflectsActualMockProviderNotLastClick() {
+        assertEquals(OverlayQuickAction.REAL_GPS, OverlayQuickPolicy.selectedGps(false))
+        assertEquals(OverlayQuickAction.VIRTUAL_GPS, OverlayQuickPolicy.selectedGps(true))
+    }
+
     @Test fun speedCyclesWithoutChangingSavedDefaults() {
         assertEquals(WalkSpeedPreset.WALK, OverlayQuickPolicy.nextSpeed(WalkSpeedPreset.SLOW))
         assertEquals(WalkSpeedPreset.FAST, OverlayQuickPolicy.nextSpeed(WalkSpeedPreset.WALK))
