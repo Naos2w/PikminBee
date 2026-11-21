@@ -11,7 +11,8 @@ object LanHttpPolicy {
         "default-src 'none'; " +
         "script-src 'self'; " +
         "style-src 'self' 'unsafe-inline'; " +
-        "img-src data: https://tiles.openfreemap.org; " +
+        // MapLibre uses same-origin and Blob images for map resources.
+        "img-src 'self' data: blob: https://tiles.openfreemap.org; " +
         "connect-src 'self' https://tiles.openfreemap.org; " +
         "font-src data: https://tiles.openfreemap.org; " +
         "worker-src 'self' blob:; " +
