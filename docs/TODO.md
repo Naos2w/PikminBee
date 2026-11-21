@@ -1,5 +1,24 @@
 # PikminBee TODO
 
+## P1 · Real-time per-walk estimated steps + icon-first controls (21 Nov 2026)
+- [x] Source: moving distance = selected speed in m/s × elapsed time (bounded to remaining planned route); virtual estimate = floor(all-time accepted metres / fixed 0.72 m stride). This is a virtual estimate, not physical pedometer activity; the 10.8 km/h preset is not a calibrated running stride.
+- [x] Separate all-time virtual estimate from **per-walk** steps using an immutable walk-start baseline and a process-local observable flow shared by the main screen and floating overlay. Each new route resets its own displayed count; GPS virtual-step checkpoints do not reset its display.
+- [x] Pause freezes stepping, checkpoints pending manual-estimate records, updates the overlay and notification immediately; resume excludes the paused interval from the next recorded batch; stop freezes the final count and posts the final batch. Health Connect cannot store a separate running/paused state; it stores opted-in manual estimate intervals asynchronously.
+- [x] Main map shows prominent “本次估算 X 步” while moving/paused and after stop in the relevant mode. Detail sheet, floating panel, active notification and HC settings show the same per-walk estimate/status.
+- [x] Compact SVG-style Compose Canvas vectors replace verbose tool shortcuts (real/virtual GPS, flower vision, speed, undo and HC refresh); primary start/pause/stop retain brief text for safety and accessibility. All icon-only touch targets have TalkBack descriptions.
+- [x] JVM regression checks compare speed-dependent estimate rate and current-walk baseline across pause/stop/new walk.
+- [x] MSI Kotlin compilation + **181/181** JVM tests, 0 failures/errors/skipped, Android Lint and `git diff --check` succeeded (Gradle exit 0). Stage for normal checked DEV PR; do not auto-promote to staging/main.
+- [ ] POCO UAT acceptance: 60s at each speed, pause/resume/stop/terminal arrival, main vs overlay vs notification count and phase, old pending HC queue, manual-entry source and TalkBack controls.
+
+## P0 · Health Connect virtual steps not visibly increasing (21 Nov 2026)
+- [x] Source diagnosis: on-screen total is a historical cumulative virtual estimate, not a live Health Connect read. Previous implementation only queued a HC manual-record export on route stop/arrival, while the aggregate screen refreshed only on entry/manual refresh. Zero pending is not evidence of a successful write.
+- [x] Add opt-in-only 60-second session checkpoints and pause/finish flush, preserving MANUAL_ENTRY metadata, user permissions and stable client IDs; do not present mocked distance as physical sensor data.
+- [x] Prevent enqueued chunks being silently stranded by WorkManager KEEP while another sync is running: use APPEND_OR_REPLACE and show the last write outcome.
+- [x] UI reads today's actual PikminBee manual virtual entries separately from Health Connect's deduplicated aggregate, refreshes upon queue completion/periodically while visible, and distinguishes the all-time local estimate.
+- [x] Add JVM tests for checkpoint opt-in, 60-second cadence and no double-counting after advancing step baseline.
+- [x] MSI Android Kotlin compile, **179/179** JVM unit tests (0 failures/errors/skipped), and Android Lint succeeded (Gradle exit 0); source changes ready for a normal checked PR to develop. No UAT promotion or physical-device acceptance claimed.
+- [ ] POCO acceptance: with virtual opt-in and WRITE_STEPS, walk >60s, pause/stop, refresh Settings, inspect this app's HC virtual entries and total versus other higher-priority data; verify pending records drain and no duplicates. No connected Android ADB device at present.
+
 ## P0 · Road snapping and two-step main-map route controls (21 Nov 2026)
 - [x] DEV source: replace strict 45 m proximity rule with bounded 200 m Valhalla pedestrian-edge snapping and matching candidate search radius; keep an explicit failure beyond the bound rather than silently using straight lines or an arbitrarily distant route.
 - [x] Main route quick button is now Plan → Start on the exact confirmed preview geometry; no location modification or mock-service start on preview. GPS jitter up to 30 m preserves preview; edited waypoints or moved starting point invalidate it.

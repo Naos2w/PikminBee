@@ -26,6 +26,7 @@ import com.naos.pikminbee.health.EstimatedStepCounter
 import com.naos.pikminbee.health.EstimatedWalkStatus
 import com.naos.pikminbee.health.EstimatedStepLedger
 import com.naos.pikminbee.health.EstimatedStepsSyncWorker
+import com.naos.pikminbee.health.VirtualEstimateSyncPolicy
 import com.naos.pikminbee.data.AppPreferences
 import com.naos.pikminbee.data.PreparedRouteState
 import com.naos.pikminbee.data.RouteDraftState
@@ -59,6 +60,8 @@ object LocationStatus {
     val geometry = MutableStateFlow<List<Coordinate>>(emptyList())
     val overlayVisible = MutableStateFlow(false)
     val progress = MutableStateFlow(WalkingProgressSnapshot())
+    /** Steps estimated for the current/most recently stopped virtual walk only. */
+    val walkEstimatedSteps = MutableStateFlow(0L)
 }
 
 class MockLocationService : Service() {
@@ -133,6 +136,7 @@ class MockLocationService : Service() {
     private var estimatedStepPersistTicker = 0
     private var sessionStartMillis = 0L
     private var sessionStartSteps = 0L
+    private var walkOriginSteps = 0L
     private var speedMetersPerSecond = WalkSpeedPreset.DEFAULT.metresPerSecond
     private var loopRoute = false
     private var previousTickMillis = 0L
@@ -156,11 +160,18 @@ class MockLocationService : Service() {
                 val acceptedMetres = if (loopRoute) travelMetres else
                     travelMetres.coerceAtMost((trackLengthMeters - walkingDistanceMeters).coerceAtLeast(0.0))
                 if (acceptedMetres > 0) {
-                    EstimatedWalkStatus.state.value = estimatedSteps.addTravel(acceptedMetres)
+                    val snapshot = estimatedSteps.addTravel(acceptedMetres)
+                    EstimatedWalkStatus.state.value = snapshot
+                    LocationStatus.walkEstimatedSteps.value =
+                        estimatedSteps.estimatedSince(walkOriginSteps)
                     if (++estimatedStepPersistTicker >= 15) {
                         saveEstimatedSteps()
+                        refreshNotification()
                         estimatedStepPersistTicker = 0
                     }
+                    // Health Connect does not receive live GPS ticks. Persist a
+                    // bounded, explicitly opted-in estimate chunk per minute.
+                    checkpointEstimatedSession()
                 }
                 walkingDistanceMeters += travelMetres
                 if (loopRoute && trackLengthMeters > 0.1 && walkingDistanceMeters >= trackLengthMeters) {
@@ -229,6 +240,7 @@ class MockLocationService : Service() {
                 trackLengthMeters = 0.0
                 stopThresholds = emptyList()
                 LocationStatus.progress.value = WalkingProgressSnapshot()
+                LocationStatus.walkEstimatedSteps.value = 0L
                 loopRoute = false
                 mode = null
                 phase = WalkPhase.PARKED
@@ -379,6 +391,7 @@ class MockLocationService : Service() {
                 stopThresholds = emptyList()
                 walkingDistanceMeters = 0.0
                 LocationStatus.progress.value = WalkingProgressSnapshot()
+                LocationStatus.walkEstimatedSteps.value = 0L
                 target = remembered
                 journal.record(remembered, force = true)
                 LocationStatus.phase.value = phase
@@ -397,21 +410,31 @@ class MockLocationService : Service() {
             }
             ACTION_PAUSE_ROUTE -> {
                 if (phase == WalkPhase.MOVING) {
+                    // Flush this moving interval before entering a paused state.
+                    checkpointEstimatedSession(force = true)
                     phase = WalkPhase.PAUSED
                     LocationStatus.phase.value = phase
                     LocationStatus.display.value = "步行已暫停"
                     target?.let { journal.record(it, force = true) }
                     refreshNotification()
+                    updateOverlay()
                 }
                 return START_STICKY
             }
             ACTION_RESUME_ROUTE -> {
                 if (phase == WalkPhase.PAUSED) {
                     previousTickMillis = SystemClock.elapsedRealtime()
+                    // Exclude the paused interval from the next HC estimate
+                    // record after a successful pause checkpoint.
+                    val currentSteps = estimatedSteps.snapshot().estimatedSteps
+                    if (sessionStartSteps == currentSteps && sessionStartMillis > 0L) {
+                        sessionStartMillis = System.currentTimeMillis()
+                    }
                     phase = WalkPhase.MOVING
                     LocationStatus.phase.value = phase
                     LocationStatus.display.value = "沿道路步行中"
                     refreshNotification()
+                    updateOverlay()
                 }
                 return START_STICKY
             }
@@ -431,6 +454,7 @@ class MockLocationService : Service() {
                     finishEstimatedSession()
                     saveEstimatedSteps()
                     refreshNotification()
+                    updateOverlay()
                 }
                 return START_STICKY
             }
@@ -442,6 +466,7 @@ class MockLocationService : Service() {
                 stopThresholds = emptyList()
                 walkingDistanceMeters = 0.0
                 LocationStatus.progress.value = WalkingProgressSnapshot()
+                LocationStatus.walkEstimatedSteps.value = 0L
                 loopRoute = false
                 mode = null
                 phase = WalkPhase.IDLE
@@ -468,6 +493,7 @@ class MockLocationService : Service() {
                 trackLengthMeters = 0.0
                 stopThresholds = emptyList()
                 LocationStatus.progress.value = WalkingProgressSnapshot()
+                LocationStatus.walkEstimatedSteps.value = 0L
                 LocationStatus.phase.value = phase
                 LocationStatus.mode.value = null
                 LocationStatus.geometry.value = emptyList()
@@ -503,24 +529,47 @@ class MockLocationService : Service() {
     }
 
 
-    private fun finishEstimatedSession() {
+    private fun checkpointEstimatedSession(force: Boolean = false, finish: Boolean = false) {
         val start = sessionStartMillis
         if (start <= 0L) return
-        sessionStartMillis = 0L
-        val estimated = (estimatedSteps.snapshot().estimatedSteps - sessionStartSteps)
-            .coerceAtLeast(0L)
-        if (estimated == 0L) return
+        val now = System.currentTimeMillis()
         val ledger = EstimatedStepLedger(this)
+        // While walking, export no more than once per minute and only if the
+        // user enabled virtual-estimate sync. An unfinished walk is not a sensor
+        // record and is still labelled MANUAL_ENTRY by HealthConnectStepSync.
+        if (!force && !finish &&
+            !VirtualEstimateSyncPolicy.shouldCheckpoint(start, now, ledger.optIn())) return
+        val currentSteps = estimatedSteps.snapshot().estimatedSteps
+        val deltaSteps = VirtualEstimateSyncPolicy.unsavedSteps(currentSteps, sessionStartSteps)
+        if (deltaSteps == 0L) {
+            if (finish) sessionStartMillis = 0L
+            else if (force) sessionStartMillis = now
+            return
+        }
+        // Do not advance the checkpoint until the interval is durably saved:
+        // otherwise a full queue/disk error could permanently lose step counts.
         val stored = runCatching {
-            ledger.add(start, System.currentTimeMillis(), estimated)
+            ledger.add(start, maxOf(now, start + 1L), deltaSteps)
         }.getOrElse { error ->
             LocationStatus.display.value = "估算步數保存失敗：" + error.message
             return
         }
-        if (stored != null && ledger.optIn()) {
-            runCatching { EstimatedStepsSyncWorker.enqueue(this) }
-                .onFailure { LocationStatus.display.value = "Health Connect 同步排程失敗：" + it.message }
+        if (stored != null) {
+            sessionStartSteps = currentSteps
+            sessionStartMillis = if (finish) 0L else now
+            saveEstimatedSteps()
+            if (ledger.optIn()) {
+                runCatching { EstimatedStepsSyncWorker.enqueue(this) }
+                    .onFailure {
+                        LocationStatus.display.value =
+                            "Health Connect 同步排程失敗：" + it.message
+                    }
+            }
         }
+    }
+
+    private fun finishEstimatedSession() {
+        checkpointEstimatedSession(finish = true)
     }
 
     private fun saveEstimatedSteps() {
@@ -615,6 +664,8 @@ class MockLocationService : Service() {
         finishEstimatedSession()
         sessionStartMillis = System.currentTimeMillis()
         sessionStartSteps = estimatedSteps.snapshot().estimatedSteps
+        walkOriginSteps = sessionStartSteps
+        LocationStatus.walkEstimatedSteps.value = 0L
         track = planned
         trackLengthMeters = length
         val draftStops = if (routeMode == WalkMode.FLOWERS)
@@ -637,6 +688,7 @@ class MockLocationService : Service() {
             "尋花步行中" else "沿道路步行中"
         scheduleTicks()
         refreshNotification()
+        updateOverlay()
         return true
     }
 
@@ -707,7 +759,11 @@ class MockLocationService : Service() {
         val builder = Notification.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setContentTitle("PikminBee · 測試定位")
-            .setContentText(LocationStatus.display.value)
+            .setContentText(LocationStatus.display.value +
+                if (mode != null && phase in listOf(
+                        WalkPhase.MOVING, WalkPhase.PAUSED, WalkPhase.PARKED))
+                    " · 本次估算 ${LocationStatus.walkEstimatedSteps.value} 步"
+                else "")
             .setOngoing(true)
             .setOnlyAlertOnce(true)
 
@@ -786,6 +842,7 @@ class MockLocationService : Service() {
         trackLengthMeters = 0.0
         stopThresholds = emptyList()
         LocationStatus.progress.value = WalkingProgressSnapshot()
+        LocationStatus.walkEstimatedSteps.value = 0L
         mode = null
         loopRoute = false
         phase = WalkPhase.IDLE
