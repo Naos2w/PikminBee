@@ -80,6 +80,7 @@ import com.naos.pikminbee.data.MapProvider
 import com.naos.pikminbee.data.FreeMapStyle
 import com.naos.pikminbee.data.MapBasemapPolicy
 import com.naos.pikminbee.data.RouteDraftState
+import com.naos.pikminbee.data.PreparedRouteState
 import com.naos.pikminbee.data.WalkSpeedState
 import com.naos.pikminbee.domain.WalkSpeedPreset
 import com.naos.pikminbee.data.SavedRouteState
@@ -200,9 +201,10 @@ private fun PikminBeeScreen() {
     var editingFlowerStopIndex by remember { mutableStateOf<Int?>(null) }
     // A recorded flower is never silently treated as the route's starting point.
     var flowerStart by remember { mutableStateOf<Coordinate?>(null) }
-    var flowerRoadPreview by remember { mutableStateOf(emptyList<Coordinate>()) }
-    var preparedRoute by remember { mutableStateOf<PreparedWalkingRoute?>(null) }
+    val preparedRoute by PreparedRouteState.route.collectAsState()
+    val preparedFlowers by PreparedRouteState.flowers.collectAsState()
     val routeRoadPreview = preparedRoute?.geometry.orEmpty()
+    val flowerRoadPreview = preparedFlowers?.geometry.orEmpty()
     var routeEditingStopIndex by remember { mutableStateOf<Int?>(null) }
     var routeStopActionIndex by remember { mutableStateOf<Int?>(null) }
     var pendingTeleport by remember { mutableStateOf<Coordinate?>(null) }
@@ -237,11 +239,11 @@ private fun PikminBeeScreen() {
     val roadLine by LocationStatus.geometry.collectAsState()
     val walkingProgress by LocationStatus.progress.collectAsState()
     val overlayVisible by LocationStatus.overlayVisible.collectAsState()
-    LaunchedEffect(flowerStops, flowerStart, mockPosition) {
-        flowerRoadPreview = emptyList()
+    // Only actual edits or loop changes clear a preview; GPS jitter is harmless.
+    LaunchedEffect(flowerStops, flowerStart, flowerLoop) {
+        PreparedRouteState.flowers.value = null
     }
-    // A changed route invalidates the preview; ordinary location jitter does not.
-    LaunchedEffect(roadStops) { preparedRoute = null }
+    LaunchedEffect(roadStops) { PreparedRouteState.route.value = null }
     LaunchedEffect(flowerStops) {
         // Any draft mutation invalidates the previous marker index.
         editingFlowerStopIndex = null
@@ -439,8 +441,12 @@ private fun PikminBeeScreen() {
     val routePreviewReady = preparedRoute?.isCurrent(
         mockPosition ?: phonePosition, roadStops
     ) == true
+    val flowerPreviewReady = preparedFlowers?.isCurrent(
+        mockPosition ?: flowerStart, flowerStops, flowerLoop
+    ) == true
     val displayedRoad = when (tab) {
-        ToolTab.FLOWERS -> if (activeFlowerWalk) roadLine else flowerRoadPreview
+        ToolTab.FLOWERS -> if (activeFlowerWalk) roadLine
+            else if (flowerPreviewReady) flowerRoadPreview else emptyList()
         ToolTab.ROUTE -> if (activeRouteWalk) roadLine
             else if (routePreviewReady) routeRoadPreview else emptyList()
         else -> emptyList()
