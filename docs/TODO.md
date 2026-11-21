@@ -1,5 +1,13 @@
 # PikminBee TODO
 
+## P0 · Restore floating controls and unify four mode tabs with swipe (21 Nov 2026)
+- [x] Keep the **floating expanded panel** as in the earlier screenshot: row 1 **start/pause/resume, stop, real GPS, virtual GPS**; row 2 **flower vision, speed, open app map, hide overlay**. Do not replace its quick actions with app-navigation tabs. Preserve original 2×4 vector-button layout and safe GPS service controls.
+- [x] Replace the **four icon-only shortcuts at the bottom of the expanded main-app detail sheet** with the exact same **瞬移／路徑／尋花／收藏** tabs as the bottom map dock. Reuse one Compose tab component so selected background, icons, labels and accessibility always match; announce current selection for TalkBack.
+- [x] Horizontal swipes within the expanded sheet's content or mode tab bar, and across the map's bottom mode dock, switch to the previous/next page at a bounded ≥72dp gesture threshold. Keep the sheet open, scroll new page to top; vertical sheet scrolling and the actual map's pan/pinch gestures remain independent.
+- [x] Add pure JVM regression tests for swipe direction, minimum threshold, page edges, and floating panel's exact former 2×4 action grouping.
+- [ ] Finish Kotlin compilation/JVM tests/Android Lint, checked DEV PR and POCO visual/gesture acceptance.
+- [ ] If a new UAT cycle is requested, follow normal semantic-version bump and fixed-signed staging workflow; do not modify production main.
+
 ## P0 · Same-private-network PC browser controller and single UAT build (21 Nov 2026)
 - [x] Add a **user-started, connected-device foreground LAN control service** that does not require mock GPS activation just to open the browser. No autonomous service restart after a process kill. Settings shows reachable phone IP:8765, fresh 6-digit PIN, phone-side approval/rejection, disable/revoke, and a notification stop action.
 - [x] Reuse the existing bounded local HTTP server, private-Wi-Fi-only listener, strict Host/Origin checks, PIN rate limit, 30-minute session, and local-only MapLibre bundle. No public port forwarding, VPN/Tailscale dependency, or new cloud backend.
@@ -13,7 +21,7 @@
 ## P0 · Route leg clarity, matching overlay navigation and optional integrations (21 Nov 2026)
 - [x] Correct route status semantics: `nextWaypoint=3` means the phone is walking from waypoint **2 → 3** (not “at 3/4”). Surface `activeLegLabel` consistently in the main mini-bar and floating summary, with start/arrival cases and JVM tests.
 - [x] Rename the arrow before Clear: **撤銷上一點** removes just the latest drafted waypoint; **清除全部** removes the entire draft. Avoid ambiguous icon-only destructive actions.
-- [x] Match the floating toolbar's lower four actions to the main dock: **瞬移 / 路徑 / 尋花 / 收藏**. They open the app in the selected tab without silently starting GPS; the upper four remain primary/stop/real GPS/virtual GPS. Walking-speed presets remain in route settings, not a floating shortcut. Long press the floating header bee to hide the overlay without stopping a walk.
+- [x] **Historical decision, superseded by current floating UX refinement:** PR #70 temporarily made the floating lower row mirror the main dock. The floating lower row now returns to **flower vision / speed / map / close** as requested, while the four app mode tabs are shown in the main detail sheet and map dock. Long-pressing the floating header still hides it without stopping the walk.
 - [x] Restore **跟隨系統** alongside Light/Dark, making SYSTEM the default for new users and preserving an existing user selection. Add JVM appearance policy tests.
 - [x] Health Connect stays **optional and collapsed** by default; offer separate explicit READ_STEPS for today’s total and WRITE_STEPS for exporting *manual virtual estimates*. Require a purpose-specific consent dialog before enabling the virtual export; do not silently turn on synchronisation on a permission grant. Add manage/revoke access and keep Android sensor fallback behind advanced settings.
 - [x] Wi-Fi panel is separated as an optional settings card; existing LAN server/pairing code inspected, design and unimplemented security gates recorded in `docs/WIFI_REMOTE_CONTROL_PLAN.md`.

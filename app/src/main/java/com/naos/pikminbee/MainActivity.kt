@@ -124,7 +124,6 @@ import com.naos.pikminbee.ui.NaosGlassMaterial
 import com.naos.pikminbee.ui.NaosVisualState
 import com.naos.pikminbee.ui.NaosDesignSystem
 import com.naos.pikminbee.ui.OverlayGuideDialog
-import com.naos.pikminbee.ui.OverlayQuickPolicy
 import com.naos.pikminbee.ui.LocalNaosVisualState
 import com.naos.pikminbee.ui.BeePermissions
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -968,19 +967,6 @@ private fun PikminBeeScreen() {
                     preparedFlowers?.maxSnapMetres ?: 0.0
                     else preparedRoute?.maxSnapMetres ?: 0.0,
                 routePlanning = planning,
-                onRestoreRealGps = {
-                    runCatching { context.startService(MockLocationService.command(
-                        context, MockLocationService.ACTION_REAL_GPS_OVERLAY)) }
-                        .onFailure { message = "無法恢復真實定位：${it.message}" }
-                },
-                onRestoreVirtualGps = {
-                    if (prefs.lastVirtualPosition() == null) message = "沒有可恢復的虛擬位置"
-                    else runCatching { context.startService(MockLocationService.command(
-                        context, MockLocationService.ACTION_VIRTUAL_GPS_OVERLAY)) }
-                        .onFailure { message = "無法恢復虛擬位置：${it.message}" }
-                },
-                onCycleSpeed = { chooseWalkSpeed(OverlayQuickPolicy.nextSpeed(speedPreset)) },
-                onFlowerVision = { tab = ToolTab.FLOWERS; openDetailsRequest++ },
                 onRouteUndo = {
                     if (walkPhase !in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)) {
                         when (tab) {
