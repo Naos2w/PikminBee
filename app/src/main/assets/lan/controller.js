@@ -1,13 +1,17 @@
 const $ = id => document.getElementById(id);
 let token = null;
 let mode = "TELEPORT";
-let chosen = {lat: 25.033, lon: 121.5654};
+const initialCenter = {lat: 25.033, lon: 121.5654};
+let chosen = null; // A map centre is not a user-selected teleport destination.
 let current = null;
 let latest = null;
 let connected = false;
 let refreshing = false;
 let map = null, maplibre = null;
-let positionMarker = null, originMarker = null, routeMarkers = [];
+let mapStyleReady = false, mapWatchdog = null, mapResizeObserver = null;
+let mapLastError = "";
+let positionMarker = null, originMarker = null, selectionMarker = null;
+let routeMarkers = [];
 let lastStopsKey = "", lastLineKey = "";
 const loops = {ROUTE: false, FLOWERS: true};
 const setMessage = value => { $("message").textContent = value; };
@@ -68,7 +72,7 @@ $("connect").addEventListener("click", async () => {
     $("pin").value = "";
     $("pairbox").style.display = "none";
     $("controls").classList.add("is-visible");
-    $("connection").textContent = "電腦已連線";
+    $("connection").textContent = "已連結手機";
     await refresh();
     await initialiseMap();
   } catch (error) {
@@ -80,13 +84,21 @@ $("pin").addEventListener("keydown", event => {
 });
 
 function showCoordinate(point) {
+  if (!Number.isFinite(point?.lat) || !Number.isFinite(point?.lon)) return;
   chosen = point;
   $("lat").value = point.lat.toFixed(6);
   $("lon").value = point.lon.toFixed(6);
   $("selected").textContent = "選取位置 · " + point.lat.toFixed(6) +
     ", " + point.lon.toFixed(6);
+  updateExternalMapLink(point);
 }
-showCoordinate(chosen);
+function updateExternalMapLink(point = chosen || latest?.position || initialCenter) {
+  const lat = Math.max(-85, Math.min(85, Number(point?.lat) || initialCenter.lat));
+  const lon = Math.max(-180, Math.min(180, Number(point?.lon) || initialCenter.lon));
+  $("external-map").href = "https://www.openstreetmap.org/#map=15/" +
+    lat.toFixed(5) + "/" + lon.toFixed(5);
+}
+updateExternalMapLink();
 
 function readCoordinate() {
   const latText = $("lat").value.trim(), lonText = $("lon").value.trim();
@@ -96,7 +108,10 @@ function readCoordinate() {
       lat < -90 || lat > 90 || lon < -180 || lon > 180) {
     throw Error("無效的緯度或經度");
   }
-  return {lat,lon};
+  const point = {lat,lon};
+  showCoordinate(point);
+  renderMap();
+  return point;
 }
 
 function selectMode(next) {
@@ -214,35 +229,126 @@ function styleUrl() {
     (styles.includes(choice) ? choice : "liberty");
   return "https://tiles.openfreemap.org/styles/" + name;
 }
-$("theme").addEventListener("change", () => {
+const MAP_LOAD_TIMEOUT_MS = 15000;
+let mapWaitTimer = null;
+function setMapStatus(state, description = "") {
+  $("map-status").dataset.state = state;
+  $("map-status").textContent = state === "ready" ? "地圖已載入" :
+    state === "error" ? "地圖載入失敗" : "正在載入地圖";
+  $("map-warning").classList.toggle("hidden", state !== "error");
+  if (state === "error") {
+    $("map-warning-text").textContent = description ||
+      "無法載入道路或地圖圖磚。可重試或改用手動輸入經緯度。";
+  }
+}
+function clearMapWait() {
+  if (mapWaitTimer !== null) clearTimeout(mapWaitTimer);
+  mapWaitTimer = null;
+}
+function armMapWait() {
+  clearMapWait();
+  setMapStatus("loading");
+  mapLastError = "";
+  mapWaitTimer = setTimeout(() => {
+    const ready = map && mapStyleReady && !mapLastError &&
+      (typeof map.areTilesLoaded !== "function" || map.areTilesLoaded());
+    if (!ready) {
+      setMapStatus("error",
+        "地圖樣式或圖磚沒有完成載入。請確認網路可連至 tiles.openfreemap.org，" +
+        "再試一次；如果手機可連上但仍空白，可能是瀏覽器渲染或資源授權問題。");
+    }
+  }, MAP_LOAD_TIMEOUT_MS);
+}
+function reloadMap() {
+  if (map) {
+    try { map.remove(); } catch (_) { /* partially initialised MapLibre */ }
+  }
+  if (mapResizeObserver) { mapResizeObserver.disconnect(); mapResizeObserver = null; }
+  clearMapWait();
+  map = null; mapStyleReady = false; mapLastError = "";
+  positionMarker = null; originMarker = null; selectionMarker = null;
+  routeMarkers = []; lastLineKey = ""; lastStopsKey = "";
+  $("map").replaceChildren();
+  initialiseMap();
+}
+$("retry-map").addEventListener("click", reloadMap);
+function chooseMapStyle() {
   localStorage.setItem(storeKey,$("theme").value);
-  if (map) map.setStyle(styleUrl());
-});
+  if (map) {
+    armMapWait();
+    mapStyleReady = false;
+    lastLineKey = "";
+    try { map.setStyle(styleUrl()); map.resize(); }
+    catch (error) { setMapStatus("error", "無法切換地圖樣式，請按重新載入地圖。"); }
+  }
+}
+$("theme").addEventListener("change", chooseMapStyle);
 darkQuery.addEventListener?.("change", () => {
-  if ($("theme").value === "auto" && map) map.setStyle(styleUrl());
+  if ($("theme").value === "auto" && map) chooseMapStyle();
 });
 async function initialiseMap() {
   if (map) return;
+  armMapWait();
   try {
     maplibre = await import("/vendor/maplibre-gl.mjs");
+    // Use the packaged MapLibre 6.18.0 worker. Auto-detection otherwise
+    // requests a missing /vendor/maplibre-gl-worker.mjs?v=6.18.0 file.
+    maplibre.setWorkerUrl("/vendor/maplibre-gl-worker.mjs");
+    const center = chosen || latest?.position || initialCenter;
     map = new maplibre.Map({
-      container:"map",style:styleUrl(),center:[chosen.lon,chosen.lat],
-      zoom:13.5,attributionControl:true
+      container:"map",style:styleUrl(),center:[center.lon,center.lat],
+      zoom:13.5,attributionControl:true,
+      // The PC has a larger viewport; preserve resources on slower phones.
+      maxTileCacheSize: 45
     });
     map.addControl(new maplibre.NavigationControl({showCompass:false}),"top-right");
     map.on("click", e => {
       showCoordinate({lat:e.lngLat.lat,lon:e.lngLat.lng});
       renderMap();
     });
-    map.on("style.load", () => { lastLineKey = ""; renderMap(); });
-    map.on("load", renderMap);
+    map.on("style.load", () => {
+      mapStyleReady = true;
+      lastLineKey = "";
+      renderMap();
+    });
+    map.on("error", event => {
+      const message = String(event?.error?.message || event?.message || "");
+      if (!/(tile|load|fetch|network|cors|glyph|sprite|worker|403|404|429|503|image)/i.test(message))
+        return;
+      mapLastError = message;
+      setMapStatus("error",
+        "地圖圖磚或字型載入失敗。請檢查手機網路與 OpenFreeMap 的連線，" +
+        "可按重新載入地圖；無法載入時仍可手動輸入座標。");
+    });
+    map.on("load", () => {
+      // Changing display:none to a grid/flex layout may require recalculation.
+      map.resize();
+      renderMap();
+      if (!mapLastError) { clearMapWait(); setMapStatus("ready"); }
+    });
+    map.on("idle", () => {
+      if (mapStyleReady && !mapLastError) {
+        clearMapWait();
+        setMapStatus("ready");
+      }
+    });
+    map.on("webglcontextlost", () => {
+      setMapStatus("error", "瀏覽器地圖繪圖中斷，請按重新載入地圖。");
+    });
+    if ("ResizeObserver" in window) {
+      mapResizeObserver = new ResizeObserver(() => { if (map) map.resize(); });
+      mapResizeObserver.observe($("map"));
+    }
+    requestAnimationFrame(() => { if (map) map.resize(); });
   } catch (error) {
-    $("map").textContent = "地圖無法載入。仍可手動輸入座標控制。";
-    setMessage("地圖資源無法載入：" + (error.message || "未知原因"));
+    clearMapWait();
+    setMapStatus("error",
+      "無法啟動地圖元件，請檢查瀏覽器是否支援 WebGL，或改用手動輸入座標。");
+    setMessage("地圖初始化失敗：" + (error?.message || "未知原因"));
   }
 }
 function renderMap() {
-  if (!map || !map.loaded()) return;
+  if (!map) return;
   if (latest?.position) {
     const p = latest.position;
     if (!positionMarker) positionMarker = new maplibre.Marker({color:"#f2b858"})
@@ -255,6 +361,15 @@ function renderMap() {
       .setLngLat([origin.lon,origin.lat]).setPopup(new maplibre.Popup().setText("路線起點")).addTo(map);
     else originMarker.setLngLat([origin.lon,origin.lat]);
   } else if (originMarker) { originMarker.remove(); originMarker = null; }
+  if (chosen) {
+    if (!selectionMarker) selectionMarker = new maplibre.Marker({color:"#527887"})
+      .setLngLat([chosen.lon,chosen.lat])
+      .setPopup(new maplibre.Popup().setText("目前選取位置")).addTo(map);
+    else selectionMarker.setLngLat([chosen.lon,chosen.lat]);
+  } else if (selectionMarker) {
+    selectionMarker.remove();
+    selectionMarker = null;
+  }
 
   const stops = mode === "FLOWERS" ? (latest?.flowerStops || []) :
     mode === "ROUTE" ? (latest?.routeStops || []) : [];
@@ -272,7 +387,7 @@ function renderMap() {
   const road = active ? (latest?.geometry || []) :
     (latest?.previews?.[mode]?.geometry || []);
   const lineKey = mode + "|" + JSON.stringify(road);
-  if (lineKey === lastLineKey) return;
+  if (lineKey === lastLineKey || !mapStyleReady) return;
   const coords = road.map(point => [point.lon,point.lat]);
   const data = {type:"FeatureCollection",features:coords.length>=2?[{
     type:"Feature",properties:{},geometry:{type:"LineString",coordinates:coords}
@@ -351,6 +466,9 @@ function updateStatus() {
   $("status").textContent = (latest?.status || "尚未模擬定位") +
     (latest?.position ? " · " + latest.position.lat.toFixed(5) +
       ", " + latest.position.lon.toFixed(5) : "");
+  $("mobile-state").textContent = names[phase] || "手機待命";
+  $("mobile-steps").textContent = "本次估算 " + count + " 步";
+  updateExternalMapLink();
   if (latest?.note && /失敗|無法/.test(latest.note)) setMessage(latest.note);
 }
 async function refresh() {
@@ -374,8 +492,12 @@ async function refresh() {
   } finally { refreshing = false; }
 }
 $("follow").addEventListener("click", () => {
-  if (map && current) map.flyTo({center:[current.lon,current.lat],zoom:15});
-  else setMessage("手機尚未啟動模擬位置，可先從地圖選起點。");
+  if (!current) {
+    setMessage("手機尚未啟動模擬定位；可先在地圖選起點，或輸入經緯度。");
+    return;
+  }
+  if (map) map.flyTo({center:[current.lon,current.lat],zoom:15});
+  else setMessage("地圖未載入，仍可使用手機提供的座標或外部地圖。");
 });
 
 async function refreshSaved() {

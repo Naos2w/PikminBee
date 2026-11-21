@@ -1,5 +1,28 @@
 # PikminBee TODO
 
+## P0 · PC browser shows empty basemap after pairing (21 Nov 2026)
+- [x] Reproduce actual private-LAN web UI in a **loopback-only mock pairing harness** with strict production-equivalent CSP; Playwright showed a blank map despite OpenFreeMap style/TileJSON/sprites HTTP 200. The browser tried to load `/vendor/maplibre-gl-worker.mjs?v=6.18.0` (HTTP **404**) and logged `Worker failed to load`.
+- [x] Package the verified `maplibre-gl-worker.mjs` from the **exact official MapLibre GL 6.18.0 npm package** (current `.mjs` and CSS hashes match that package), serve it locally with the proper JavaScript MIME type and set its stable same-origin URL explicitly before creating `maplibre.Map`. Do not allow arbitrary query paths or external JS execution.
+- [x] Align restrictive CSP `img-src` with MapLibre requirements (`'self' data: blob:` + the existing OpenFreeMap host), retain `script-src 'self'`, safe Host/Origin, PIN pairing and no public port binding.
+- [x] Playwright repeat test with the revised loopback server: map status became **地圖已載入**, browser console reported **0 errors**, and style, vector tile PBF and glyph requests all returned HTTP 200. (Only nonfatal OpenFreeMap style-filter warnings remained.)
+- [x] Add explicit `map.error`, WebGL context-loss handling, 15s loading timeout, retry/re-initialise and external OpenStreetMap link. Never pretend a blank map is usable; manual coordinate input remains available.
+- [x] Mobile UX: reduce map height on small screens from 340px to 33svh within 240–330px, show first-screen live walk status/steps and clear tile-loading state, keep full-size desktop map, collapse explanatory text and distinguish the map view centre from a **user-selected** teleport coordinate.
+- [x] Add source/UI contract tests for the local worker hash, script route, CSP, error controls, mobile breakpoint and no route auto-start; include `scripts/lan_ui_preview.mjs` as a loopback-only UI smoke harness (no real pairing, GPS or public listener).
+- [x] MSI final verification passed: Kotlin compilation, **204/204 JVM unit tests**, Android Lint, Node syntax checks and `git diff --check`; loopback Playwright confirmed worker loads with zero browser errors, vector tiles/fonts HTTP 200 and responsive mobile map status.
+- [ ] Submit checked develop PR; after GitHub Android verification, promote as one new stable-signed UAT rather than a debug APK.
+- [ ] POCO + PC LAN acceptance: use the actual phone's private IP:8765 after PIN approval, verify map on Android Chrome/Edge and PC browser, style changes, zoom, map pick, manual coordinates, routing preview and route status, Wi-Fi/network loss and failure retry. ADB device was not connected during development.
+
+## P1 · Health Connect compact opt-in UX (21 Nov 2026)
+- [x] Screenshot review: former expanded UI repeated Health Connect aggregate / app-written estimate / all-time local estimate, technical READ_STEPS/WRITE_STEPS labels, permission notices and sensor explanations in one long card.
+- [x] Rebuild optional Health Connect section as two **at-a-glance metrics** (today's HC aggregate vs PikminBee manual estimates), one concise sync state, and independent READ today steps / opt-in WRITE estimates controls. The figures are not additive. No permission prompts or manual writes just from opening Settings.
+- [x] Default to compact summary, expand to manage consent, and reveal advanced diagnostics only on request (all-time estimate, underlying source, permission grants, pending/sync errors, local sensor fallback, permission management).
+- [x] Maintain existing consent dialog, current queue/worker logic and manual-entry metadata; preserve optional no-Health-Connect operation.
+- [x] Add pure JVM tests ensuring a write grant is not confused with sync opt-in, inaccessible daily figures are not shown, and immediate sync only appears for authorised opted-in pending work.
+- [x] MSI Kotlin compilation, **204/204** JVM unit tests (0 failures/errors/skipped) and Android Lint passed; no APK packaging.
+- [ ] Submit checked develop-only PR and require GitHub Android verify before squash merge.
+- [ ] POCO visual acceptance: light/dark theme, small screen, 23006/21077 independent counts, READ-only/WRITE-only/denied/revoked, pending queue/failure disclosure, optional sensor mode; verify no regression in background sync.
+- [ ] UAT APK only after release flow; no changes to main/production.
+
 ## P0 · Restore floating controls and unify four mode tabs with swipe (21 Nov 2026)
 - [x] Keep the **floating expanded panel** as in the earlier screenshot: row 1 **start/pause/resume, stop, real GPS, virtual GPS**; row 2 **flower vision, speed, open app map, hide overlay**. Do not replace its quick actions with app-navigation tabs. Preserve original 2×4 vector-button layout and safe GPS service controls.
 - [x] Replace the **four icon-only shortcuts at the bottom of the expanded main-app detail sheet** with the exact same **瞬移／路徑／尋花／收藏** tabs as the bottom map dock. Reuse one Compose tab component so selected background, icons, labels and accessibility always match; announce current selection for TalkBack.
