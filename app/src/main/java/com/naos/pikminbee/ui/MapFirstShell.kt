@@ -57,7 +57,7 @@ import androidx.compose.ui.unit.sp
  * The map owns the entire viewport. No navigation drawer, full-screen drag
  * detector, or BottomSheetScaffold over the map's gesture area. Only dedicated
  * controls consume touches. Glass captures the map's own idle screenshot,
- * never another app's pixels. Native failure falls back to frosted material.
+ * never another app's pixels. Uses opaque Compose controls for fluid map gestures.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -283,6 +283,8 @@ fun MapFirstShell(
             value = coordinateInput,
             onValueChange = onCoordinateChange,
             onTeleport = onCoordinateTeleport,
+            teleportEnabled = active == 0,
+            modeTitle = modeTitle,
             onHome = {
                 detailsOpen = false
                 onHome()
