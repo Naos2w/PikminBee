@@ -1,19 +1,31 @@
 package com.naos.pikminbee.domain
 
 /**
- * A road preview belongs to exactly one set of route stops and a nearby origin.
- * Small GPS jitter does not discard it, but a moved start or edited stop does.
- * The displayed preview geometry is also the geometry passed to playback.
+ * In-process preview. The exact routed geometry is used when playback starts.
+ * A moved waypoint, changed loop setting, or materially moved origin invalidates
+ * it. Small GPS jitter does not.
  */
 data class PreparedWalkingRoute(
     val origin: Coordinate,
     val stops: List<Coordinate>,
     val geometry: List<Coordinate>,
+    val loop: Boolean = false,
+    val snapMetres: List<Double> = emptyList(),
 ) {
-    init { require(geometry.size >= 2) }
+    init {
+        require(geometry.size >= 2)
+        require(snapMetres.all { it.isFinite() && it >= 0.0 })
+    }
 
-    fun isCurrent(currentOrigin: Coordinate?, currentStops: List<Coordinate>): Boolean =
-        currentOrigin != null &&
-            stops == currentStops &&
+    val maxSnapMetres: Double get() = snapMetres.maxOrNull() ?: 0.0
+    val originSnapMetres: Double get() = snapMetres.firstOrNull() ?: 0.0
+    val requiresSnapConfirmation: Boolean get() = maxSnapMetres > 40.0
+
+    fun isCurrent(
+        currentOrigin: Coordinate?,
+        currentStops: List<Coordinate>,
+        currentLoop: Boolean = loop,
+    ): Boolean =
+        currentOrigin != null && stops == currentStops && loop == currentLoop &&
             WalkingGeometry.distanceMeters(origin, currentOrigin) <= 30.0
 }

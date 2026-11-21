@@ -14,13 +14,14 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -154,15 +155,14 @@ fun BeePermissionWizard(
         }
     }
 
+    val palette = NaosDesignSystem.palette(LocalNaosVisualState.current.family, dark)
     Column(
         Modifier.fillMaxSize()
-            .background(Brush.verticalGradient(if (dark)
-                listOf(androidx.compose.ui.graphics.Color(0xFF142541),
-                    androidx.compose.ui.graphics.Color(0xFF0C152A))
-                else listOf(androidx.compose.ui.graphics.Color(0xFFDFEBFF),
-                    androidx.compose.ui.graphics.Color(0xFFF7FAFF))))
+            .background(palette.bg)
+            .statusBarsPadding()
+            .navigationBarsPadding()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 22.dp),
+            .padding(horizontal = 18.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(15.dp),
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -173,8 +173,8 @@ fun BeePermissionWizard(
             }
         }
         Text(
-            if (initial) "首次設定將逐項引導。必要權限完成後才能使用模擬定位；選配項可略過。"
-            else "重新確認裝置權限。這裡不會自行啟動定位或開啟系統權限。",
+            if (initial) "依序完成需要的權限，其他項目可略過。"
+            else "檢查裝置權限，不會自動啟動定位。",
             color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
             fontSize = 13.sp,
         )

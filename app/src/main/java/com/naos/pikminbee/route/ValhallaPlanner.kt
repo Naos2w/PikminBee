@@ -19,10 +19,21 @@ object ValhallaPlanner {
     // Valhalla may correlate a tap in a park or courtyard to the closest walkable edge.
     // Never silently choose an arbitrarily distant road.
     internal const val MAX_SNAP_METERS = 200.0
-    private val cache = LinkedHashMap<String, Pair<Long, List<Coordinate>>>()
+    /** Includes actual distance from each picked waypoint to the routed path. */
+    data class RoadPlan(
+        val geometry: List<Coordinate>,
+        val snapMetres: List<Double>,
+    ) {
+        val maxSnapMetres: Double get() = snapMetres.maxOrNull() ?: 0.0
+        val originSnapMetres: Double get() = snapMetres.firstOrNull() ?: 0.0
+    }
+
+    private val cache = LinkedHashMap<String, Pair<Long, RoadPlan>>()
     private var lastRequestMillis = 0L
 
-    suspend fun plan(points: List<Coordinate>): List<Coordinate> = withContext(Dispatchers.IO) {
+    suspend fun plan(points: List<Coordinate>): List<Coordinate> = planDetailed(points).geometry
+
+    suspend fun planDetailed(points: List<Coordinate>): RoadPlan = withContext(Dispatchers.IO) {
         if (points.size !in 2..16) throw RouteException("請選擇至少兩個、最多十六個路線點")
         if (WalkingGeometry.lengthMeters(points) > 40_000.0) throw RouteException("路線超過 40 公里")
         val key = points.joinToString("|") {
@@ -44,7 +55,7 @@ object ValhallaPlanner {
         val json = JSONObject().put("locations", locations)
             .put("costing", "pedestrian").put("directions_type", "none")
             .put("shape_format", "polyline6").put("units", "km").toString()
-        val result = parseResponse(post(json), points)
+        val result = parseDetailedResponse(post(json), points)
         synchronized(cache) {
             cache[key] = System.currentTimeMillis() to result
             while (cache.size > 8) cache.remove(cache.keys.first())
@@ -89,19 +100,28 @@ object ValhallaPlanner {
         }
     }
 
-    fun parseResponse(response: String, stops: List<Coordinate>): List<Coordinate> {
+    fun parseResponse(response: String, stops: List<Coordinate>): List<Coordinate> =
+        parseDetailedResponse(response, stops).geometry
+
+    fun parseDetailedResponse(response: String, stops: List<Coordinate>): RoadPlan {
         val body = JSONObject(response)
         val legs = body.optJSONObject("trip")?.optJSONArray("legs")
             ?: throw RouteException("道路服務未提供完整路線")
         if (legs.length() != stops.size - 1) throw RouteException("部分路點無法規劃道路")
         val result = ArrayList<Coordinate>()
+        val snapDistances = MutableList(stops.size) { 0.0 }
         repeat(legs.length()) { leg ->
             val vertices = decodePolyline6(legs.getJSONObject(leg).optString("shape"))
             if (vertices.size < 2) throw RouteException("路線缺少有效節點")
-            if (WalkingGeometry.distanceMeters(vertices.first(), stops[leg]) > MAX_SNAP_METERS ||
-                WalkingGeometry.distanceMeters(vertices.last(), stops[leg + 1]) > MAX_SNAP_METERS) {
+            val snapStart = WalkingGeometry.distanceMeters(vertices.first(), stops[leg])
+            val snapEnd = WalkingGeometry.distanceMeters(vertices.last(), stops[leg + 1])
+            if (snapStart > MAX_SNAP_METERS || snapEnd > MAX_SNAP_METERS) {
                 throw RouteException("附近 200 公尺內找不到可步行的道路或步道，請稍微調整路點")
             }
+            // At a junction, adjacent legs may snap differently. Show the
+            // larger measured offset instead of hiding the discrepancy.
+            snapDistances[leg] = maxOf(snapDistances[leg], snapStart)
+            snapDistances[leg + 1] = maxOf(snapDistances[leg + 1], snapEnd)
             vertices.forEach { point ->
                 if (result.isEmpty() || WalkingGeometry.distanceMeters(result.last(), point) > 0.30) {
                     result.add(point)
@@ -110,7 +130,7 @@ object ValhallaPlanner {
             }
         }
         if (result.size < 2) throw RouteException("無法產生步行路線")
-        return result
+        return RoadPlan(result, snapDistances)
     }
 
     /** Valhalla uses 6-decimal encoded polylines, not Google's 5-decimal default. */

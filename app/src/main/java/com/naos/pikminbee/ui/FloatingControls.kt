@@ -7,10 +7,8 @@ import android.content.Context
 import android.content.res.ColorStateList
 import androidx.compose.ui.graphics.toArgb
 import android.graphics.PixelFormat
-import android.graphics.Color
 import android.os.Build
 import android.graphics.drawable.GradientDrawable
-import android.graphics.drawable.LayerDrawable
 import android.graphics.drawable.RippleDrawable
 import android.view.Gravity
 import android.view.MotionEvent
@@ -31,6 +29,7 @@ import com.naos.pikminbee.vision.BloomVisionState
 import com.naos.pikminbee.vision.BloomCaptureService
 import android.widget.TextView
 import com.naos.pikminbee.data.AppPreferences
+import com.naos.pikminbee.data.PreparedRouteState
 import com.naos.pikminbee.data.MapAppearance
 import android.content.res.Configuration
 import com.naos.pikminbee.domain.WalkMode
@@ -200,36 +199,19 @@ class FloatingControls(
     private fun colors(): NaosPalette = NaosDesignSystem.palette(
         AppPreferences(context).naosThemeFamily(), isDark())
 
-    /** Cross-app overlays cannot sample another application's secure pixels. */
-    private fun glass() = GradientDrawable(
-        GradientDrawable.Orientation.TL_BR,
-        intArrayOf(
-            colors().surface.copy(alpha = if (isDark()) .86f else .83f).toArgb(),
-            colors().soft.copy(alpha = if (isDark()) .79f else .70f).toArgb(),
-            colors().surface.copy(alpha = if (isDark()) .88f else .82f).toArgb(),
-        ),
-    ).apply {
-        cornerRadius = dp(26).toFloat()
+    /** Opaque, light-weight matte surfaces. No backdrop sampling or blur. */
+    private fun glass() = GradientDrawable().apply {
+        cornerRadius = dp(22).toFloat()
+        setColor(colors().surface.toArgb())
         setStroke(dp(1).coerceAtLeast(1), colors().stroke.toArgb())
     }
 
-    /** A subtle lens rim around the lone bee logo, not a second status badge. */
-    private fun beeGlassRim() = LayerDrawable(arrayOf(
-        GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(
-            colors().surface.copy(alpha = if (isDark()) .67f else .57f).toArgb(),
-            colors().soft.copy(alpha = if (isDark()) .56f else .44f).toArgb(),
-        )).apply {
-            shape = GradientDrawable.OVAL
-            setStroke(dp(1).coerceAtLeast(1), if (isDark())
-                Color.argb(210, 245, 252, 255) else Color.argb(210, 255, 255, 255))
-        },
-        GradientDrawable().apply {
-            shape = GradientDrawable.OVAL
-            setColor(Color.TRANSPARENT)
-            setStroke(dp(1).coerceAtLeast(1),
-                colors().ink.copy(alpha = if (isDark()) .32f else .38f).toArgb())
-        },
-    )).apply { setLayerInset(1, dp(2), dp(2), dp(2), dp(2)) }
+    /** The original outline bee with a visible but inexpensive circular rim. */
+    private fun beeGlassRim() = GradientDrawable().apply {
+        shape = GradientDrawable.OVAL
+        setColor(colors().surface.toArgb())
+        setStroke(dp(2).coerceAtLeast(1), colors().stroke.toArgb())
+    }
 
     private fun softButtonBackground() = GradientDrawable().apply {
         cornerRadius = dp(14).toFloat()
@@ -254,28 +236,38 @@ class FloatingControls(
         else sendAction(START_FLOWERS)
     }
 
-    /** One dynamic start/pause/resume action; never teleport as a side effect. */
+    /** Main and overlay use the same prepared road, never an unreviewed draft. */
     private fun performQuickAction() {
         when (OverlayQuickPolicy.primary(lastPhase)) {
             OverlayPrimaryState.PAUSE -> sendAction(PAUSE)
             OverlayPrimaryState.RESUME -> sendAction(RESUME)
             OverlayPrimaryState.START -> {
                 val prefs = AppPreferences(context)
-                val route = prefs.routeDraft().isNotEmpty()
-                val flowers = prefs.flowerDraft().isNotEmpty()
+                val routeReady = PreparedRouteState.route.value?.stops ==
+                    prefs.routeDraft() && prefs.routeDraft().isNotEmpty()
+                val flowerReady = PreparedRouteState.flowers.value?.stops ==
+                    prefs.flowerDraft() && prefs.flowerDraft().isNotEmpty()
                 val requested = when {
-                    lastMode == WalkMode.ROUTE && route -> WalkMode.ROUTE
-                    lastMode == WalkMode.FLOWERS && flowers -> WalkMode.FLOWERS
-                    route && !flowers -> WalkMode.ROUTE
-                    flowers && !route -> WalkMode.FLOWERS
+                    lastMode == WalkMode.ROUTE && routeReady -> WalkMode.ROUTE
+                    lastMode == WalkMode.FLOWERS && flowerReady -> WalkMode.FLOWERS
+                    routeReady && !flowerReady -> WalkMode.ROUTE
+                    flowerReady && !routeReady -> WalkMode.FLOWERS
                     else -> null
                 }
-                if (requested == null) {
-                    val message = if (route && flowers) "請先在主 App 選擇路徑或尋花"
-                        else "請先在主 App 規劃路線"
-                    Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
-                    openMap()
-                } else onStartRouteOrFlowers(requested)
+                val preview = requested?.let { PreparedRouteState.get(it) }
+                when {
+                    requested == null -> {
+                        Toast.makeText(context, "請先在主 App 規劃並預覽道路",
+                            Toast.LENGTH_SHORT).show()
+                        openMap()
+                    }
+                    preview?.requiresSnapConfirmation == true -> {
+                        Toast.makeText(context, "吸附距離較大，請在主 App 確認",
+                            Toast.LENGTH_SHORT).show()
+                        openMap()
+                    }
+                    else -> onStartRouteOrFlowers(requested)
+                }
             }
         }
     }
@@ -339,8 +331,10 @@ class FloatingControls(
         if (root == null) return
         val prefs = AppPreferences(context)
         val primary = OverlayQuickPolicy.primary(lastPhase)
-        val routeReady = prefs.routeDraft().isNotEmpty()
-        val flowerReady = prefs.flowerDraft().isNotEmpty()
+        val routeReady = PreparedRouteState.route.value?.stops == prefs.routeDraft() &&
+            prefs.routeDraft().isNotEmpty()
+        val flowerReady = PreparedRouteState.flowers.value?.stops == prefs.flowerDraft() &&
+            prefs.flowerDraft().isNotEmpty()
         val visibleMode = lastMode ?: when {
             routeReady && !flowerReady -> WalkMode.ROUTE
             flowerReady && !routeReady -> WalkMode.FLOWERS
@@ -352,10 +346,11 @@ class FloatingControls(
                 "尋花行走中" else "路徑行走中"
             lastPhase == WalkPhase.PAUSED -> "已暫停"
             lastPhase == WalkPhase.PARKED -> "已停止 · 原地停留"
-            lastStatus.contains("失敗") || lastStatus.contains("無法") -> lastStatus.take(25)
+            lastStatus.contains("失敗") || lastStatus.contains("無法") ||
+                lastStatus.contains("請先") || lastStatus.contains("確認") -> lastStatus.take(32)
             visibleMode != null -> "待命 · ${if (visibleMode == WalkMode.FLOWERS) "尋花" else "路徑"}已就緒"
             routeReady && flowerReady -> "待命 · 請在主 App 選擇模式"
-            else -> "待命 · 請先在主 App 規劃"
+            else -> "待命 · 請在主 App 預覽道路"
         }
         val progress = com.naos.pikminbee.location.LocationStatus.progress.value
         val journey = if (lastPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED) &&
@@ -637,7 +632,7 @@ class FloatingControls(
         expanded = !expanded
         root?.apply {
             background = if (expanded) glass() else null
-            elevation = if (expanded) dp(13).toFloat() else 0f
+            elevation = if (expanded) dp(6).toFloat() else 0f
             if (expanded) setPadding(dp(7), dp(5), dp(7), dp(5))
             else setPadding(0, 0, 0, 0)
         }

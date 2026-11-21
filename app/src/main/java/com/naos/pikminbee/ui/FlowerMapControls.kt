@@ -33,6 +33,7 @@ fun FlowerMapControls(
     selected: FlowerMapPick?,
     editingStopIndex: Int?,
     stops: List<Coordinate>,
+    canEdit: Boolean,
     foreground: Color,
     muted: Color,
     onAddSelected: () -> Unit,
@@ -46,11 +47,9 @@ fun FlowerMapControls(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
         Text("地圖選花 · 設定行走路線", fontWeight = FontWeight.Bold, color = foreground)
-        Text(
-            "點地圖選位置、點花點標記查看來源，或點既有路點標記進行編輯。" +
-                " 一切修改都需確認；匯入花點不是遊戲內已驗證的大花。",
-            color = muted, fontSize = 12.sp,
-        )
+        Text(if (canEdit) "選位置 → 加入路點 → 規劃道路 → 開始"
+            else "行走中無法編輯路點，請先停止",
+            color = muted, fontSize = 12.sp)
         Text(
             when {
                 usingMockStart && start != null -> "起點：目前模擬位置 ${start.label()}"
@@ -63,15 +62,14 @@ fun FlowerMapControls(
         if (editing != null) {
             Text("正在編輯第 ${editing + 1} 個路點", color = foreground,
                 fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-            Text("點地圖上的新位置或花點標記，再確認替換；其他路點不會變動。" +
-                " 編輯只影響草稿，已開始的行走路線須停止後重新規劃。",
+            Text("點地圖選新位置，再確認替換。",
                 color = muted, fontSize = 12.sp)
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 TextButton(onClick = onCancelStopEdit) { Text("取消路點編輯", fontSize = 12.sp) }
-                TextButton(onClick = { onRemoveStop(editing) }) {
+                TextButton(onClick = { onRemoveStop(editing) }, enabled = canEdit) {
                     Text("移除此路點", color = Color(0xFFC45A4A), fontSize = 12.sp)
                 }
             }
@@ -88,7 +86,7 @@ fun FlowerMapControls(
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Button(
                     onClick = if (editing != null) onReplaceStop else onAddSelected,
-                    enabled = start != null && (editing != null || stops.size < 14),
+                    enabled = canEdit && start != null && (editing != null || stops.size < 14),
                     modifier = Modifier.weight(1f),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Color(0xFF9F5E0C),
@@ -96,7 +94,7 @@ fun FlowerMapControls(
                     ),
                 ) { Text(if (editing != null) "替換第 ${editing + 1} 點" else "加入尋花路線", fontSize = 12.sp) }
                 OutlinedButton(
-                    onClick = onUseAsStart, enabled = !usingMockStart && editing == null,
+                    onClick = onUseAsStart, enabled = canEdit && !usingMockStart && editing == null,
                     modifier = Modifier.weight(1f),
                 ) { Text("設為起點", fontSize = 12.sp) }
             }
@@ -112,6 +110,7 @@ fun FlowerMapControls(
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     TextButton(
                         onClick = { onSelectStop(index) },
+                        enabled = canEdit,
                         modifier = Modifier.weight(1f),
                     ) {
                         Text(
@@ -122,14 +121,14 @@ fun FlowerMapControls(
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
-                    TextButton(enabled = index > 0, onClick = { onMoveStop(index, -1) },
+                    TextButton(enabled = canEdit && index > 0, onClick = { onMoveStop(index, -1) },
                         modifier = Modifier.semantics { contentDescription = "第 ${index + 1} 點上移" }) {
                         Text("↑", fontSize = 14.sp)
                     }
-                    TextButton(enabled = index < stops.lastIndex,
+                    TextButton(enabled = canEdit && index < stops.lastIndex,
                         onClick = { onMoveStop(index, 1) },
                         modifier = Modifier.semantics { contentDescription = "第 ${index + 1} 點下移" }) { Text("↓", fontSize = 14.sp) }
-                    TextButton(onClick = { onRemoveStop(index) }) {
+                    TextButton(onClick = { onRemoveStop(index) }, enabled = canEdit) {
                         Text("移除", fontSize = 11.sp)
                     }
                 }

@@ -57,7 +57,7 @@ import androidx.compose.ui.unit.sp
  * The map owns the entire viewport. No navigation drawer, full-screen drag
  * detector, or BottomSheetScaffold over the map's gesture area. Only dedicated
  * controls consume touches. Glass captures the map's own idle screenshot,
- * never another app's pixels. Native failure falls back to frosted material.
+ * never another app's pixels. Uses opaque Compose controls for fluid map gestures.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -92,6 +92,7 @@ fun MapFirstShell(
     routePaused: Boolean = false,
     routePreviewReady: Boolean = false,
     routePlanning: Boolean = false,
+    routeSnapMetres: Double = 0.0,
     onRestoreRealGps: () -> Unit,
     onRestoreVirtualGps: () -> Unit,
     onCycleSpeed: () -> Unit,
@@ -113,7 +114,8 @@ fun MapFirstShell(
     val labels = listOf("瞬移", "路徑", "尋花", "收藏")
     val active = modeIndex.coerceIn(0, 3)
     // Ongoing walking must remain controllable even after changing map tabs.
-    val showQuick = (modeIndex == 1 && routeStopsCount > 0) || routeActive || flowerActive
+    val showQuick = (modeIndex == 1 && routeStopsCount > 0) ||
+        (modeIndex == 2 && flowerStopsCount > 0) || routeActive || flowerActive
 
     Box(Modifier.fillMaxSize().background(p.bg)) {
         mapContent()
@@ -184,7 +186,12 @@ fun MapFirstShell(
 
         if (showQuick) {
             val activeWalking = routeActive || flowerActive
-            val modeStopsCount = if (modeIndex == 2) flowerStopsCount else routeStopsCount
+            val modeStopsCount = when {
+                flowerActive -> flowerStopsCount
+                routeActive -> routeStopsCount
+                modeIndex == 2 -> flowerStopsCount
+                else -> routeStopsCount
+            }
             MapGlass(
                 dark,
                 Modifier.align(Alignment.BottomCenter).navigationBarsPadding()
@@ -213,7 +220,7 @@ fun MapFirstShell(
                     }
                     Surface(
                         onClick = if (activeWalking) onRouteStop else onRouteUndo,
-                        enabled = activeWalking || modeStopsCount > 0,
+                        enabled = activeWalking || (!routePlanning && modeStopsCount > 0),
                         shape = RoundedCornerShape(13.dp),
                         color = if (activeWalking)
                             Color(BeeActionColors.STOP_RED) else p.soft,
@@ -230,7 +237,7 @@ fun MapFirstShell(
                     }
                     Surface(
                         onClick = onRoutePrimary,
-                        enabled = activeWalking || !routePlanning,
+                        enabled = activeWalking || (!routePlanning && modeStopsCount > 0),
                         shape = RoundedCornerShape(13.dp),
                         color = if (activeWalking && !routePaused) Color(BeeActionColors.PAUSE_AMBER)
                             else if (!activeWalking && !routePreviewReady) p.accent
@@ -251,6 +258,14 @@ fun MapFirstShell(
                                 fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                         }
                     }
+                }
+                if (!activeWalking && routePreviewReady && routeSnapMetres > 40.0) {
+                    Text("路點最大吸附 ${routeSnapMetres.toInt()} 公尺 · 開始前會再次確認",
+                        color = p.muted, fontSize = 11.sp, maxLines = 1)
+                } else if (!activeWalking &&
+                    (message.contains("失敗") || message.contains("無法"))) {
+                    Text(message, color = Color(BeeActionColors.STOP_RED),
+                        fontSize = 11.sp, maxLines = 2)
                 }
                 if (activeWalking && walkingProgress.totalMetres > 0.0) {
                     val total = walkingProgress.totalMetres / 1000.0
@@ -283,6 +298,8 @@ fun MapFirstShell(
             value = coordinateInput,
             onValueChange = onCoordinateChange,
             onTeleport = onCoordinateTeleport,
+            teleportEnabled = active == 0,
+            modeTitle = modeTitle,
             onHome = {
                 detailsOpen = false
                 onHome()
