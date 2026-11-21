@@ -31,6 +31,7 @@ import com.naos.pikminbee.vision.BloomVisionState
 import com.naos.pikminbee.vision.BloomCaptureService
 import android.widget.TextView
 import com.naos.pikminbee.data.AppPreferences
+import com.naos.pikminbee.data.PreparedRouteState
 import com.naos.pikminbee.data.MapAppearance
 import android.content.res.Configuration
 import com.naos.pikminbee.domain.WalkMode
@@ -254,28 +255,38 @@ class FloatingControls(
         else sendAction(START_FLOWERS)
     }
 
-    /** One dynamic start/pause/resume action; never teleport as a side effect. */
+    /** Main and overlay use the same prepared road, never an unreviewed draft. */
     private fun performQuickAction() {
         when (OverlayQuickPolicy.primary(lastPhase)) {
             OverlayPrimaryState.PAUSE -> sendAction(PAUSE)
             OverlayPrimaryState.RESUME -> sendAction(RESUME)
             OverlayPrimaryState.START -> {
                 val prefs = AppPreferences(context)
-                val route = prefs.routeDraft().isNotEmpty()
-                val flowers = prefs.flowerDraft().isNotEmpty()
+                val routeReady = PreparedRouteState.route.value?.stops ==
+                    prefs.routeDraft() && prefs.routeDraft().isNotEmpty()
+                val flowerReady = PreparedRouteState.flowers.value?.stops ==
+                    prefs.flowerDraft() && prefs.flowerDraft().isNotEmpty()
                 val requested = when {
-                    lastMode == WalkMode.ROUTE && route -> WalkMode.ROUTE
-                    lastMode == WalkMode.FLOWERS && flowers -> WalkMode.FLOWERS
-                    route && !flowers -> WalkMode.ROUTE
-                    flowers && !route -> WalkMode.FLOWERS
+                    lastMode == WalkMode.ROUTE && routeReady -> WalkMode.ROUTE
+                    lastMode == WalkMode.FLOWERS && flowerReady -> WalkMode.FLOWERS
+                    routeReady && !flowerReady -> WalkMode.ROUTE
+                    flowerReady && !routeReady -> WalkMode.FLOWERS
                     else -> null
                 }
-                if (requested == null) {
-                    val message = if (route && flowers) "請先在主 App 選擇路徑或尋花"
-                        else "請先在主 App 規劃路線"
-                    Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
-                    openMap()
-                } else onStartRouteOrFlowers(requested)
+                val preview = requested?.let { PreparedRouteState.get(it) }
+                when {
+                    requested == null -> {
+                        Toast.makeText(context, "請先在主 App 規劃並預覽道路",
+                            Toast.LENGTH_SHORT).show()
+                        openMap()
+                    }
+                    preview?.requiresSnapConfirmation == true -> {
+                        Toast.makeText(context, "吸附距離較大，請在主 App 確認",
+                            Toast.LENGTH_SHORT).show()
+                        openMap()
+                    }
+                    else -> onStartRouteOrFlowers(requested)
+                }
             }
         }
     }
@@ -339,8 +350,10 @@ class FloatingControls(
         if (root == null) return
         val prefs = AppPreferences(context)
         val primary = OverlayQuickPolicy.primary(lastPhase)
-        val routeReady = prefs.routeDraft().isNotEmpty()
-        val flowerReady = prefs.flowerDraft().isNotEmpty()
+        val routeReady = PreparedRouteState.route.value?.stops == prefs.routeDraft() &&
+            prefs.routeDraft().isNotEmpty()
+        val flowerReady = PreparedRouteState.flowers.value?.stops == prefs.flowerDraft() &&
+            prefs.flowerDraft().isNotEmpty()
         val visibleMode = lastMode ?: when {
             routeReady && !flowerReady -> WalkMode.ROUTE
             flowerReady && !routeReady -> WalkMode.FLOWERS
@@ -352,10 +365,11 @@ class FloatingControls(
                 "尋花行走中" else "路徑行走中"
             lastPhase == WalkPhase.PAUSED -> "已暫停"
             lastPhase == WalkPhase.PARKED -> "已停止 · 原地停留"
-            lastStatus.contains("失敗") || lastStatus.contains("無法") -> lastStatus.take(25)
+            lastStatus.contains("失敗") || lastStatus.contains("無法") ||
+                lastStatus.contains("請先") || lastStatus.contains("確認") -> lastStatus.take(32)
             visibleMode != null -> "待命 · ${if (visibleMode == WalkMode.FLOWERS) "尋花" else "路徑"}已就緒"
             routeReady && flowerReady -> "待命 · 請在主 App 選擇模式"
-            else -> "待命 · 請先在主 App 規劃"
+            else -> "待命 · 請在主 App 預覽道路"
         }
         val progress = com.naos.pikminbee.location.LocationStatus.progress.value
         val journey = if (lastPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED) &&
