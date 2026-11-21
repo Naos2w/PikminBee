@@ -538,8 +538,40 @@ private fun PikminBeeScreen() {
         }
     }
 
-    /** Main map and route sheet share the same preview-then-start command. */
-    fun handleRoutePrimary() {
+    var confirmStartMode by remember { mutableStateOf<WalkMode?>(null) }
+
+    fun startPreparedWalk(mode: WalkMode) {
+        val ready = PreparedRouteState.get(mode)
+        val start = if (mode == WalkMode.FLOWERS) mockPosition ?: flowerStart
+            else mockPosition ?: phonePosition
+        val stops = if (mode == WalkMode.FLOWERS) flowerStops else roadStops
+        val loop = mode == WalkMode.FLOWERS && flowerLoop
+        if (ready == null || !ready.isCurrent(start, stops, loop)) {
+            message = "路點或起點已變更，請先重新規劃"
+            return
+        }
+        when {
+            ContextCompat.checkSelfPermission(context,
+                Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED -> {
+                message = "開始行走前請授予精確定位權限"
+                requestLocation.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+            }
+            !BeePermissions.inspect(context).selectedMockApp ->
+                message = "請先將 PikminBee 設為模擬位置應用程式"
+            else -> runCatching {
+                ContextCompat.startForegroundService(context,
+                    MockLocationService.routeIntent(context, ready.geometry,
+                        WalkSpeedState.selected.value.metresPerSecond, mode, loop))
+            }.onSuccess {
+                message = "已使用預覽道路開始${if (mode == WalkMode.FLOWERS) "尋花" else "路徑"}行走"
+            }.onFailure {
+                message = "無法開始行走：" + (it.message ?: "請檢查系統權限")
+            }
+        }
+    }
+
+    /** One preview → confirm → start/pause/resume command for both main modes. */
+    fun handleJourneyPrimary() {
         if (walkPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)) {
             runCatching {
                 context.startService(MockLocationService.command(context,
@@ -549,55 +581,64 @@ private fun PikminBeeScreen() {
             }.onFailure { message = "無法切換行走狀態：${it.message}" }
             return
         }
-        if (tab != ToolTab.ROUTE) {
-            message = "請先在路徑模式規劃道路"
-            return
+        val mode = when (tab) {
+            ToolTab.ROUTE -> WalkMode.ROUTE
+            ToolTab.FLOWERS -> WalkMode.FLOWERS
+            else -> {
+                message = "請先切換到路徑或尋花模式"
+                return
+            }
         }
-        val origin = mockPosition ?: phonePosition
+        val origin = if (mode == WalkMode.FLOWERS) mockPosition ?: flowerStart
+            else mockPosition ?: phonePosition
+        val stops = if (mode == WalkMode.FLOWERS) flowerStops else roadStops
+        val loop = mode == WalkMode.FLOWERS && flowerLoop
+        val ready = PreparedRouteState.get(mode)
         when {
             planning -> Unit
-            origin == null -> message = "尚無有效起點，請先取得手機定位"
-            roadStops.isEmpty() -> message = "請先點地圖加入第 1 個目的地"
-            routePreviewReady -> {
-                val ready = preparedRoute ?: return
-                when {
-                    ContextCompat.checkSelfPermission(context,
-                        Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED ->
-                        message = "請先授予精確位置權限"
-                    !BeePermissions.inspect(context).selectedMockApp ->
-                        message = "請先設定 PikminBee 為 Android 模擬位置應用程式"
-                    else -> runCatching {
-                        ContextCompat.startForegroundService(context,
-                            MockLocationService.routeIntent(context, ready.geometry,
-                                WalkSpeedState.selected.value.metresPerSecond,
-                                WalkMode.ROUTE, loop = false))
-                    }.onSuccess {
-                        message = "已使用預覽道路開始行走"
-                    }.onFailure {
-                        message = "無法開始行走：" + (it.message ?: "請確認權限")
-                    }
-                }
+            origin == null -> message = "請先取得定位或在地圖設定起點"
+            stops.isEmpty() -> message = "請先在地圖選取至少一個路點"
+            ready?.isCurrent(origin, stops, loop) == true -> {
+                if (ready.requiresSnapConfirmation) confirmStartMode = mode
+                else startPreparedWalk(mode)
             }
             else -> {
-                val requestedStops = roadStops.toList()
+                val capturedStops = stops.toList()
+                val capturedOrigin = origin
+                val capturedLoop = loop
                 planning = true
-                message = "正在規劃步行道路…"
+                message = "正在規劃可步行道路…"
                 work.launch {
                     try {
-                        val geometry = ValhallaPlanner.plan(listOf(origin) + requestedStops)
-                        val latestOrigin = mockPosition ?: phonePosition
-                        if (roadStops != requestedStops || latestOrigin == null ||
-                            WalkingGeometry.distanceMeters(latestOrigin, origin) > 30.0) {
-                            message = "規劃期間起點或路點已改變，請重新規劃"
+                        val points = if (mode == WalkMode.FLOWERS) {
+                            FlowerMapDraft.routePoints(capturedOrigin, capturedStops, capturedLoop)
+                        } else listOf(capturedOrigin) + capturedStops
+                        val plan = ValhallaPlanner.planDetailed(points)
+                        val currentStops = if (mode == WalkMode.FLOWERS) flowerStops else roadStops
+                        val currentOrigin = if (mode == WalkMode.FLOWERS)
+                            mockPosition ?: flowerStart else mockPosition ?: phonePosition
+                        if (currentOrigin == null || currentStops != capturedStops ||
+                            (mode == WalkMode.FLOWERS && flowerLoop != capturedLoop) ||
+                            WalkingGeometry.distanceMeters(capturedOrigin, currentOrigin) > 30.0) {
+                            message = "規劃期間路點或起點已變更，請重新規劃"
                         } else {
-                            preparedRoute = PreparedWalkingRoute(origin, requestedStops, geometry)
+                            PreparedRouteState.set(mode, PreparedWalkingRoute(
+                                origin = capturedOrigin,
+                                stops = capturedStops,
+                                geometry = plan.geometry,
+                                loop = capturedLoop,
+                                snapMetres = plan.snapMetres,
+                            ))
                             mapExplore = true
-                            moveMapCamera(MapCameraGeometry.forRoute(origin, requestedStops, geometry))
+                            moveMapCamera(MapCameraGeometry.forRoute(
+                                capturedOrigin, capturedStops, plan.geometry))
                             closeDetailsRequest++
-                            message = "已規劃道路，請確認路線後再按「開始行走」"
+                            message = if (plan.maxSnapMetres > 40.0)
+                                "路線已預覽，最近道路最大偏移 ${plan.maxSnapMetres.toInt()} 公尺，開始前須確認"
+                            else "路線已預覽，再按一次即可開始行走"
                         }
-                    } catch (e: Exception) {
-                        message = "道路規劃失敗：" + (e.message ?: "請檢查網路與路點")
+                    } catch (error: Exception) {
+                        message = "道路規劃失敗：" + (error.message ?: "請檢查網路或路點")
                     } finally {
                         planning = false
                     }
