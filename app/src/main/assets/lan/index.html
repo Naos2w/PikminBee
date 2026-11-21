@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="referrer" content="no-referrer">
 <title>PikminBee · 電腦控制</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 64 64%27%3E%3Crect width=%2764%27 height=%2764%27 rx=%2716%27 fill=%27%23101b22%27/%3E%3Ccircle cx=%2732%27 cy=%2735%27 r=%2717%27 fill=%27%23e8b76c%27/%3E%3Cpath d=%27M22 31h20M23 39h18%27 stroke=%27%23101b22%27 stroke-width=%275%27/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/vendor/maplibre-gl.css">
 <style>
 :root {
@@ -110,6 +111,8 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
  .layout{display:flex;flex-direction:column;gap:11px}
  #controls.is-visible{display:flex}
  .glass{padding:13px;border-radius:21px;width:100%}
+ /* backdrop-filter makes fixed descendants relative to the panel in Chromium. */
+ .control-panel{-webkit-backdrop-filter:none;backdrop-filter:none}
  #map{height:clamp(290px,45svh,500px)}
  .head{align-items:center;gap:8px;margin-bottom:12px}
  h1{font-size:21px}
