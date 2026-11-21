@@ -182,6 +182,8 @@ fun CoordinateTopBar(
     onValueChange: (String) -> Unit,
     onTeleport: () -> Unit,
     onHome: () -> Unit,
+    teleportEnabled: Boolean = true,
+    modeTitle: String = "瞬移",
     dark: Boolean,
     modifier: Modifier = Modifier,
     backdrop: Bitmap? = null,
@@ -189,7 +191,7 @@ fun CoordinateTopBar(
     val palette = NaosDesignSystem.palette(LocalNaosVisualState.current.family, dark)
     MapGlass(dark, modifier, backdrop) {
         Row(
-            Modifier.fillMaxWidth().heightIn(min = 66.dp).padding(start = 14.dp, end = 9.dp),
+            Modifier.fillMaxWidth().heightIn(min = 58.dp).padding(start = 12.dp, end = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
@@ -199,15 +201,26 @@ fun CoordinateTopBar(
                     .semantics { contentDescription = "回到目前定位並收起選單" },
             ) { NaosBeeHomeIcon(palette.accent) }
             Column(Modifier.weight(1f)) {
-                Text("經緯度 · 點地圖選取", fontSize = 11.sp, color = palette.muted)
+                Text(if (teleportEnabled) "瞬移 · 選取座標" else "$modeTitle · 地圖選點",
+                    fontSize = 11.sp, color = palette.muted)
                 BasicTextField(
                     value = value,
                     onValueChange = { onValueChange(it.take(65)) },
+                    readOnly = !teleportEnabled,
+                    decorationBox = { inner ->
+                        Box {
+                            if (value.isEmpty()) {
+                                Text(if (teleportEnabled) "點地圖或輸入座標" else "點地圖選擇位置",
+                                    color = palette.muted, fontSize = 14.sp)
+                            }
+                            inner()
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth()
                         .semantics { contentDescription = "輸入緯度、經度" },
                     singleLine = true,
                     textStyle = androidx.compose.ui.text.TextStyle(
-                        fontSize = 17.sp, fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
                         color = palette.ink,
                     ),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
@@ -215,18 +228,20 @@ fun CoordinateTopBar(
                     cursorBrush = androidx.compose.ui.graphics.SolidColor(palette.accent),
                 )
             }
-            Box(
-                modifier = Modifier.size(width = 52.dp, height = 49.dp)
-                    .clip(RoundedCornerShape(15.dp)).background(palette.accent),
-                contentAlignment = Alignment.Center,
-            ) {
-                IconButton(
-                    onClick = onTeleport,
-                    modifier = Modifier.matchParentSize()
-                        .semantics { contentDescription = "立即瞬移到輸入的座標" },
+            if (teleportEnabled) {
+                Box(
+                    modifier = Modifier.size(width = 48.dp, height = 47.dp)
+                        .clip(RoundedCornerShape(14.dp)).background(palette.accent),
+                    contentAlignment = Alignment.Center,
                 ) {
-                    Text("↗", fontSize = 26.sp, fontWeight = FontWeight.Bold,
-                        color = palette.onAccent)
+                    IconButton(
+                        onClick = onTeleport,
+                        modifier = Modifier.matchParentSize()
+                            .semantics { contentDescription = "瞬移到所選座標" },
+                    ) {
+                        Text("↗", fontSize = 24.sp, fontWeight = FontWeight.SemiBold,
+                            color = palette.onAccent)
+                    }
                 }
             }
         }
