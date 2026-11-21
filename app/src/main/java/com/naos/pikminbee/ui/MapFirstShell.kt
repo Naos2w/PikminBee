@@ -3,8 +3,6 @@ package com.naos.pikminbee.ui
 import android.graphics.Bitmap
 import com.naos.pikminbee.domain.WalkingProgressSnapshot
 import java.util.Locale
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -96,10 +94,6 @@ fun MapFirstShell(
     routePreviewReady: Boolean = false,
     routePlanning: Boolean = false,
     routeSnapMetres: Double = 0.0,
-    onRestoreRealGps: () -> Unit,
-    onRestoreVirtualGps: () -> Unit,
-    onCycleSpeed: () -> Unit,
-    onFlowerVision: () -> Unit,
     onRouteUndo: () -> Unit = {},
     onRoutePrimary: () -> Unit = {},
     onRouteStop: () -> Unit = {},
@@ -112,9 +106,13 @@ fun MapFirstShell(
         if (closeDetailsRequest > 0) detailsOpen = false
     }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val detailsScrollState = rememberScrollState()
+    LaunchedEffect(modeIndex, detailsOpen) {
+        // A page change inside the open details sheet starts at the top.
+        if (detailsOpen) detailsScrollState.scrollTo(0)
+    }
     val p = NaosDesignSystem.palette(LocalNaosVisualState.current.family, dark)
     val heightDp = LocalConfiguration.current.screenHeightDp
-    val labels = listOf("瞬移", "路徑", "尋花", "收藏")
     val active = modeIndex.coerceIn(0, 3)
     // Ongoing walking must remain controllable even after changing map tabs.
     val showQuick = (modeIndex == 1 && routeStopsCount > 0) ||
@@ -157,33 +155,11 @@ fun MapFirstShell(
                             .background(p.muted.copy(alpha = .6f), RoundedCornerShape(4.dp))
                     )
                 }
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    labels.forEachIndexed { i, label ->
-                        val selected = i == active
-                        val tabColor by animateColorAsState(
-                            if (selected) p.accent else Color.Transparent,
-                            tween(NaosDesignSystem.FAST_MS), label = "tabColour")
-                        Surface(
-                            modifier = Modifier.weight(1f).height(55.dp),
-                            onClick = { onMode(i) },
-                            shape = RoundedCornerShape(15.dp),
-                            color = tabColor,
-                            contentColor = if (selected) p.onAccent else p.ink,
-                        ) {
-                            Column(
-                                Modifier.fillMaxSize(),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.Center,
-                                ) {
-                                NaosModeIcon(i, if (selected) p.onAccent else p.ink)
-                                Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                            }
-                        }
-                    }
-                }
+                MapModeTabs(
+                    active = active,
+                    palette = p,
+                    onMode = onMode,
+                )
             }
         }
 
@@ -396,31 +372,21 @@ fun MapFirstShell(
             Column(
                 Modifier.fillMaxWidth()
                     .heightIn(max = (heightDp - 230).coerceIn(175, 580).dp)
-                    .verticalScroll(rememberScrollState())
+                    // Horizontal swipe switches the sheet's functional page.
+                    // Map swipes are left to the map surface outside this sheet.
+                    .swipeModes(active, onMode)
+                    .verticalScroll(detailsScrollState)
                     .padding(horizontal = 17.dp, vertical = 5.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) { modeContent() }
-            // Compact icon-only shortcuts; TalkBack still reads every action.
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                listOf(
-                    Triple(NaosActionGlyph.REAL_GPS, "還原真實 GPS", onRestoreRealGps),
-                    Triple(NaosActionGlyph.VIRTUAL_GPS, "恢復上次虛擬位置", onRestoreVirtualGps),
-                    Triple(NaosActionGlyph.FLOWER, "開啟花朵辨識", onFlowerVision),
-                    Triple(NaosActionGlyph.SPEED,
-                        "切換速度，目前 ${routeSpeedKmh} km/h", onCycleSpeed),
-                ).forEach { (glyph, label, action) ->
-                    IconButton(
-                        onClick = action,
-                        modifier = Modifier.size(48.dp)
-                            .background(p.soft, RoundedCornerShape(13.dp))
-                            .semantics { contentDescription = label },
-                    ) { NaosActionIcon(glyph, p.ink) }
-                }
-            }
+            // Same four pages, visual selection and icon labels as the main dock.
+            MapModeTabs(
+                active = active,
+                palette = p,
+                onMode = onMode,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 3.dp),
+                height = 64.dp,
+            )
             Spacer(Modifier.height(8.dp))
         }
     }
