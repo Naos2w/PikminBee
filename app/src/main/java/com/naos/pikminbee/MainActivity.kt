@@ -660,6 +660,7 @@ private fun PikminBeeScreen() {
         }
     }
     var coordinateInput by remember { mutableStateOf("") }
+    var coordinateInputDismissToken by remember { mutableIntStateOf(0) }
     LaunchedEffect(selected, selectionExplicit) {
         coordinateInput = if (selectionExplicit) selected.label() else ""
     }
@@ -897,9 +898,13 @@ private fun PikminBeeScreen() {
                         else "下一點：第 ${roadStops.size + 1} 點 · 上滑復原或管理路點"
                     else message,
                 coordinateInput = coordinateInput,
+                coordinateInputDismissToken = coordinateInputDismissToken,
                 onCoordinateChange = { coordinateInput = it },
                 onCoordinateTeleport = ::applyCoordinateInput,
-                onCurrentLocation = ::goToCurrentMapPosition,
+                onCurrentLocation = {
+                    coordinateInputDismissToken++
+                    goToCurrentMapPosition()
+                },
                 onHome = {
                     activePage = BeePage.MAP
                     mapExplore = false
@@ -908,6 +913,7 @@ private fun PikminBeeScreen() {
                 openDetailsRequest = openDetailsRequest,
                 closeDetailsRequest = closeDetailsRequest,
                 onMode = { index ->
+                    coordinateInputDismissToken++
                     tab = ToolTab.entries[index]
                     routeEditingStopIndex = null
                     routeStopActionIndex = null
@@ -998,6 +1004,7 @@ private fun PikminBeeScreen() {
                     selected, allFlowers, 5000.0, maxCount = 100
                 ) else emptyList(),
                 onPick = { point ->
+                    coordinateInputDismissToken++
                     selectionExplicit = true
                     if (mapExplore) mapExplore = false
                     when (tab) {
@@ -1047,6 +1054,7 @@ private fun PikminBeeScreen() {
                     }
                 },
                 onFlowerPick = { flower ->
+                    coordinateInputDismissToken++
                     selectionExplicit = true
                     if (mapExplore) mapExplore = false
                     selected = flower.coordinate
@@ -1057,12 +1065,14 @@ private fun PikminBeeScreen() {
                 },
                 onStopPick = when (tab) {
                     ToolTab.ROUTE -> { index: Int ->
+                        coordinateInputDismissToken++
                         if (index in roadStops.indices) {
                             routeStopActionIndex = index
                             message = "已點選第 ${index + 1} 點，可刪除或重新選位置"
                         }
                     }
                     ToolTab.FLOWERS -> { index: Int ->
+                        coordinateInputDismissToken++
                         flowerStops.getOrNull(index)?.let { stop ->
                             if (mapExplore) mapExplore = false
                             selected = stop

@@ -24,10 +24,18 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -36,12 +44,18 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 
 /**
  * Low-overhead opaque mineral surface.
@@ -123,7 +137,7 @@ fun NaosModeIcon(index: Int, tint: Color, modifier: Modifier = Modifier) {
 
 /** Shared lightweight vector glyphs; only major actions keep a short text label. */
 enum class NaosActionGlyph {
-    PLAN, PLAY, PAUSE, STOP, UNDO, REAL_GPS, VIRTUAL_GPS, FLOWER, SPEED, STEPS, REFRESH
+    PLAN, PLAY, PAUSE, STOP, UNDO, REAL_GPS, VIRTUAL_GPS, FLOWER, SPEED, STEPS, REFRESH, EDIT, DONE
 }
 
 @Composable
@@ -204,6 +218,17 @@ fun NaosActionIcon(
                 drawLine(tint, pt(20f, 5f), pt(20f, 11f), pen, StrokeCap.Round)
                 drawLine(tint, pt(20f, 11f), pt(14f, 11f), pen, StrokeCap.Round)
             }
+            NaosActionGlyph.EDIT -> {
+                drawLine(tint, pt(5f, 17f), pt(6f, 21f), pen, StrokeCap.Round)
+                drawLine(tint, pt(6f, 21f), pt(10f, 20f), pen, StrokeCap.Round)
+                drawLine(tint, pt(6f, 17f), pt(17f, 6f), pen, StrokeCap.Round)
+                drawLine(tint, pt(10f, 20f), pt(21f, 9f), pen, StrokeCap.Round)
+                drawLine(tint, pt(17f, 6f), pt(21f, 9f), pen, StrokeCap.Round)
+            }
+            NaosActionGlyph.DONE -> {
+                drawLine(tint, pt(4f, 12f), pt(10f, 18f), pen*1.3f, StrokeCap.Round)
+                drawLine(tint, pt(10f, 18f), pt(21f, 6f), pen*1.3f, StrokeCap.Round)
+            }
             NaosActionGlyph.REAL_GPS, NaosActionGlyph.FLOWER -> Unit
         }
     }
@@ -271,12 +296,48 @@ fun CoordinateTopBar(
     onTeleport: () -> Unit,
     onHome: () -> Unit,
     teleportEnabled: Boolean = true,
+    dismissEditingToken: Int = 0,
+    editingBlocked: Boolean = false,
     modeTitle: String = "瞬移",
     dark: Boolean,
     modifier: Modifier = Modifier,
     backdrop: Bitmap? = null,
 ) {
     val palette = NaosDesignSystem.palette(LocalNaosVisualState.current.family, dark)
+    var editor by remember { mutableStateOf(CoordinateInputEditorState()) }
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focusRequester = remember { FocusRequester() }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val showingEditor = editor.showField(teleportEnabled, editingBlocked)
+
+    fun dismissEditor() {
+        editor = editor.dismiss()
+        focusManager.clearFocus(force = true)
+        keyboard?.hide()
+    }
+
+    // Returning to the map after switching apps must not reopen the keyboard.
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP && editor.editing) dismissEditor()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    // No input is created on startup. Only an explicit edit tap focuses it.
+    LaunchedEffect(showingEditor) {
+        if (showingEditor) {
+            focusRequester.requestFocus()
+            keyboard?.show()
+        }
+    }
+    // Location picks, mode changes and opening sheets must not retain IME focus.
+    LaunchedEffect(teleportEnabled, dismissEditingToken, editingBlocked) {
+        if (editor.editing) dismissEditor()
+    }
+
     MapGlass(dark, modifier, backdrop) {
         Row(
             Modifier.fillMaxWidth().heightIn(min = 58.dp).padding(start = 12.dp, end = 8.dp),
@@ -284,37 +345,72 @@ fun CoordinateTopBar(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             IconButton(
-                onClick = onHome,
+                onClick = { dismissEditor(); onHome() },
                 modifier = Modifier.size(46.dp)
                     .semantics { contentDescription = "回到目前定位並收起選單" },
             ) { NaosBeeHomeIcon(palette.accent) }
             Column(Modifier.weight(1f)) {
                 Text(if (teleportEnabled) "瞬移 · 選取座標" else "$modeTitle · 地圖選點",
                     fontSize = 11.sp, color = palette.muted)
-                BasicTextField(
-                    value = value,
-                    onValueChange = { onValueChange(it.take(65)) },
-                    readOnly = !teleportEnabled,
-                    decorationBox = { inner ->
-                        Box {
-                            if (value.isEmpty()) {
-                                Text(if (teleportEnabled) "點地圖或輸入座標" else "點地圖選擇位置",
-                                    color = palette.muted, fontSize = 14.sp)
+                if (showingEditor) {
+                    BasicTextField(
+                        value = value,
+                        onValueChange = { onValueChange(it.take(65)) },
+                        decorationBox = { inner ->
+                            Box {
+                                if (value.isEmpty()) {
+                                    Text("輸入緯度、經度", color = palette.muted, fontSize = 14.sp)
+                                }
+                                inner()
                             }
-                            inner()
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                        .semantics { contentDescription = "輸入緯度、經度" },
-                    singleLine = true,
-                    textStyle = androidx.compose.ui.text.TextStyle(
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                            .focusRequester(focusRequester)
+                            .semantics { contentDescription = "輸入緯度、經度" },
+                        singleLine = true,
+                        textStyle = androidx.compose.ui.text.TextStyle(
+                            fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                            color = palette.ink,
+                        ),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
+                        keyboardActions = KeyboardActions(onGo = {
+                            dismissEditor()
+                            onTeleport()
+                        }),
+                        cursorBrush = androidx.compose.ui.graphics.SolidColor(palette.accent),
+                    )
+                } else {
+                    // Never mount a focusable field while merely viewing the map.
+                    Text(
+                        text = value.ifEmpty {
+                            if (teleportEnabled) "點地圖選取座標" else "點地圖選擇位置"
+                        },
+                        color = if (value.isEmpty()) palette.muted else palette.ink,
                         fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
-                        color = palette.ink,
-                    ),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
-                    keyboardActions = KeyboardActions(onGo = { onTeleport() }),
-                    cursorBrush = androidx.compose.ui.graphics.SolidColor(palette.accent),
-                )
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.fillMaxWidth()
+                            .semantics {
+                                contentDescription = "目前選取座標：" + value.ifEmpty { "尚未選取" }
+                            },
+                    )
+                }
+            }
+            if (teleportEnabled && !editingBlocked) {
+                IconButton(
+                    onClick = {
+                        if (showingEditor) dismissEditor()
+                        else editor = editor.begin(teleportMode = true, blocked = false)
+                    },
+                    modifier = Modifier.size(42.dp).semantics {
+                        contentDescription = if (showingEditor)
+                            "完成座標編輯並收起鍵盤" else "手動編輯座標"
+                    },
+                ) {
+                    NaosActionIcon(
+                        if (showingEditor) NaosActionGlyph.DONE else NaosActionGlyph.EDIT,
+                        palette.ink
+                    )
+                }
             }
             if (teleportEnabled) {
                 Box(
@@ -323,7 +419,7 @@ fun CoordinateTopBar(
                     contentAlignment = Alignment.Center,
                 ) {
                     IconButton(
-                        onClick = onTeleport,
+                        onClick = { dismissEditor(); onTeleport() },
                         modifier = Modifier.matchParentSize()
                             .semantics { contentDescription = "瞬移到所選座標" },
                     ) {

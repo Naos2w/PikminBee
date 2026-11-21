@@ -67,6 +67,7 @@ fun MapFirstShell(
     modeTitle: String,
     message: String,
     coordinateInput: String,
+    coordinateInputDismissToken: Int = 0,
     onCoordinateChange: (String) -> Unit,
     onCoordinateTeleport: () -> Unit,
     onCurrentLocation: () -> Unit,
@@ -336,6 +337,8 @@ fun MapFirstShell(
             onValueChange = onCoordinateChange,
             onTeleport = onCoordinateTeleport,
             teleportEnabled = active == 0,
+            dismissEditingToken = coordinateInputDismissToken,
+            editingBlocked = detailsOpen || mapExplore,
             modeTitle = modeTitle,
             onHome = {
                 detailsOpen = false
