@@ -1,18 +1,27 @@
 # PikminBee TODO
 
+## P0 · UAT 0.13.1 performance-first matte surfaces (21 Nov 2026)
+- [x] User chose no expensive glass effects for PikminBee; preserve mineral/honey colours, rounded controls, map-first navigation and accessibility. No Web backdrop-filter, shaders, map snapshot or refraction effects.
+- [x] Web PC/mobile panels, bottom mode dock and active walk buttons now use opaque lightweight surfaces, short shadows and no blur/animation. Android `MapGlass` already uses opaque Compose surfaces; obsolete optical helper classes are not wired into the active UI.
+- [x] Add JVM source contract preventing return of backdrop blur in LAN HTML.
+- [ ] Validate real Web layout on mobile/desktop, Gradle unit tests, GitHub PR verify; then squash to develop.
+- [ ] Promote develop -> staging with checked merge commit; publish fixed-signed UAT 0.13.1 through manual GitHub Actions and verify package identity, certificate and artifact.
+- [ ] POCO / PC real LAN acceptance and physical performance checks remain after release; do not claim measured FPS improvement before testing.
+
+
 ## P0 · Web map-first control UI/UX V2 (21 Nov 2026)
 - [x] Rework desktop layout to map-first wide canvas and a compact operation panel; make tablet a single column and mobile map-first with safe-area spacing.
 - [x] Share four mode icon + label navigation and clear selected/ARIA pressed state across mobile and desktop; add guarded 72px swipes on form-free control regions without intercepting MapLibre gestures.
 - [x] Keep start only after server-verified route preview; preserve existing pairing, CSP, IP validation, phone execution and real/mock GPS permissions.
-- [x] Put pause/resume/stop in a reachable mobile fixed glass action row **only while walking or paused**, above the fixed mode navigation. Distinguish current action using existing amber accent; stop remains danger red.
-- [x] Apply restrained mineral blue / muted honey surfaces, dark/light system palette, edge highlights, accessible focus, 48px controls, reduced-motion/transparency fallbacks. CSS backdrop blur is a visual fallback, **not claimed true pixel-displacement refraction**.
+- [x] Put pause/resume/stop in a reachable mobile fixed action row **only while walking or paused**, above the fixed mode navigation. Distinguish current action using existing amber accent; stop remains danger red.
+- [x] Apply restrained mineral blue / muted honey surfaces, dark/light system palette, edge highlights, accessible focus, 48px controls, reduced-motion/transparency fallbacks. This was the historical Web V2 baseline; the subsequent 0.13.1 UAT switches to opaque matte surfaces without CSS blur.
 - [x] Collapse secondary default-speed settings without hiding speed/loop/route preview; preserve mobile progress and map load/error/retry.
 - [x] Update HTML/JS source contract assertions; manually check unique IDs and all referenced DOM IDs.
 - [x] MSI Node syntax and loopback-only mock pairing Playwright: map loaded, 0 console errors, no horizontal overflow at 390×844 / 834×1112 / 1440×900, mobile viewport-fixed modes and no overlap with tested active motion dock; no live GPS/start.
 - [x] MSI offline Gradle `:app:testDebugUnitTest`: Kotlin compile + JVM unit tests BUILD SUCCESSFUL; no app/route permission changes.
 - [ ] MSI `:app:lintDebug` exceeded the local 3-minute hard limit during `lintAnalyzeDebugUnitTest` (no pass/fail result); require GitHub PR `android / verify` and Lint success before merge.
 - [ ] Real LAN acceptance on POCO + PC after a separately approved UAT version bump and staging promotion; confirm fixed bottom controls, WebGL responsiveness, 2 → 3, permission gating, routing preview/start, pairing/revocation.
-- [ ] Web actual refractive edge shader is **not implemented**; consider only behind capability/visual QA gating, retain high-contrast matte fallback.
+- [x] Web true refractive glass is deliberately out of scope for PikminBee; prefer opaque matte UI to avoid added GPU cost.
 
 
 ## P0 · PC browser shows empty basemap after pairing (21 Nov 2026)
