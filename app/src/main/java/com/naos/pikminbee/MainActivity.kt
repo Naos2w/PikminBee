@@ -35,6 +35,9 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
@@ -70,6 +73,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.naos.pikminbee.data.AppPreferences
+import com.naos.pikminbee.data.PlaceLookup
+import com.naos.pikminbee.data.PlaceSuggestion
+import com.naos.pikminbee.data.PlaceSuggestionPolicy
 import com.naos.pikminbee.flower.FlowerCatalogStore
 import com.naos.pikminbee.flower.FlowerCatalogState
 import com.naos.pikminbee.flower.FlowerFinder
@@ -105,10 +111,12 @@ import com.naos.pikminbee.location.CheckpointStatus
 import com.naos.pikminbee.location.SessionJournal
 import com.naos.pikminbee.location.MockLocationService
 import com.naos.pikminbee.ui.LocationMap
+import com.naos.pikminbee.ui.VerifiedPhysicalFixState
 import com.naos.pikminbee.ui.rememberDeviceLocation
 import com.naos.pikminbee.ui.MapCameraRequest
 import com.naos.pikminbee.ui.JourneyControls
 import com.naos.pikminbee.ui.RouteLibraryPanel
+import com.naos.pikminbee.ui.FavouritesPanel
 import com.naos.pikminbee.ui.FlowerCatalogPanel
 import com.naos.pikminbee.ui.FlowerMapControls
 import com.naos.pikminbee.ui.FlowerMapPick
@@ -121,6 +129,9 @@ import com.naos.pikminbee.ui.BeePermissionWizard
 import com.naos.pikminbee.ui.PikminBeeThemeColors
 import com.naos.pikminbee.ui.NaosThemeFamily
 import com.naos.pikminbee.ui.NaosGlassMaterial
+import com.naos.pikminbee.ui.NaosActionIcon
+import com.naos.pikminbee.ui.NaosActionGlyph
+import com.naos.pikminbee.ui.NaosModeIcon
 import com.naos.pikminbee.ui.NaosVisualState
 import com.naos.pikminbee.ui.NaosDesignSystem
 import com.naos.pikminbee.ui.OverlayGuideDialog
@@ -175,10 +186,12 @@ private fun FrostedCard(dark: Boolean, modifier: Modifier = Modifier, content: @
     ) { content() }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PikminBeeScreen() {
     val context = LocalContext.current
     val prefs = remember(context) { AppPreferences(context) }
+    val placeLookup = remember(context) { PlaceLookup(context) }
     val flowerCatalog = remember(context) { FlowerCatalogStore(context) }
     val allFlowers by FlowerCatalogState.spots.collectAsState()
     remember(context) { SessionJournal(context).also { it.read() } }
@@ -223,7 +236,7 @@ private fun PikminBeeScreen() {
             ?.getIntExtra(MainActivity.EXTRA_OPEN_MODE, -1) ?: -1
         mutableStateOf(
             when {
-                requestedMode in 0..3 -> ToolTab.entries[requestedMode]
+                requestedMode in 0..2 -> ToolTab.entries[requestedMode]
                 (context as? MainActivity)?.intent
                     ?.getBooleanExtra(MainActivity.EXTRA_OPEN_FLOWER_VISION, false) == true ->
                     ToolTab.FLOWERS
@@ -234,6 +247,12 @@ private fun PikminBeeScreen() {
     LaunchedEffect(tab) { controlsScroll.scrollTo(0) }
     var showWifiPanel by remember { mutableStateOf(false) }
     var places by remember { mutableStateOf(prefs.places()) }
+    var showFavourites by remember { mutableStateOf(false) }
+    var referenceRealZoneId by remember { mutableStateOf<String?>(null) }
+    var pendingPlace by remember { mutableStateOf<Coordinate?>(null) }
+    var suggestedName by remember { mutableStateOf("") }
+    var placeSuggestion by remember { mutableStateOf<PlaceSuggestion?>(null) }
+    var lookingUpPlace by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("地圖點一下就能選擇位置") }
     val roadStops by RouteDraftState.routeStops.collectAsState()
     val flowerStops by RouteDraftState.flowerStops.collectAsState()
@@ -243,6 +262,12 @@ private fun PikminBeeScreen() {
     val defaultSpeedPreset by WalkSpeedState.preferred.collectAsState()
     var flowerLoop by remember { mutableStateOf(true) }
     val work = rememberCoroutineScope()
+    LaunchedEffect(showFavourites) {
+        if (!showFavourites) return@LaunchedEffect
+        referenceRealZoneId = null
+        val verified = VerifiedPhysicalFixState.fresh() ?: return@LaunchedEffect
+        referenceRealZoneId = placeLookup.zoneForVerifiedPhysical(verified.coordinate)
+    }
     val mockStatus by LocationStatus.display.collectAsState()
     val mockPosition by LocationStatus.selected.collectAsState()
     val walkPhase by LocationStatus.phase.collectAsState()
@@ -519,9 +544,10 @@ private fun PikminBeeScreen() {
     }
 
     var activePage by remember {
-        mutableStateOf(if ((context as? MainActivity)?.intent
-                ?.getBooleanExtra(MainActivity.EXTRA_OPEN_SETTINGS, false) == true)
-            BeePage.SETTINGS
+        mutableStateOf(if ((context as? MainActivity)?.intent?.let {
+                it.getBooleanExtra(MainActivity.EXTRA_OPEN_SETTINGS, false) ||
+                    it.getIntExtra(MainActivity.EXTRA_OPEN_MODE, -1) == 3
+            } == true) BeePage.SETTINGS
             else if (prefs.setupCompleted()) BeePage.MAP else BeePage.PERMISSIONS)
     }
     val settingsRequest by MainActivity.settingsRequests.collectAsState()
@@ -672,7 +698,10 @@ private fun PikminBeeScreen() {
         }
     }
     LaunchedEffect(modeRequest) {
-        if (modeRequest in 0..3) {
+        if (modeRequest == 3) {
+            activePage = BeePage.SETTINGS
+            MainActivity.mapModeRequests.value = -1
+        } else if (modeRequest in 0..2) {
             tab = ToolTab.entries[modeRequest]
             activePage = BeePage.MAP
             routeEditingStopIndex = null
@@ -933,11 +962,13 @@ private fun PikminBeeScreen() {
                     mapExplore = false
                     goToCurrentMapPosition()
                 },
+                onFavourites = { showFavourites = true; coordinateInputDismissToken++ },
                 openDetailsRequest = openDetailsRequest,
                 closeDetailsRequest = closeDetailsRequest,
                 onMode = { index ->
                     coordinateInputDismissToken++
-                    tab = ToolTab.entries[index]
+                    if (index !in 0..2) activePage = BeePage.SETTINGS
+                    else tab = ToolTab.entries[index]
                     routeEditingStopIndex = null
                     routeStopActionIndex = null
                     mapExplore = false
@@ -1139,7 +1170,13 @@ private fun PikminBeeScreen() {
                                         colors = ButtonDefaults.buttonColors(
                                             containerColor = honey, contentColor = Color.White,
                                         )
-                                    ) { Text("瞬移並停留") }
+                                    ) {
+                                        Row(horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                            verticalAlignment = Alignment.CenterVertically) {
+                                            NaosActionIcon(NaosActionGlyph.VIRTUAL_GPS, Color.White)
+                                            Text("瞬移並停留")
+                                        }
+                                    }
                                     OutlinedButton(
                                         onClick = {
                                             runCatching { context.startService(MockLocationService.stopIntent(context)) }
@@ -1147,18 +1184,46 @@ private fun PikminBeeScreen() {
                                         },
                                         enabled = mockPosition != null,
                                         modifier = Modifier.weight(.9f).height(52.dp),
-                                    ) { Text("恢復真實 GPS") }
+                                    ) {
+                                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                            verticalAlignment = Alignment.CenterVertically) {
+                                            NaosActionIcon(NaosActionGlyph.REAL_GPS, foreground)
+                                            Text("恢復真實 GPS")
+                                        }
+                                    }
                                 }
                                 if (mockPosition != null) {
                                     Text("模擬座標：${mockPosition!!.label()}", fontSize = 12.sp, color = muted)
                                 }
                                 TextButton(
                                     onClick = {
-                                        prefs.addPlace("地點 ${places.size + 1}", selected)
-                                        places = prefs.places()
-                                        message = "已收藏目前選取位置"
+                                        if (!selectionExplicit) {
+                                            message = "請先點地圖選取要收藏的位置"
+                                        } else {
+                                            val target = selected
+                                            val fallback = PlaceSuggestionPolicy.pointLabel(target)
+                                            pendingPlace = target
+                                            suggestedName = fallback
+                                            placeSuggestion = null
+                                            lookingUpPlace = true
+                                            work.launch {
+                                                val suggested = placeLookup.suggest(target)
+                                                if (pendingPlace == target) {
+                                                    if (suggestedName == fallback)
+                                                        suggestedName = suggested.displayName
+                                                    placeSuggestion = suggested
+                                                    lookingUpPlace = false
+                                                }
+                                            }
+                                        }
                                     }
-                                ) { Text("＋ 收藏這個位置") }
+                                ) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                        verticalAlignment = Alignment.CenterVertically) {
+                                        NaosModeIcon(3, foreground)
+                                        Text("收藏這個位置")
+                                    }
+                                }
                             }
                             ToolTab.SAVED -> {
                                 Text("收藏地點", fontWeight = FontWeight.Bold, color = foreground)
@@ -1446,6 +1511,127 @@ private fun PikminBeeScreen() {
                         }
                 },
             )
+        }
+        pendingPlace?.let { target ->
+            AlertDialog(
+                onDismissRequest = { pendingPlace = null; lookingUpPlace = false },
+                title = { Text("收藏這個位置") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("選取座標：${target.label()}", color = muted, fontSize = 12.sp)
+                        OutlinedTextField(
+                            value = suggestedName,
+                            onValueChange = { suggestedName = it.take(80) },
+                            label = { Text("地點名稱（可修改）") },
+                            modifier = Modifier.fillMaxWidth(), singleLine = true,
+                        )
+                        if (lookingUpPlace)
+                            Text("正在取得附近地標／商家與當地時區建議…",
+                                color = muted, fontSize = 12.sp)
+                        val meta = placeSuggestion
+                        if (meta != null) {
+                            Text(listOfNotNull(meta.countryName, meta.city).joinToString(" · ")
+                                .ifBlank { "國家／城市待確認" },
+                                color = muted, fontSize = 12.sp)
+                            Text(if (meta.timeZoneId != null)
+                                "地點時區：${meta.timeZoneId}" else "時區待確認",
+                                color = muted, fontSize = 12.sp)
+                        }
+                        Text(
+                            "只有點擊收藏才查詢網路建議；選取座標會傳至 Photon／TimeAPI。" +
+                                "查詢失敗仍能用座標名稱儲存，日後手動名稱不會被覆寫。",
+                            color = muted, fontSize = 11.sp,
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        enabled = suggestedName.isNotBlank(),
+                        onClick = {
+                            val suggested = placeSuggestion
+                            prefs.addPlace(
+                                suggestedName, target,
+                                countryCode = suggested?.countryCode,
+                                countryName = suggested?.countryName,
+                                city = suggested?.city,
+                                timeZoneId = suggested?.timeZoneId,
+                            )
+                            places = prefs.places()
+                            pendingPlace = null
+                            lookingUpPlace = false
+                            message = "已收藏「${suggestedName}」，沒有移動 GPS"
+                        },
+                    ) { Text("儲存收藏") }
+                },
+                dismissButton = {
+                    TextButton(onClick = {
+                        pendingPlace = null
+                        lookingUpPlace = false
+                    }) { Text("取消") }
+                },
+            )
+        }
+        if (showFavourites && activePage == BeePage.MAP) {
+            ModalBottomSheet(
+                onDismissRequest = { showFavourites = false },
+                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false),
+                containerColor = semantic.surface,
+                contentColor = foreground,
+                shape = RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp),
+            ) {
+                FavouritesPanel(
+                    places = places,
+                    // A system time zone is NOT proof of the phone's actual GPS time zone.
+                    referenceRealZoneId = referenceRealZoneId,
+                    foreground = foreground,
+                    muted = muted,
+                    onSelectPlace = { place ->
+                        showFavourites = false
+                        selected = place.coordinate
+                        selectionExplicit = true
+                        tab = ToolTab.TELEPORT
+                        focusMapPoint(place.coordinate)
+                        message = "已在地圖選取「${place.name}」，尚未瞬移"
+                    },
+                    onDeletePlace = { place ->
+                        prefs.removePlace(place.id)
+                        places = prefs.places()
+                        message = "已移除收藏「${place.name}」"
+                    },
+                    routeContent = { query ->
+                        listOf(WalkMode.ROUTE, WalkMode.FLOWERS).forEach { kind ->
+                            RouteLibraryPanel(
+                                mode = kind,
+                                draft = if (kind == WalkMode.FLOWERS) flowerStops else roadStops,
+                                routes = savedRoutes.filter {
+                                    it.mode == kind && (query.isBlank() ||
+                                        it.name.contains(query, ignoreCase = true))
+                                },
+                                foreground = foreground, muted = muted,
+                                onSave = { name ->
+                                    saveRoute(name, kind,
+                                        if (kind == WalkMode.FLOWERS) flowerStops else roadStops)
+                                },
+                                onRename = ::renameRoute,
+                                onLoad = { route ->
+                                    loadRoute(route)
+                                    showFavourites = false
+                                },
+                                onExport = { route ->
+                                    exportRouteId = route.id
+                                    exportGpx.launch(route.fileName())
+                                },
+                                onDelete = ::deleteRoute,
+                                onImport = {
+                                    importMode = kind
+                                    importGpx.launch(arrayOf(
+                                        "application/gpx+xml", "application/xml", "text/xml", "*/*"))
+                                },
+                            )
+                        }
+                    },
+                )
+            }
         }
         pendingSimplifiedGpx?.let { candidate ->
             AlertDialog(

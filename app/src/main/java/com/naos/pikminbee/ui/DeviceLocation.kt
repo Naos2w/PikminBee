@@ -14,10 +14,22 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
+import androidx.core.location.LocationCompat
+import com.naos.pikminbee.location.LocationStatus
+import kotlinx.coroutines.flow.MutableStateFlow
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.naos.pikminbee.domain.Coordinate
+
+/** Verified physical GPS reference, memory-only. Mock samples never enter this flow. */
+data class VerifiedDeviceFix(val coordinate: Coordinate, val timestampMillis: Long)
+
+object VerifiedPhysicalFixState {
+    val latest = MutableStateFlow<VerifiedDeviceFix?>(null)
+    fun fresh(nowMillis: Long = System.currentTimeMillis()): VerifiedDeviceFix? =
+        latest.value?.takeIf { nowMillis - it.timestampMillis in 0..(30 * 60_000L) }
+}
 
 /**
  * Foreground-only phone location for the map's blue dot.
@@ -35,7 +47,17 @@ fun rememberDeviceLocation(refresh: Int = 0): State<Coordinate?> {
         val listener = object : LocationListener {
             override fun onLocationChanged(location: Location) {
                 runCatching { Coordinate(location.latitude, location.longitude) }
-                    .onSuccess { current.value = it }
+                    .onSuccess { point ->
+                        current.value = point
+                        // A recent, explicitly non-mock Android sample is needed
+                        // before the favourites clock may compare time zones.
+                        if (!LocationCompat.isMock(location) &&
+                            !LocationStatus.mockActive.value &&
+                            System.currentTimeMillis() - location.time in 0..120_000L) {
+                            VerifiedPhysicalFixState.latest.value =
+                                VerifiedDeviceFix(point, location.time)
+                        }
+                    }
             }
         }
         fun stop() { runCatching { manager.removeUpdates(listener) } }

@@ -70,6 +70,7 @@ fun MapFirstShell(
     onCoordinateTeleport: () -> Unit,
     onCurrentLocation: () -> Unit,
     onHome: () -> Unit,
+    onFavourites: () -> Unit,
     openDetailsRequest: Int = 0,
     closeDetailsRequest: Int = 0,
     onMode: (Int) -> Unit,
@@ -113,7 +114,7 @@ fun MapFirstShell(
     }
     val p = NaosDesignSystem.palette(LocalNaosVisualState.current.family, dark)
     val heightDp = LocalConfiguration.current.screenHeightDp
-    val active = modeIndex.coerceIn(0, 3)
+    val active = modeIndex.coerceIn(0, 2)
     // Ongoing walking must remain controllable even after changing map tabs.
     val showQuick = (modeIndex == 1 && routeStopsCount > 0) ||
         (modeIndex == 2 && flowerStopsCount > 0) || routeActive || flowerActive
@@ -159,6 +160,7 @@ fun MapFirstShell(
                     active = active,
                     palette = p,
                     onMode = onMode,
+                    onSettings = onSettings,
                 )
             }
         }
@@ -312,6 +314,7 @@ fun MapFirstShell(
             value = coordinateInput,
             onValueChange = onCoordinateChange,
             onTeleport = onCoordinateTeleport,
+            onFavourites = onFavourites,
             teleportEnabled = active == 0,
             dismissEditingToken = coordinateInputDismissToken,
             editingBlocked = detailsOpen || mapExplore,
@@ -379,11 +382,12 @@ fun MapFirstShell(
                     .padding(horizontal = 17.dp, vertical = 5.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) { modeContent() }
-            // Same four pages, visual selection and icon labels as the main dock.
+            // Three swipeable modes + tap-only Settings, shared with the map dock.
             MapModeTabs(
                 active = active,
                 palette = p,
                 onMode = onMode,
+                onSettings = { detailsOpen = false; onSettings() },
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 3.dp),
                 height = 64.dp,
             )

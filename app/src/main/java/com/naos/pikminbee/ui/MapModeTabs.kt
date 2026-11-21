@@ -55,16 +55,18 @@ internal fun MapModeTabs(
     active: Int,
     palette: NaosPalette,
     onMode: (Int) -> Unit,
+    onSettings: () -> Unit,
     modifier: Modifier = Modifier,
     height: Dp = 55.dp,
 ) {
-    val labels = listOf("瞬移", "路徑", "尋花", "收藏")
+    val labels = listOf("瞬移", "路徑", "尋花", "設定")
     Row(
         modifier.fillMaxWidth().swipeModes(active, onMode),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         labels.forEachIndexed { index, label ->
-            val isCurrent = index == active
+            val isSettings = index == 3
+            val isCurrent = !isSettings && index == active
             val background by animateColorAsState(
                 if (isCurrent) palette.accent else Color.Transparent,
                 animationSpec = tween(NaosDesignSystem.FAST_MS),
@@ -72,7 +74,7 @@ internal fun MapModeTabs(
             )
             val tint = if (isCurrent) palette.onAccent else palette.ink
             Surface(
-                onClick = { onMode(index) },
+                onClick = { if (isSettings) onSettings() else onMode(index) },
                 modifier = Modifier.weight(1f).height(height).semantics {
                     selected = isCurrent
                     contentDescription = if (isCurrent) "目前模式：$label" else "切換至${label}模式"
@@ -86,7 +88,7 @@ internal fun MapModeTabs(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                 ) {
-                    NaosModeIcon(index, tint)
+                    if (isSettings) NaosUtilityIcon(0, tint) else NaosModeIcon(index, tint)
                     Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                 }
             }

@@ -230,6 +230,8 @@ class FloatingControls(
     }
 
     private fun actionBackground(which: OverlayQuickAction, enabled: Boolean): GradientDrawable {
+        val isActiveGps = which == OverlayQuickPolicy.selectedGps(
+            com.naos.pikminbee.location.LocationStatus.mockActive.value)
         val color = when (which) {
             OverlayQuickAction.PRIMARY -> BeeActionColors.primary(lastPhase)
             OverlayQuickAction.STOP -> BeeActionColors.stop(enabled)
@@ -237,7 +239,8 @@ class FloatingControls(
         }
         return GradientDrawable().apply {
             cornerRadius = dp(14).toFloat()
-            setColor(color ?: colors().soft.toArgb())
+            setColor(color ?: if (isActiveGps) colors().accent.toArgb() else colors().soft.toArgb())
+            if (isActiveGps) setStroke(dp(2).coerceAtLeast(1), colors().accent.toArgb())
         }
     }
 
@@ -309,10 +312,13 @@ class FloatingControls(
         which: OverlayQuickAction, icon: OverlayGlyph, label: String, enabled: Boolean = true,
     ) {
         quickActions[which]?.apply {
+            val activeGps = which == OverlayQuickPolicy.selectedGps(
+                com.naos.pikminbee.location.LocationStatus.mockActive.value)
             val ink = when {
                 !enabled -> colors().muted.toArgb()
                 which == OverlayQuickAction.PRIMARY -> BeeActionColors.ON_BRIGHT
                 which == OverlayQuickAction.STOP -> BeeActionColors.ON_DANGER
+                activeGps -> colors().onAccent.toArgb()
                 else -> colors().ink.toArgb()
             }
             val paint = colors()
@@ -322,7 +328,7 @@ class FloatingControls(
                 else -> null
             } ?: paint.soft.toArgb()
             val ripple = paint.ink.copy(alpha = .12f).toArgb()
-            val renderKey = "$icon:$ink:$fill:$ripple:$enabled"
+            val renderKey = "$icon:$ink:$fill:$ripple:$enabled:$activeGps"
             if (tag != renderKey) {
                 setImageDrawable(NaosOverlayActionIcon(icon, ink, dp(24)))
                 background = RippleDrawable(
@@ -384,7 +390,8 @@ class FloatingControls(
         iconUpdate(OverlayQuickAction.REAL_GPS, OverlayGlyph.REAL, "還原真實 GPS，暫停模擬定位")
         iconUpdate(OverlayQuickAction.VIRTUAL_GPS, OverlayGlyph.VIRTUAL,
             "回到上次虛擬位置，不繼續行走",
-            AppPreferences(context).lastVirtualPosition() != null)
+            AppPreferences(context).lastVirtualPosition() != null ||
+                com.naos.pikminbee.location.LocationStatus.mockActive.value)
         val capturing = BloomVisionState.state.value.phase == BloomVisionState.Phase.CAPTURING
         iconUpdate(OverlayQuickAction.FLOWER_VISION, OverlayGlyph.FLOWER,
             if (capturing) "停止畫面偵測花" else "開啟畫面偵測花並取得系統授權")
