@@ -55,6 +55,22 @@ class LanRouteDraftPolicyTest {
             WalkMode.ROUTE, start, stops.dropLast(1), true).size)
     }
 
+    @Test fun remoteReorderHasStableIndicesAndRejectsBoundaryEdits() {
+        val initial = listOf(start, one, two)
+        val moved = LanRouteDraftPolicy.reorder(initial, 1, 1)
+        assertTrue(moved.accepted)
+        assertEquals(listOf(start, two, one), moved.stops)
+        assertEquals(initial, LanRouteDraftPolicy.reorder(initial, 0, -1).stops)
+        assertFalse(LanRouteDraftPolicy.reorder(initial, 0, -1).accepted)
+        assertEquals(initial, LanRouteDraftPolicy.reorder(initial, 0, 2).stops)
+        assertEquals(initial, LanRouteDraftPolicy.reorder(initial, 99, 1).stops)
+        assertEquals(initial, LanRouteDraftPolicy.remove(initial, 9).stops)
+        val removed = LanRouteDraftPolicy.remove(initial, 1)
+        assertTrue(removed.accepted)
+        assertEquals(listOf(start, two), removed.stops)
+        assertEquals(initial, listOf(start, one, two)) // Source draft remains immutable.
+    }
+
     @Test fun remoteFlowerLoopKeepsOriginalStartWithoutStraightLineFallback() {
         val stops = listOf(one, two)
         assertEquals(listOf(start, one, two, start),

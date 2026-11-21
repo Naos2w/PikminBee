@@ -48,6 +48,24 @@ object LanRouteDraftPolicy {
         }
     }
 
+    /** All reordering is server-owned; invalid indices leave drafts unchanged. */
+    fun reorder(current: List<Coordinate>, index: Int, offset: Int): Addition {
+        val other = index + offset
+        if (offset !in listOf(-1, 1) || index !in current.indices ||
+            other !in current.indices) return reject(current, "路點順序無效")
+        val reordered = current.toMutableList()
+        val previous = reordered[index]
+        reordered[index] = reordered[other]
+        reordered[other] = previous
+        return Addition(reordered, true, "路點順序已更新，請重新預覽道路")
+    }
+
+    fun remove(current: List<Coordinate>, index: Int): Addition {
+        if (index !in current.indices) return reject(current, "找不到要移除的路點")
+        return Addition(current.filterIndexed { i, _ -> i != index },
+            true, "路點已移除，請重新預覽道路")
+    }
+
     fun anchors(
         mode: WalkMode,
         origin: Coordinate,

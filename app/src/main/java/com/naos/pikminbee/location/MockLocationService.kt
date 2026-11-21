@@ -57,6 +57,8 @@ object LocationStatus {
     val selected = MutableStateFlow<Coordinate?>(null)
     val phase = MutableStateFlow(WalkPhase.IDLE)
     val mode = MutableStateFlow<WalkMode?>(null)
+    /** True only while the Android test GPS provider is installed; never label its fix real. */
+    val mockActive = MutableStateFlow(false)
     val geometry = MutableStateFlow<List<Coordinate>>(emptyList())
     val overlayVisible = MutableStateFlow(false)
     val progress = MutableStateFlow(WalkingProgressSnapshot())
@@ -713,6 +715,7 @@ class MockLocationService : Service() {
                 }
                 manager.setTestProviderEnabled(LocationManager.GPS_PROVIDER, true)
                 providerActive = true
+                LocationStatus.mockActive.value = true
             }
             true
         } catch (e: Exception) {
@@ -836,6 +839,7 @@ class MockLocationService : Service() {
             }
         }
         providerActive = false
+        LocationStatus.mockActive.value = false
         handler.removeCallbacks(tick)
         target = null
         track = emptyList()
