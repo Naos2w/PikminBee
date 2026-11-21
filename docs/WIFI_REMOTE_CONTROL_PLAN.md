@@ -1,6 +1,6 @@
 # PikminBee · Wi-Fi 控制設計與安全驗收
 
-Status: proposed follow-up. This document does **not** imply that the routed LAN/VPN code has been implemented or POCO connectivity tested.
+Status: **same-private-LAN browser control implemented in DEV source, not yet verified on POCO**. VPN/Tailscale and custom-DNS support remain future options, not required for the basic workflow.
 
 ## Confirmed PC-to-Android control scope (21 Nov 2026)
 
@@ -15,7 +15,7 @@ private VPN/tailnet (e.g. Tailscale or WireGuard) even when PC and phone are
 on separate physical networks. A DNS name or MagicDNS is just an address:
 it does not establish connectivity on its own.
 
-### Verified gaps in the current code
+### Network limitations still applicable
 
 - LanWifiAddress discovers only TRANSPORT_WIFI and selects a private IPv4
   listener. It has no verified VPN-interface selection.
@@ -23,8 +23,9 @@ it does not establish connectivity on its own.
   Tailscale's usual 100.64.0.0/10 addresses are therefore not accepted.
 - LanHttpPolicy requires the exact bound IP:port in Host and POST Origin,
   so a MagicDNS or private custom domain does not currently work.
-- Existing /api/route/start starts moving after planning. It needs an explicit
-  preview -> confirm -> start flow before remote routing is accepted.
+- `/api/route/preview` now builds a bounded pedestrian road plan without GPS movement.
+  `/api/route/start` refuses to execute until an unmodified preview ID has been
+  explicitly confirmed, including an extra acknowledgment for large road snaps.
 - Current HTTP is plaintext: never forward port 8765 to the public internet.
 
 ### Implementation priorities
@@ -72,12 +73,14 @@ requiring the same Wi-Fi network. No public control endpoint and no second GPS e
   owner explicitly approves or denies the request. A short-lived browser
   session is bound to the connecting client address; the controller closes on
   Wi-Fi change/disconnection and revokes sessions when turned off.
-- The phone currently needs an active mock-location service for this option.
+- A user-started `LanControlService` foreground listener can open the browser
+  control without starting the mock GPS engine. Actual teleport/start still
+  requires system location and mock-app permissions.
 - The HTTP transport is **not encrypted**. Treat current LAN control as
   experimental and use only on a trusted private Wi-Fi, never public Wi-Fi.
-- Current `/api/route/start` still plans and immediately starts walking. It
-  does **not** follow the new preview → confirm → start rule and must be
-  fixed before considering the LAN workflow fully accepted.
+- `/api/route/preview` is a no-movement road preview; `/api/route/start`
+  requires a fresh matching preview ID and separate explicit confirmation.
+  High snap offsets require an additional browser acknowledgment.
 
 ## Proposed UI/UX
 
@@ -90,9 +93,10 @@ requiring the same Wi-Fi network. No public control endpoint and no second GPS e
    **瞬移 / 路徑 / 尋花 / 收藏**, matching Android's bottom navigation.
    Show current segment (e.g. 2 → 3), session-only estimated steps, route
    position and start/pause/resume/stop using the *same* service state.
-4. Route editor must first call a read-only preview endpoint and show the
-   snapped pedestrian geometry/distance. Starting needs a second explicit
-   user action and mandatory phone-side approval if the snap offset is high.
+4. Route editor calls a read-only preview endpoint and shows the snapped
+   pedestrian geometry/distance. Starting needs a second explicit action;
+   large snap offsets require another visible browser confirmation after
+   the browser device was independently approved on the phone.
    Never restart or move GPS on connection, page load or re-pairing.
 5. Add active-session revoke, last-connected-device label, short expiry and
    a permanent Kill/Disable button in Android settings. Auto stop LAN on
@@ -103,9 +107,10 @@ requiring the same Wi-Fi network. No public control endpoint and no second GPS e
 
 ## Permissions / safeguards
 
-- For a private-LAN HTTP server on the current Android-16-targeting app:
-  `INTERNET` and network-state access already exist. This is not an
-  ordinary Wi-Fi scanning feature.
+- For Android-16-targeting local browser control, the app declares `INTERNET`,
+  network-state access, `FOREGROUND_SERVICE_CONNECTED_DEVICE`, and the normal
+  `CHANGE_NETWORK_STATE` prerequisite. A user-initiated connected-device
+  foreground service hosts the controller without booting mock GPS.
 - On future targetSdk 37 (Android 17), review new runtime
   `ACCESS_LOCAL_NETWORK` permission before upgrading the target SDK,
   using Android developer guidance for accepted incoming TCP connections.
@@ -119,7 +124,8 @@ requiring the same Wi-Fi network. No public control endpoint and no second GPS e
 
 ## Acceptance tests to perform on connected phones
 
-- Pair/deny/revoke/timeout/wrong PIN and active network change.
+- Pair/deny/revoke/timeout/wrong PIN and active network change. Check the
+  foreground control notification and permission behaviour on the real POCO.
 - PC/mobile layouts and real/virtual location state parity.
 - Create four points; show 2 → 3 correctly; plan only, then explicit start.
 - Pause/resume/stop; no movement when disconnected; no duplicate steps.
