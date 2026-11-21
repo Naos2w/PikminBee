@@ -26,6 +26,7 @@ import com.naos.pikminbee.health.EstimatedStepCounter
 import com.naos.pikminbee.health.EstimatedWalkStatus
 import com.naos.pikminbee.health.EstimatedStepLedger
 import com.naos.pikminbee.health.EstimatedStepsSyncWorker
+import com.naos.pikminbee.health.VirtualEstimateSyncPolicy
 import com.naos.pikminbee.data.AppPreferences
 import com.naos.pikminbee.data.PreparedRouteState
 import com.naos.pikminbee.data.RouteDraftState
@@ -161,6 +162,9 @@ class MockLocationService : Service() {
                         saveEstimatedSteps()
                         estimatedStepPersistTicker = 0
                     }
+                    // Health Connect does not receive live GPS ticks. Persist a
+                    // bounded, explicitly opted-in estimate chunk per minute.
+                    checkpointEstimatedSession()
                 }
                 walkingDistanceMeters += travelMetres
                 if (loopRoute && trackLengthMeters > 0.1 && walkingDistanceMeters >= trackLengthMeters) {
@@ -397,6 +401,8 @@ class MockLocationService : Service() {
             }
             ACTION_PAUSE_ROUTE -> {
                 if (phase == WalkPhase.MOVING) {
+                    // Flush this moving interval before entering a paused state.
+                    checkpointEstimatedSession(force = true)
                     phase = WalkPhase.PAUSED
                     LocationStatus.phase.value = phase
                     LocationStatus.display.value = "步行已暫停"
@@ -503,24 +509,47 @@ class MockLocationService : Service() {
     }
 
 
-    private fun finishEstimatedSession() {
+    private fun checkpointEstimatedSession(force: Boolean = false, finish: Boolean = false) {
         val start = sessionStartMillis
         if (start <= 0L) return
-        sessionStartMillis = 0L
-        val estimated = (estimatedSteps.snapshot().estimatedSteps - sessionStartSteps)
-            .coerceAtLeast(0L)
-        if (estimated == 0L) return
+        val now = System.currentTimeMillis()
         val ledger = EstimatedStepLedger(this)
+        // While walking, export no more than once per minute and only if the
+        // user enabled virtual-estimate sync. An unfinished walk is not a sensor
+        // record and is still labelled MANUAL_ENTRY by HealthConnectStepSync.
+        if (!force && !finish &&
+            !VirtualEstimateSyncPolicy.shouldCheckpoint(start, now, ledger.optIn())) return
+        val currentSteps = estimatedSteps.snapshot().estimatedSteps
+        val deltaSteps = VirtualEstimateSyncPolicy.unsavedSteps(currentSteps, sessionStartSteps)
+        if (deltaSteps == 0L) {
+            if (finish) sessionStartMillis = 0L
+            else if (force) sessionStartMillis = now
+            return
+        }
+        // Do not advance the checkpoint until the interval is durably saved:
+        // otherwise a full queue/disk error could permanently lose step counts.
         val stored = runCatching {
-            ledger.add(start, System.currentTimeMillis(), estimated)
+            ledger.add(start, maxOf(now, start + 1L), deltaSteps)
         }.getOrElse { error ->
             LocationStatus.display.value = "估算步數保存失敗：" + error.message
             return
         }
-        if (stored != null && ledger.optIn()) {
-            runCatching { EstimatedStepsSyncWorker.enqueue(this) }
-                .onFailure { LocationStatus.display.value = "Health Connect 同步排程失敗：" + it.message }
+        if (stored != null) {
+            sessionStartSteps = currentSteps
+            sessionStartMillis = if (finish) 0L else now
+            saveEstimatedSteps()
+            if (ledger.optIn()) {
+                runCatching { EstimatedStepsSyncWorker.enqueue(this) }
+                    .onFailure {
+                        LocationStatus.display.value =
+                            "Health Connect 同步排程失敗：" + it.message
+                    }
+            }
         }
+    }
+
+    private fun finishEstimatedSession() {
+        checkpointEstimatedSession(finish = true)
     }
 
     private fun saveEstimatedSteps() {
