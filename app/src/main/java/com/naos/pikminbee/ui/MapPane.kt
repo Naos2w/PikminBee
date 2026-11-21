@@ -57,6 +57,7 @@ fun LocationMap(
     provider: MapProvider,
     dark: Boolean,
     selected: Coordinate,
+    selectionActive: Boolean,
     current: Coordinate?,
     currentIsMock: Boolean,
     start: Coordinate?,
@@ -74,14 +75,14 @@ fun LocationMap(
     modifier: Modifier = Modifier,
 ) {
     when (provider) {
-        MapProvider.OPEN_FREE_MAP -> OpenFreeMapPane(dark, selected, current, currentIsMock, start, stops, road, previewRoad, flowerSpots,
+        MapProvider.OPEN_FREE_MAP -> OpenFreeMapPane(dark, selected, selectionActive, current, currentIsMock, start, stops, road, previewRoad, flowerSpots,
             freeMapStyle, cameraRequest, mapExplore, onCameraFailure,
             onPick, onFlowerPick, onStopPick, modifier)
         MapProvider.GOOGLE_MAPS -> if (BuildConfig.HAS_GOOGLE_MAPS_KEY) {
-            GoogleMapsPane(dark, selected, current, currentIsMock, start, stops, road, previewRoad, flowerSpots,
+            GoogleMapsPane(dark, selected, selectionActive, current, currentIsMock, start, stops, road, previewRoad, flowerSpots,
                 cameraRequest, mapExplore, onCameraFailure, onPick, onFlowerPick, onStopPick, modifier)
         } else {
-            OpenFreeMapPane(dark, selected, current, currentIsMock, start, stops, road, previewRoad, flowerSpots,
+            OpenFreeMapPane(dark, selected, selectionActive, current, currentIsMock, start, stops, road, previewRoad, flowerSpots,
                 freeMapStyle, cameraRequest, mapExplore, onCameraFailure,
                 onPick, onFlowerPick, onStopPick, modifier)
         }
@@ -90,7 +91,8 @@ fun LocationMap(
 
 @Composable
 private fun OpenFreeMapPane(
-    dark: Boolean, selected: Coordinate, current: Coordinate?, currentIsMock: Boolean,
+    dark: Boolean, selected: Coordinate, selectionActive: Boolean,
+    current: Coordinate?, currentIsMock: Boolean,
     start: Coordinate?, stops: List<Coordinate>,
     road: List<Coordinate>, previewRoad: Boolean, flowerSpots: List<FlowerSpot>,
     freeMapStyle: FreeMapStyle, cameraRequest: MapCameraRequest?, mapExplore: Boolean,
@@ -189,16 +191,21 @@ private fun OpenFreeMapPane(
         }
     }
     // The moving position is updated in place. Do not recreate the whole route every second.
-    LaunchedEffect(map, styleVersion, selected) {
+    LaunchedEffect(map, styleVersion, selected, selectionActive) {
         val m = map ?: return@LaunchedEffect
         if (styleVersion == 0) return@LaunchedEffect
-        val position = LibreLatLng(selected.latitude, selected.longitude)
-        if (currentMarker == null || currentStyleVersion != styleVersion) {
+        if (!selectionActive) {
             currentMarker?.let { m.removeMarker(it) }
-            currentMarker = m.addMarker(LibreMarkerOptions()
-                .position(position).title("選取位置"))
-            currentStyleVersion = styleVersion
-        } else currentMarker?.position = position
+            currentMarker = null
+        } else {
+            val position = LibreLatLng(selected.latitude, selected.longitude)
+            if (currentMarker == null || currentStyleVersion != styleVersion) {
+                currentMarker?.let { m.removeMarker(it) }
+                currentMarker = m.addMarker(LibreMarkerOptions()
+                    .position(position).title("選取位置"))
+                currentStyleVersion = styleVersion
+            } else currentMarker?.position = position
+        }
     }
     LaunchedEffect(map, styleVersion, current, currentIsMock) {
         val m = map ?: return@LaunchedEffect
@@ -303,7 +310,8 @@ private fun OpenFreeMapPane(
 
 @Composable
 private fun GoogleMapsPane(
-    dark: Boolean, selected: Coordinate, current: Coordinate?, currentIsMock: Boolean,
+    dark: Boolean, selected: Coordinate, selectionActive: Boolean,
+    current: Coordinate?, currentIsMock: Boolean,
     start: Coordinate?, stops: List<Coordinate>,
     road: List<Coordinate>, previewRoad: Boolean, flowerSpots: List<FlowerSpot>,
     cameraRequest: MapCameraRequest?, mapExplore: Boolean,
@@ -385,12 +393,18 @@ private fun GoogleMapsPane(
     LaunchedEffect(map, dark) {
         map?.setMapStyle(if (dark) MapStyleOptions(GOOGLE_DARK_STYLE) else null)
     }
-    LaunchedEffect(map, selected) {
+    LaunchedEffect(map, selected, selectionActive) {
         val m = map ?: return@LaunchedEffect
-        val position = GoogleLatLng(selected.latitude, selected.longitude)
-        if (currentMarker == null) {
-            currentMarker = m.addMarker(GoogleMarkerOptions().position(position).title("選取位置"))
-        } else currentMarker?.position = position
+        if (!selectionActive) {
+            currentMarker?.remove()
+            currentMarker = null
+        } else {
+            val position = GoogleLatLng(selected.latitude, selected.longitude)
+            if (currentMarker == null) {
+                currentMarker = m.addMarker(GoogleMarkerOptions()
+                    .position(position).title("選取位置"))
+            } else currentMarker?.position = position
+        }
     }
     LaunchedEffect(map, current, currentIsMock) {
         val m = map ?: return@LaunchedEffect
