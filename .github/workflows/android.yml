@@ -1,0 +1,118 @@
+name: android
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, synchronize]
+    branches: [develop, staging, main]
+  workflow_dispatch:
+    inputs:
+      package_apk:
+        description: 'Build and upload a debug APK (manual UAT only)'
+        type: boolean
+        default: false
+        required: false
+
+permissions:
+  contents: read
+
+# New pushes replace any still-running verification for the same PR.
+concurrency:
+  group: android-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    # A draft PR uses no Android runner minutes. Manually requested runs are explicit.
+    if: github.event_name == 'workflow_dispatch' || !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enforce branch promotion direction
+        if: github.event_name == 'pull_request'
+        env:
+          HEAD: ${{ github.head_ref }}
+          BASE: ${{ github.base_ref }}
+        run: |
+          case "$BASE:$HEAD" in
+            develop:feature/*|develop:fix/*|develop:chore/*|staging:develop|main:staging) ;;
+            *) echo "Invalid branch promotion: $HEAD -> $BASE"; exit 1 ;;
+          esac
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Check semantic version progression rules
+        run: |
+          python3 -m unittest discover -s scripts -p 'test_version*.py'
+          python3 scripts/bump_version.py check
+      - name: Verify source (no APK packaging)
+        run: ./gradlew :app:testDebugUnitTest :app:lintDebug --no-daemon --console=plain
+      - name: Restore private, fixed UAT signing key
+        if: github.event_name == 'workflow_dispatch' && inputs.package_apk == true
+        env:
+          UAT_KEYSTORE_BASE64: ${{ secrets.PIKMINBEE_UAT_KEYSTORE_BASE64 }}
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/staging" ]; then
+            echo "Signed UAT APKs may only be built from staging."
+            exit 1
+          fi
+          if [ -z "$UAT_KEYSTORE_BASE64" ]; then
+            echo "Missing private UAT keystore. Refusing a rotating debug signature."
+            exit 1
+          fi
+          printf '%s' "$UAT_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/pikminbee-uat.p12"
+          echo "PIKMINBEE_UAT_KEYSTORE_FILE=$RUNNER_TEMP/pikminbee-uat.p12" >> "$GITHUB_ENV"
+      - name: Build fixed-signer UAT APK only when explicitly requested
+        if: github.event_name == 'workflow_dispatch' && inputs.package_apk == true
+        env:
+          PIKMINBEE_UAT: 'true'
+          PIKMINBEE_UAT_SIGN_PASSWORD: ${{ secrets.PIKMINBEE_UAT_SIGN_PASSWORD }}
+        run: |
+          if [ -z "$PIKMINBEE_UAT_SIGN_PASSWORD" ]; then
+            echo "Missing private UAT signing password. Refusing an unsigned build."
+            exit 1
+          fi
+          ./gradlew :app:assembleDebug --no-daemon --console=plain
+      - name: Verify UAT package identity and certificate
+        if: github.event_name == 'workflow_dispatch' && inputs.package_apk == true
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          METADATA="app/build/outputs/apk/debug/output-metadata.json"
+          if [ ! -s "$APK" ] || [ ! -s "$METADATA" ]; then
+            echo "UAT APK or Android Gradle output metadata is missing"
+            exit 1
+          fi
+          # AGP writes the actual applicationId and versionCode into output-metadata.json.
+          # aapt is optional on some hosted Android SDK installations.
+          python3 -c "import json; d=json.load(open('$METADATA')); expected=next(line.split('=',1)[1].strip() for line in open('gradle.properties') if line.startswith('pikminbeeUatVersion=')); assert d['applicationId']=='com.naos.pikminbee.uat', d['applicationId']; assert int(d['elements'][0]['versionCode']) > 1051, d['elements'][0]['versionCode']; assert d['elements'][0]['versionName']==expected, (d['elements'][0]['versionName'], expected); print('Validated UAT metadata:', d['applicationId'], d['elements'][0]['versionName'], d['elements'][0]['versionCode'])"
+          SDK_DIR="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          if [ ! -d "$SDK_DIR/build-tools" ]; then
+            echo "Android SDK build-tools not found: $SDK_DIR"
+            exit 1
+          fi
+          TOOL="$(find "$SDK_DIR/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
+          if [ -z "$TOOL" ]; then
+            echo "apksigner tool not installed in Android SDK build-tools"
+            exit 1
+          fi
+          # Android apksigner may label a certificate as "Signer #1" or "V2 Signer".
+          # Check all reported SHA-256 digests, not the version-specific prefix.
+          "$TOOL" verify --print-certs "$APK" | tee "$RUNNER_TEMP/pikminbee-uat-certificate.txt"
+          actual_sha256s="$(awk '/certificate SHA-256 digest:/ { print $NF }' "$RUNNER_TEMP/pikminbee-uat-certificate.txt" | tr '[:upper:]' '[:lower:]' | sort -u)"
+          expected_sha256='7a34ec161ae557f0c2db222b54696e0ef574bd3f95d135e6597a7bff7e96f807'
+          if [ "$actual_sha256s" != "$expected_sha256" ]; then
+            echo "UAT signing certificate is missing, unexpected, or ambiguous"
+            exit 1
+          fi
+          sha256sum "$APK"
+      - name: Upload manually requested UAT APK
+        if: github.event_name == 'workflow_dispatch' && inputs.package_apk == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: PikminBee-UAT-stable-signed
+          path: app/build/outputs/apk/debug/*.apk
+          retention-days: 7
