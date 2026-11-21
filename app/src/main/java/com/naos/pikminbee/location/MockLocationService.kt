@@ -27,6 +27,7 @@ import com.naos.pikminbee.health.EstimatedWalkStatus
 import com.naos.pikminbee.health.EstimatedStepLedger
 import com.naos.pikminbee.health.EstimatedStepsSyncWorker
 import com.naos.pikminbee.data.AppPreferences
+import com.naos.pikminbee.data.PreparedRouteState
 import com.naos.pikminbee.data.RouteDraftState
 import com.naos.pikminbee.data.WalkSpeedState
 import com.naos.pikminbee.domain.WalkSpeedPreset
@@ -546,59 +547,36 @@ class MockLocationService : Service() {
             ?.let { fix -> runCatching { Coordinate(fix.latitude, fix.longitude) }.getOrNull() }
     }
 
+    /**
+     * Overlay is a compact controller, not a second route planner.
+     * Only the exact road preview explicitly prepared in the main app may be
+     * started here. Large snap offsets require confirmation in the main app.
+     */
     private fun startFloatingDraft(walkMode: WalkMode): Int {
         val label = if (walkMode == WalkMode.FLOWERS) "尋花" else "路徑"
-        if (flowerPlanJob?.isActive == true) {
-            LocationStatus.display.value = "已有道路規劃正在進行，請先取消"
-            updateOverlay()
-            return if (providerActive) START_STICKY else START_NOT_STICKY
-        }
         if (phase == WalkPhase.MOVING || phase == WalkPhase.PAUSED) {
-            LocationStatus.display.value = "請先停止目前行走，再啟動新的" + label
+            LocationStatus.display.value = "請先停止目前行走，再切換模式"
             updateOverlay()
             return START_STICKY
         }
-        val current = floatingOrigin()
-        val stops = if (walkMode == WalkMode.FLOWERS) RouteDraftState.flowerStops.value
-            else RouteDraftState.routeStops.value
-        val anchors = runCatching {
-            FloatingRouteDraft.anchors(current, stops, loop = walkMode == WalkMode.FLOWERS)
-        }.getOrElse { error ->
-            LocationStatus.display.value = label + "無法開始：" +
-                (error.message ?: "請檢查路點")
-            updateOverlay()
-            return if (providerActive) START_STICKY else START_NOT_STICKY
-        }
-        val revision = ++flowerPlanRevision
-        LocationStatus.display.value = label + "道路規劃中 · 尚未移動"
-        updateOverlay()
-        flowerPlanJob = serviceScope.launch {
-            try {
-                val planned = ValhallaPlanner.plan(anchors)
-                if (revision != flowerPlanRevision ||
-                    phase == WalkPhase.MOVING || phase == WalkPhase.PAUSED ||
-                    (providerActive && target != current)) return@launch
-                activateRoute(
-                    planned,
-                    WalkSpeedState.selected.value.metresPerSecond,
-                    walkMode,
-                    loop = walkMode == WalkMode.FLOWERS,
+        val ready = PreparedRouteState.get(walkMode)
+        val origin = floatingOrigin()
+        val stops = if (walkMode == WalkMode.FLOWERS)
+            RouteDraftState.flowerStops.value else RouteDraftState.routeStops.value
+        when {
+            ready == null || !ready.isCurrent(origin, stops) ->
+                LocationStatus.display.value = "請先到主畫面預覽" + label + "道路"
+            ready.requiresSnapConfirmation ->
+                LocationStatus.display.value = "道路吸附距離較大，請在主畫面確認後開始"
+            else -> {
+                val started = activateRoute(
+                    ready.geometry, WalkSpeedState.selected.value.metresPerSecond,
+                    walkMode, loop = ready.loop,
                 )
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Exception) {
-                if (revision == flowerPlanRevision) {
-                    LocationStatus.display.value = label + "道路規劃失敗：" +
-                        (error.message ?: "網路或路點錯誤")
-                }
-            } finally {
-                if (revision == flowerPlanRevision) {
-                    flowerPlanJob = null
-                    updateOverlay()
-                    refreshNotification()
-                }
+                if (started) return START_STICKY
             }
         }
+        updateOverlay()
         return if (providerActive) START_STICKY else START_NOT_STICKY
     }
 
