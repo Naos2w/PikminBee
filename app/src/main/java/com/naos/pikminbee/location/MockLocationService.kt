@@ -60,6 +60,8 @@ object LocationStatus {
     val geometry = MutableStateFlow<List<Coordinate>>(emptyList())
     val overlayVisible = MutableStateFlow(false)
     val progress = MutableStateFlow(WalkingProgressSnapshot())
+    /** Steps estimated for the current/most recently stopped virtual walk only. */
+    val walkEstimatedSteps = MutableStateFlow(0L)
 }
 
 class MockLocationService : Service() {
@@ -134,6 +136,7 @@ class MockLocationService : Service() {
     private var estimatedStepPersistTicker = 0
     private var sessionStartMillis = 0L
     private var sessionStartSteps = 0L
+    private var walkOriginSteps = 0L
     private var speedMetersPerSecond = WalkSpeedPreset.DEFAULT.metresPerSecond
     private var loopRoute = false
     private var previousTickMillis = 0L
@@ -157,9 +160,13 @@ class MockLocationService : Service() {
                 val acceptedMetres = if (loopRoute) travelMetres else
                     travelMetres.coerceAtMost((trackLengthMeters - walkingDistanceMeters).coerceAtLeast(0.0))
                 if (acceptedMetres > 0) {
-                    EstimatedWalkStatus.state.value = estimatedSteps.addTravel(acceptedMetres)
+                    val snapshot = estimatedSteps.addTravel(acceptedMetres)
+                    EstimatedWalkStatus.state.value = snapshot
+                    LocationStatus.walkEstimatedSteps.value =
+                        estimatedSteps.estimatedSince(walkOriginSteps)
                     if (++estimatedStepPersistTicker >= 15) {
                         saveEstimatedSteps()
+                        refreshNotification()
                         estimatedStepPersistTicker = 0
                     }
                     // Health Connect does not receive live GPS ticks. Persist a
@@ -233,6 +240,7 @@ class MockLocationService : Service() {
                 trackLengthMeters = 0.0
                 stopThresholds = emptyList()
                 LocationStatus.progress.value = WalkingProgressSnapshot()
+                LocationStatus.walkEstimatedSteps.value = 0L
                 loopRoute = false
                 mode = null
                 phase = WalkPhase.PARKED
@@ -383,6 +391,7 @@ class MockLocationService : Service() {
                 stopThresholds = emptyList()
                 walkingDistanceMeters = 0.0
                 LocationStatus.progress.value = WalkingProgressSnapshot()
+                LocationStatus.walkEstimatedSteps.value = 0L
                 target = remembered
                 journal.record(remembered, force = true)
                 LocationStatus.phase.value = phase
@@ -408,16 +417,24 @@ class MockLocationService : Service() {
                     LocationStatus.display.value = "步行已暫停"
                     target?.let { journal.record(it, force = true) }
                     refreshNotification()
+                    updateOverlay()
                 }
                 return START_STICKY
             }
             ACTION_RESUME_ROUTE -> {
                 if (phase == WalkPhase.PAUSED) {
                     previousTickMillis = SystemClock.elapsedRealtime()
+                    // Exclude the paused interval from the next HC estimate
+                    // record after a successful pause checkpoint.
+                    val currentSteps = estimatedSteps.snapshot().estimatedSteps
+                    if (sessionStartSteps == currentSteps && sessionStartMillis > 0L) {
+                        sessionStartMillis = System.currentTimeMillis()
+                    }
                     phase = WalkPhase.MOVING
                     LocationStatus.phase.value = phase
                     LocationStatus.display.value = "沿道路步行中"
                     refreshNotification()
+                    updateOverlay()
                 }
                 return START_STICKY
             }
@@ -437,6 +454,7 @@ class MockLocationService : Service() {
                     finishEstimatedSession()
                     saveEstimatedSteps()
                     refreshNotification()
+                    updateOverlay()
                 }
                 return START_STICKY
             }
@@ -448,6 +466,7 @@ class MockLocationService : Service() {
                 stopThresholds = emptyList()
                 walkingDistanceMeters = 0.0
                 LocationStatus.progress.value = WalkingProgressSnapshot()
+                LocationStatus.walkEstimatedSteps.value = 0L
                 loopRoute = false
                 mode = null
                 phase = WalkPhase.IDLE
@@ -474,6 +493,7 @@ class MockLocationService : Service() {
                 trackLengthMeters = 0.0
                 stopThresholds = emptyList()
                 LocationStatus.progress.value = WalkingProgressSnapshot()
+                LocationStatus.walkEstimatedSteps.value = 0L
                 LocationStatus.phase.value = phase
                 LocationStatus.mode.value = null
                 LocationStatus.geometry.value = emptyList()
@@ -644,6 +664,8 @@ class MockLocationService : Service() {
         finishEstimatedSession()
         sessionStartMillis = System.currentTimeMillis()
         sessionStartSteps = estimatedSteps.snapshot().estimatedSteps
+        walkOriginSteps = sessionStartSteps
+        LocationStatus.walkEstimatedSteps.value = 0L
         track = planned
         trackLengthMeters = length
         val draftStops = if (routeMode == WalkMode.FLOWERS)
@@ -666,6 +688,7 @@ class MockLocationService : Service() {
             "尋花步行中" else "沿道路步行中"
         scheduleTicks()
         refreshNotification()
+        updateOverlay()
         return true
     }
 
@@ -736,7 +759,11 @@ class MockLocationService : Service() {
         val builder = Notification.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setContentTitle("PikminBee · 測試定位")
-            .setContentText(LocationStatus.display.value)
+            .setContentText(LocationStatus.display.value +
+                if (mode != null && phase in listOf(
+                        WalkPhase.MOVING, WalkPhase.PAUSED, WalkPhase.PARKED))
+                    " · 本次估算 ${LocationStatus.walkEstimatedSteps.value} 步"
+                else "")
             .setOngoing(true)
             .setOnlyAlertOnce(true)
 
@@ -815,6 +842,7 @@ class MockLocationService : Service() {
         trackLengthMeters = 0.0
         stopThresholds = emptyList()
         LocationStatus.progress.value = WalkingProgressSnapshot()
+        LocationStatus.walkEstimatedSteps.value = 0L
         mode = null
         loopRoute = false
         phase = WalkPhase.IDLE

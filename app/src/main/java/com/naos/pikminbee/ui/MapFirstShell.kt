@@ -87,6 +87,8 @@ fun MapFirstShell(
     flowerStopsCount: Int = 0,
     flowerActive: Boolean = false,
     walkingProgress: WalkingProgressSnapshot = WalkingProgressSnapshot(),
+    walkEstimatedSteps: Long = 0L,
+    walkStopped: Boolean = false,
     routeSpeedKmh: Double = 1.4,
     routeActive: Boolean = false,
     routePaused: Boolean = false,
@@ -206,17 +208,35 @@ fun MapFirstShell(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text(if (activeWalking) (if (flowerActive) "尋花行走中" else "道路行走中") else "下一個路點",
-                            color = p.muted, fontSize = 11.sp, maxLines = 1)
-                        Text(if (activeWalking) (if (routePaused) "已暫停" else "進行中")
-                            else if (routePlanning) "正在規劃…"
-                            else if (routePreviewReady) "已規劃 · 請確認"
-                            else "第 ${modeStopsCount + 1} 點",
+                        Text(
+                            when {
+                                activeWalking && routePaused -> "已暫停 · 本次估算"
+                                activeWalking -> (if (flowerActive) "尋花中" else "行走中") + " · 本次估算"
+                                walkStopped -> "已結束 · 本次估算"
+                                else -> "下一個路點"
+                            },
+                            color = p.muted, fontSize = 11.sp, maxLines = 1,
+                        )
+                        Text(
+                            when {
+                                activeWalking || walkStopped -> "${walkEstimatedSteps} 步"
+                                routePlanning -> "正在規劃…"
+                                routePreviewReady -> "已規劃 · 請確認"
+                                else -> "第 ${modeStopsCount + 1} 點"
+                            },
                             color = if (activeWalking) Color(
                                 if (routePaused) BeeActionColors.PAUSED_BLUE
                                 else BeeActionColors.START_GREEN
                             ) else p.ink,
-                            fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                            fontSize = if (activeWalking || walkStopped) 17.sp else 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            modifier = Modifier.semantics {
+                                if (activeWalking || walkStopped) {
+                                    contentDescription = "本次模擬行走估算 ${walkEstimatedSteps} 步"
+                                }
+                            },
+                        )
                     }
                     Surface(
                         onClick = if (activeWalking) onRouteStop else onRouteUndo,
@@ -228,11 +248,17 @@ fun MapFirstShell(
                             Color(BeeActionColors.ON_DANGER) else p.ink,
                         modifier = Modifier.height(48.dp),
                     ) {
-                        Box(Modifier.padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
-                            Text(if (activeWalking) "■ 停止" else "↶ 上一步",
-                                color = if (activeWalking) Color(BeeActionColors.ON_DANGER)
-                                else p.ink, fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold)
+                        Row(Modifier.padding(horizontal = if (activeWalking) 12.dp else 13.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            NaosActionIcon(
+                                if (activeWalking) NaosActionGlyph.STOP else NaosActionGlyph.UNDO,
+                                if (activeWalking) Color(BeeActionColors.ON_DANGER) else p.ink,
+                            )
+                            if (activeWalking) {
+                                Text("停止", color = Color(BeeActionColors.ON_DANGER),
+                                    fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            }
                         }
                     }
                     Surface(
@@ -246,15 +272,26 @@ fun MapFirstShell(
                             else Color(BeeActionColors.ON_BRIGHT),
                         modifier = Modifier.height(48.dp),
                     ) {
-                        Box(Modifier.padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
+                        Row(Modifier.padding(horizontal = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            val controlInk = if (!activeWalking && !routePreviewReady) p.onAccent
+                                else Color(BeeActionColors.ON_BRIGHT)
+                            NaosActionIcon(
+                                when {
+                                    activeWalking && !routePaused -> NaosActionGlyph.PAUSE
+                                    activeWalking || routePreviewReady -> NaosActionGlyph.PLAY
+                                    else -> NaosActionGlyph.PLAN
+                                },
+                                controlInk,
+                            )
                             Text(when {
-                                activeWalking && routePaused -> "▷ 繼續"
-                                activeWalking -> "Ⅱ 暫停"
-                                routePlanning -> "規劃中…"
-                                routePreviewReady -> "▷ 開始行走"
-                                else -> "規劃路徑"
-                            }, color = if (!activeWalking && !routePreviewReady) p.onAccent
-                                else Color(BeeActionColors.ON_BRIGHT),
+                                activeWalking && routePaused -> "繼續"
+                                activeWalking -> "暫停"
+                                routePlanning -> "規劃中"
+                                routePreviewReady -> "開始"
+                                else -> "規劃"
+                            }, color = controlInk,
                                 fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                         }
                     }
@@ -360,26 +397,25 @@ fun MapFirstShell(
                     .padding(horizontal = 17.dp, vertical = 5.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) { modeContent() }
-            // The main app exposes the overlay's convenience actions too.
+            // Compact icon-only shortcuts; TalkBack still reads every action.
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 10.dp),
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TextButton(onClick = onRestoreRealGps, modifier = Modifier.weight(1f)) {
-                    Text("真實 GPS", fontSize = 11.sp)
-                }
-                TextButton(onClick = onRestoreVirtualGps, modifier = Modifier.weight(1f)) {
-                    Text("虛擬 GPS", fontSize = 11.sp)
-                }
-                TextButton(onClick = onFlowerVision, modifier = Modifier.weight(1f)) {
-                    Text("花朵辨識", fontSize = 11.sp)
-                }
-                TextButton(onClick = onCycleSpeed,
-                    modifier = Modifier.weight(1f).semantics {
-                        contentDescription = "切換速度，目前 ${routeSpeedKmh} km/h"
-                    }) {
-                    Text("切換速度", fontSize = 11.sp)
+                listOf(
+                    Triple(NaosActionGlyph.REAL_GPS, "還原真實 GPS", onRestoreRealGps),
+                    Triple(NaosActionGlyph.VIRTUAL_GPS, "恢復上次虛擬位置", onRestoreVirtualGps),
+                    Triple(NaosActionGlyph.FLOWER, "開啟花朵辨識", onFlowerVision),
+                    Triple(NaosActionGlyph.SPEED,
+                        "切換速度，目前 ${routeSpeedKmh} km/h", onCycleSpeed),
+                ).forEach { (glyph, label, action) ->
+                    IconButton(
+                        onClick = action,
+                        modifier = Modifier.size(48.dp)
+                            .background(p.soft, RoundedCornerShape(13.dp))
+                            .semantics { contentDescription = label },
+                    ) { NaosActionIcon(glyph, p.ink) }
                 }
             }
             Spacer(Modifier.height(8.dp))

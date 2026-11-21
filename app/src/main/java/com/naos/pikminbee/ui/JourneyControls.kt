@@ -3,15 +3,20 @@ package com.naos.pikminbee.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -36,6 +41,7 @@ fun JourneyControls(
     origin: Coordinate?,
     activeMode: WalkMode?,
     phase: WalkPhase,
+    walkEstimatedSteps: Long,
     speedPreset: WalkSpeedPreset,
     onSpeedSelected: (WalkSpeedPreset) -> Unit,
     foreground: Color,
@@ -59,12 +65,12 @@ fun JourneyControls(
     val canPlan = origin != null && stops.isNotEmpty()
     val canEdit = !activeWalk && !routePlanning
     val primaryLabel = when {
-        controlling && phase == WalkPhase.PAUSED -> "▶ 繼續"
-        controlling -> "Ⅱ 暫停"
+        controlling && phase == WalkPhase.PAUSED -> "繼續"
+        controlling -> "暫停"
         otherWalking -> "其他行走進行中"
         routePlanning -> "規劃中…"
-        hasPreview -> "▶ 開始行走"
-        else -> "規劃路徑"
+        hasPreview -> "開始"
+        else -> "規劃"
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -120,6 +126,16 @@ fun JourneyControls(
             else -> Text("先選路點並預覽，不會自動移動定位。",
                 color = muted, fontSize = 12.sp)
         }
+        if (controlling || (phase == WalkPhase.PARKED &&
+                activeMode == mode && walkEstimatedSteps > 0L)) {
+            Row(verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                NaosActionIcon(NaosActionGlyph.STEPS, foreground)
+                Text("本次估算 ${walkEstimatedSteps} 步",
+                    color = foreground, fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold)
+            }
+        }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
                 onClick = onRoutePrimary,
@@ -134,7 +150,17 @@ fun JourneyControls(
                     disabledContainerColor = muted.copy(alpha = .14f),
                     disabledContentColor = muted,
                 ),
-            ) { Text(primaryLabel, fontSize = 13.sp, fontWeight = FontWeight.SemiBold) }
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    NaosActionIcon(when {
+                        controlling && phase == WalkPhase.MOVING -> NaosActionGlyph.PAUSE
+                        controlling || hasPreview -> NaosActionGlyph.PLAY
+                        else -> NaosActionGlyph.PLAN
+                    }, Color.White)
+                    Text(primaryLabel, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
             Button(
                 onClick = onRouteStop,
                 enabled = controlling,
@@ -145,11 +171,19 @@ fun JourneyControls(
                     disabledContainerColor = muted.copy(alpha = .14f),
                     disabledContentColor = muted,
                 ),
-            ) { Text("■ 停止", fontSize = 13.sp) }
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    NaosActionIcon(NaosActionGlyph.STOP, Color.White)
+                    Text("停止", fontSize = 13.sp)
+                }
+            }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            TextButton(onClick = onUndo, enabled = canEdit && stops.isNotEmpty()) {
-                Text("上一步")
+            IconButton(onClick = onUndo, enabled = canEdit && stops.isNotEmpty(),
+                modifier = Modifier.size(48.dp)
+                    .semantics { contentDescription = "移除上一個路點" }) {
+                NaosActionIcon(NaosActionGlyph.UNDO, foreground)
             }
             TextButton(
                 onClick = { onClear(); onMessage("路點已清除") },

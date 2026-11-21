@@ -13,8 +13,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -30,6 +32,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -64,6 +68,7 @@ fun HealthConnectSettings(dark: Boolean, onMessage: (String) -> Unit) {
     val estimates by EstimatedWalkStatus.state.collectAsState()
     val sensor by PhysicalStepsStatus.state.collectAsState()
     val walkPhase by LocationStatus.phase.collectAsState()
+    val walkSteps by LocationStatus.walkEstimatedSteps.collectAsState()
     val queueRevision by EstimatedStepLedger.changes.collectAsState()
     val lastVirtualSync by HealthConnectStepSync.lastSyncResult.collectAsState()
 
@@ -188,8 +193,17 @@ fun HealthConnectSettings(dark: Boolean, onMessage: (String) -> Unit) {
 
     MapGlass(dark, Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("♡ Health Connect · 步數", fontSize = 18.sp,
-                fontWeight = FontWeight.SemiBold, color = foreground)
+            Row(Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically) {
+                Text("Health Connect · 步數", fontSize = 18.sp,
+                    fontWeight = FontWeight.SemiBold, color = foreground)
+                IconButton(
+                    onClick = { scope.launch { refresh() } },
+                    modifier = Modifier.size(48.dp)
+                        .semantics { contentDescription = "更新今日步數與同步狀態" },
+                ) { NaosActionIcon(NaosActionGlyph.REFRESH, foreground) }
+            }
 
             Text("今日 Health Connect 彙總步數：" +
                 (hcToday?.toString() ?: "尚未取得"),
@@ -212,8 +226,7 @@ fun HealthConnectSettings(dark: Boolean, onMessage: (String) -> Unit) {
                     "真實行走由系統記錄；模擬 GPS 不會觸發計步感測器。"
                     else "此裝置不符合 Android 原生計步條件；可使用手機計步感測器相容模式。",
                     fontSize = 11.sp, color = muted)
-                Button(onClick = { scope.launch { refresh() } },
-                    modifier = Modifier.fillMaxWidth()) { Text("更新今日步數與權限狀態") }
+
             } else {
                 Text("Health Connect 不可用；可先在本機檢視感測器步數。",
                     fontSize = 12.sp, color = muted)
@@ -283,10 +296,11 @@ fun HealthConnectSettings(dark: Boolean, onMessage: (String) -> Unit) {
                 "Health Connect 彙總會處理重疊來源，不保證等量增加。",
                 fontSize = 11.sp, color = muted)
             if (walkPhase == WalkPhase.MOVING || walkPhase == WalkPhase.PAUSED) {
-                Text("模擬路線" +
-                    (if (walkPhase == WalkPhase.PAUSED) "已暫停。" else "行走中。") +
-                    "啟用同步後，每約一分鐘或暫停時保存一段估算步數；" +
-                    "背景寫入可能延遲。",
+                Text(
+                    (if (walkPhase == WalkPhase.PAUSED) "已暫停" else "行走中") +
+                        " · 本次估算 ${walkSteps} 步",
+                    fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = foreground)
+                Text("啟用同步後定期保存；暫停與停止會保存該段估算，背景寫入可能延遲。",
                     fontSize = 11.sp, color = muted)
             }
             Row(verticalAlignment = Alignment.CenterVertically) {

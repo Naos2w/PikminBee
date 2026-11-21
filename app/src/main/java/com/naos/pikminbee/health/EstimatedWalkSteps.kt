@@ -25,6 +25,10 @@ class EstimatedStepCounter(private val strideMetres: Double = 0.72) {
     }
     fun snapshot(): EstimatedStepSnapshot =
         EstimatedStepSnapshot(metres, floor(metres / strideMetres).toLong())
+
+    /** All-time totals may be restored; a new walk displays steps since its start. */
+    fun estimatedSince(startSteps: Long): Long =
+        (snapshot().estimatedSteps - startSteps).coerceAtLeast(0L)
 }
 
 /** One observable source for Activity and overlay; synthetic and measured steps are separate. */
