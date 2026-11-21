@@ -36,6 +36,8 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.health.connect.client.PermissionController
 import com.naos.pikminbee.health.EstimatedStepLedger
+import com.naos.pikminbee.location.LocationStatus
+import com.naos.pikminbee.domain.WalkPhase
 import com.naos.pikminbee.health.EstimatedStepsSyncWorker
 import com.naos.pikminbee.health.EstimatedWalkStatus
 import com.naos.pikminbee.health.HealthConnectRealSteps
@@ -46,6 +48,7 @@ import com.naos.pikminbee.health.PhysicalStepsStatus
 import com.naos.pikminbee.health.PhysicalStepsSyncWorker
 import com.naos.pikminbee.health.RealStepSource
 import com.naos.pikminbee.health.RealStepSourcePolicy
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -60,6 +63,9 @@ fun HealthConnectSettings(dark: Boolean, onMessage: (String) -> Unit) {
     val scope = rememberCoroutineScope()
     val estimates by EstimatedWalkStatus.state.collectAsState()
     val sensor by PhysicalStepsStatus.state.collectAsState()
+    val walkPhase by LocationStatus.phase.collectAsState()
+    val queueRevision by EstimatedStepLedger.changes.collectAsState()
+    val lastVirtualSync by HealthConnectStepSync.lastSyncResult.collectAsState()
 
     val foreground = if (dark) Color(0xFFF3F7FF) else Color(0xFF18263A)
     val muted = if (dark) Color(0xFFC6D3E6) else Color(0xFF52627A)
@@ -78,6 +84,7 @@ fun HealthConnectSettings(dark: Boolean, onMessage: (String) -> Unit) {
     var readAllowed by remember { mutableStateOf(false) }
     var writeAllowed by remember { mutableStateOf(false) }
     var hcToday by remember { mutableStateOf<Long?>(null) }
+    var ownVirtualToday by remember { mutableStateOf<Long?>(null) }
     var virtualPending by remember { mutableStateOf(estimateLedger.pending().size) }
     var physicalPending by remember { mutableStateOf(physicalLedger.pending().size) }
     var feedback by remember { mutableStateOf("尚未檢查 Health Connect 授權") }
@@ -115,7 +122,10 @@ fun HealthConnectSettings(dark: Boolean, onMessage: (String) -> Unit) {
         scope.launch {
             readAllowed = HealthConnectRealSteps.hasReadPermission(context)
             writeAllowed = HealthConnectStepSync.hasWritePermission(context)
-            if (readAllowed) hcToday = HealthConnectRealSteps.todayAggregate(context)
+            if (readAllowed) {
+                hcToday = HealthConnectRealSteps.todayAggregate(context)
+                ownVirtualToday = HealthConnectStepSync.todayOwnVirtualSteps(context)
+            }
             if (writeAllowed) {
                 if (virtualOptIn) EstimatedStepsSyncWorker.enqueue(context)
                 if (physicalOptIn && !native) PhysicalStepsSyncWorker.enqueue(context)
@@ -128,13 +138,22 @@ fun HealthConnectSettings(dark: Boolean, onMessage: (String) -> Unit) {
         readAllowed = HealthConnectRealSteps.hasReadPermission(context)
         writeAllowed = HealthConnectStepSync.hasWritePermission(context)
         hcToday = if (readAllowed) HealthConnectRealSteps.todayAggregate(context) else null
+        ownVirtualToday = if (readAllowed) HealthConnectStepSync.todayOwnVirtualSteps(context)
+            else null
         virtualPending = estimateLedger.pending().size
         physicalPending = physicalLedger.pending().size
         feedback = if (!available) "這台裝置目前無法使用 Health Connect"
             else if (readAllowed) "已讀取 Health Connect 今日彙總步數"
             else "尚未取得 READ_STEPS，無法讀取今日步數"
     }
-    LaunchedEffect(available) { refresh() }
+    // A worker can complete while this page is open; refresh only on queue or
+    // sync-result changes, not every GPS tick.
+    LaunchedEffect(available, queueRevision, lastVirtualSync) {
+        while (true) {
+            refresh()
+            delay(60_000L)
+        }
+    }
 
     if (confirmDiscard != null) {
         val type = confirmDiscard
@@ -175,7 +194,7 @@ fun HealthConnectSettings(dark: Boolean, onMessage: (String) -> Unit) {
             Text("今日 Health Connect 彙總步數：" +
                 (hcToday?.toString() ?: "尚未取得"),
                 fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = foreground)
-            Text("此數字是 Health Connect 的跨來源彙總，可能包含其他 App 及使用者授權的手動虛擬估算紀錄，不能直接當成手機感測器專屬步數。",
+            Text("跨來源彙總可能去除重疊步數，與虛擬估算不一定相同。",
                 fontSize = 11.sp, color = muted)
             Text("目前實體步數來源：" + when (source) {
                 RealStepSource.HC_ON_DEVICE -> "Android 原生 Health Connect 計步"
@@ -190,7 +209,7 @@ fun HealthConnectSettings(dark: Boolean, onMessage: (String) -> Unit) {
                     Text(if (readAllowed) "重新確認讀取步數權限" else "授權 READ_STEPS／啟用系統計步")
                 }
                 Text(if (native)
-                    "此裝置支援系統原生計步：授予 READ_STEPS 後，Health Connect 可自行記錄手機行走步數，不另外重複上傳感測器資料。"
+                    "真實行走由系統記錄；模擬 GPS 不會觸發計步感測器。"
                     else "此裝置不符合 Android 原生計步條件；可使用手機計步感測器相容模式。",
                     fontSize = 11.sp, color = muted)
                 Button(onClick = { scope.launch { refresh() } },
@@ -253,14 +272,27 @@ fun HealthConnectSettings(dark: Boolean, onMessage: (String) -> Unit) {
                     fontSize = 12.sp, color = muted)
             }
 
-            Text("模擬路徑／尋花累計估算：" + estimates.estimatedSteps + " 步",
+            Text("本機虛擬行走累計估算：" + estimates.estimatedSteps + " 步",
                 fontSize = 14.sp, color = foreground)
-            Text("虛擬步數由路程與預設步幅換算，不等於真的走路；不會與手機感測步數混在一起。",
+            Text("這是歷次模擬路程的累計，不是今日 Health Connect 步數。",
                 fontSize = 11.sp, color = muted)
+            Text("PikminBee 今日已寫入虛擬估算：" +
+                (ownVirtualToday?.toString() ?: "尚未取得") + " 步",
+                fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = foreground)
+            Text("此處只計算 PikminBee 寫入的手動估算紀錄。" +
+                "Health Connect 彙總會處理重疊來源，不保證等量增加。",
+                fontSize = 11.sp, color = muted)
+            if (walkPhase == WalkPhase.MOVING || walkPhase == WalkPhase.PAUSED) {
+                Text("模擬路線" +
+                    (if (walkPhase == WalkPhase.PAUSED) "已暫停。" else "行走中。") +
+                    "啟用同步後，每約一分鐘或暫停時保存一段估算步數；" +
+                    "背景寫入可能延遲。",
+                    fontSize = 11.sp, color = muted)
+            }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("同步虛擬路徑估算步數", fontSize = 13.sp, color = foreground)
-                    Text("預設關閉。明確同意後才以手動輸入標示寫入，可能與其他來源重疊。",
+                    Text("明確開啟後才同步手動估算，不視為實際運動。",
                         fontSize = 11.sp, color = muted)
                 }
                 Switch(checked = virtualOptIn, onCheckedChange = {
@@ -283,6 +315,10 @@ fun HealthConnectSettings(dark: Boolean, onMessage: (String) -> Unit) {
             }
             Text("待同步虛擬步行紀錄：" + virtualPending + " 筆",
                 fontSize = 12.sp, color = muted)
+            lastVirtualSync?.let { result ->
+                Text("上次寫入結果：" + result.note,
+                    fontSize = 12.sp, color = muted)
+            }
             if (virtualPending > 0) {
                 Button(
                     enabled = virtualOptIn && available && writeAllowed,
@@ -299,7 +335,7 @@ fun HealthConnectSettings(dark: Boolean, onMessage: (String) -> Unit) {
                     modifier = Modifier.fillMaxWidth()) { Text("清除未同步虛擬步數") }
             }
             Text(feedback, fontSize = 11.sp, color = muted)
-            Text("沒有寫入授權或未明確啟用同步時，PikminBee 不會向 Health Connect 寫入步數；也不會將任何健康資料傳至個人伺服器。",
+            Text("未開啟同步或未取得寫入權限，就不會寫入虛擬步數。",
                 fontSize = 11.sp, color = muted)
         }
     }

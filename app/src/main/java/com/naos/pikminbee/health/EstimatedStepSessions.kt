@@ -4,6 +4,7 @@ import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
+import kotlinx.coroutines.flow.MutableStateFlow
 
 /** Only *virtual* route estimates; recording them never implies physical exercise. */
 data class EstimatedStepSession(
@@ -48,7 +49,12 @@ object EstimatedStepSessionCodec {
 }
 
 class EstimatedStepLedger(context: Context) {
-    companion object { private val transactionLock = Any() }
+    companion object {
+        private val transactionLock = Any()
+        /** Signals UI readers when the queue changes, including after background sync. */
+        val changes = MutableStateFlow(0L)
+        private fun changed() { changes.value += 1L }
+    }
     private val prefs = context.getSharedPreferences("pikminbee_virtual_step_sessions", Context.MODE_PRIVATE)
 
     @Synchronized fun pending(): List<EstimatedStepSession> = all().filterNot { it.synced }
@@ -68,6 +74,7 @@ class EstimatedStepLedger(context: Context) {
         val recentSynced = previous.filter { it.synced }.takeLast(499 - unsynced.size)
         check(prefs.edit().putString("sessions", EstimatedStepSessionCodec.encode(recentSynced + unsynced + next))
             .commit()) { "無法保存虛擬步數紀錄" }
+        changed()
         next
         }
     }
@@ -78,6 +85,7 @@ class EstimatedStepLedger(context: Context) {
         check(prefs.edit().putString("sessions", EstimatedStepSessionCodec.encode(
             all().filter { it.synced }
         )).commit()) { "無法清除尚未同步的虛擬步數" }
+        changed()
         }
     }
 
@@ -88,6 +96,7 @@ class EstimatedStepLedger(context: Context) {
         check(prefs.edit().putString("sessions", EstimatedStepSessionCodec.encode(
             before.map { if (it.id == id) it.copy(synced = true) else it }
         )).commit()) { "無法保存步數同步狀態" }
+        changed()
         }
     }
 

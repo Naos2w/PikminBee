@@ -20,7 +20,10 @@ class EstimatedStepsSyncWorker(context: Context, params: WorkerParameters) :
             if (!EstimatedStepLedger(context).optIn()) return
             val request = OneTimeWorkRequestBuilder<EstimatedStepsSyncWorker>().build()
             WorkManager.getInstance(context.applicationContext)
-                .enqueueUniqueWork(UNIQUE_NAME, ExistingWorkPolicy.KEEP, request)
+                // KEEP can silently strand a newly saved chunk if an older worker
+                // finishes after reading its queue. APPEND_OR_REPLACE ensures a
+                // subsequent pass, while stable client IDs prevent duplicate writes.
+                .enqueueUniqueWork(UNIQUE_NAME, ExistingWorkPolicy.APPEND_OR_REPLACE, request)
         }
     }
 
