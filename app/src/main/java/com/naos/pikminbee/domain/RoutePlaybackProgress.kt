@@ -13,6 +13,13 @@ data class WalkingProgressSnapshot(
 ) {
     val fraction: Float get() = if (totalMetres <= 0.0) 0f
         else (travelledMetres / totalMetres).toFloat().coerceIn(0f, 1f)
+    /** Display the actual leg, not just the upcoming waypoint index. */
+    val activeLegLabel: String get() = when {
+        waypointCount <= 0 -> "尚無路點"
+        nextWaypoint == null -> "已抵達第 ${waypointCount} 點"
+        nextWaypoint <= 1 -> "起點 → 1"
+        else -> "${nextWaypoint - 1} → ${nextWaypoint}"
+    }
 }
 
 object RoutePlaybackProgress {

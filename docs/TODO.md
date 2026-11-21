@@ -1,5 +1,16 @@
 # PikminBee TODO
 
+## P0 · Route leg clarity, matching overlay navigation and optional integrations (21 Nov 2026)
+- [x] Correct route status semantics: `nextWaypoint=3` means the phone is walking from waypoint **2 → 3** (not “at 3/4”). Surface `activeLegLabel` consistently in the main mini-bar and floating summary, with start/arrival cases and JVM tests.
+- [x] Rename the arrow before Clear: **撤銷上一點** removes just the latest drafted waypoint; **清除全部** removes the entire draft. Avoid ambiguous icon-only destructive actions.
+- [x] Match the floating toolbar's lower four actions to the main dock: **瞬移 / 路徑 / 尋花 / 收藏**. They open the app in the selected tab without silently starting GPS; the upper four remain primary/stop/real GPS/virtual GPS. Walking-speed presets remain in route settings, not a floating shortcut. Long press the floating header bee to hide the overlay without stopping a walk.
+- [x] Restore **跟隨系統** alongside Light/Dark, making SYSTEM the default for new users and preserving an existing user selection. Add JVM appearance policy tests.
+- [x] Health Connect stays **optional and collapsed** by default; offer separate explicit READ_STEPS for today’s total and WRITE_STEPS for exporting *manual virtual estimates*. Require a purpose-specific consent dialog before enabling the virtual export; do not silently turn on synchronisation on a permission grant. Add manage/revoke access and keep Android sensor fallback behind advanced settings.
+- [x] Wi-Fi panel is separated as an optional settings card; existing LAN server/pairing code inspected, design and unimplemented security gates recorded in `docs/WIFI_REMOTE_CONTROL_PLAN.md`.
+- [x] MSI Kotlin compilation, **189/189** JVM tests (0 failures/errors/skips), Android Lint and `git diff --check` passed (Gradle exit 0). Submit the normal checked DEV PR; this batch is **not** yet in UAT 0.9.1.
+- [ ] Real POCO acceptance: visual current 2→3 segment/arrival, 4 overlay navigation icons to proper tabs, undo vs clear, automatic system theme changes, HC skip/READ-only/WRITE-only/deny/revoke without GPS disruption.
+- [ ] LAN later: implement paired web controller with preview → explicit start, reconcile shared mode state and security. **Current /api/route/start still starts directly**, so do not claim remote preview parity.
+
 ## P0 · Unwanted coordinate TextField focus on map (21 Nov 2026)
 - [x] Diagnose: `CoordinateTopBar` always mounted a focusable `BasicTextField`, even in read-only non-teleport modes. Android could focus its first text field automatically on activity/window resumption, showing keyboard/caret over the map.
 - [x] Map-first fix: render a non-focusable text label by default; mount a `BasicTextField` only after tapping a dedicated Edit icon in Teleport mode. Confirm (checkmark)/Go/Teleport dismiss keyboard and focus. Never request focus just because map GPS/selection text changes.

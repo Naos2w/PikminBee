@@ -119,6 +119,7 @@ fun BeeSettingsScreen(
                     horizontalArrangement = Arrangement.spacedBy(7.dp),
                 ) {
                     listOf(
+                        MapAppearance.SYSTEM to "跟隨系統",
                         MapAppearance.LIGHT to "淺色",
                         MapAppearance.DARK to "深色",
                     ).forEach { (option, label) ->
@@ -186,15 +187,6 @@ fun BeeSettingsScreen(
                 TextButton(onClick = onReplayOverlayGuide) {
                     Text("查看懸浮控制操作說明")
                 }
-                TextButton(onClick = onToggleWifi) {
-                    Text(if (showWifiPanel) "收起 Wi-Fi 遠端控制" else "Wi-Fi 遠端控制")
-                }
-                if (showWifiPanel) WifiControlPanel(
-                    isMockActive = mockActive,
-                    foreground = foreground,
-                    muted = muted,
-                    onMessage = onMessage,
-                )
                 BackgroundSessionPanel(
                     isMockActive = mockActive,
                     checkpoint = checkpoint,
@@ -202,6 +194,28 @@ fun BeeSettingsScreen(
                     muted = muted,
                     onMessage = onMessage,
                     onAskLocationPermission = onAskLocation,
+                )
+            }
+        }
+        androidx.compose.material3.Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(22.dp),
+            color = palette.surface,
+        ) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Wi-Fi 遠端控制 · 選用", fontSize = 18.sp,
+                    fontWeight = FontWeight.SemiBold, color = foreground)
+                Text("只在你主動開啟時於私人 Wi-Fi 使用，需配對碼及手機核准。" +
+                    "關閉後立即撤銷連線；不影響路徑行走。",
+                    fontSize = 12.sp, color = muted)
+                TextButton(onClick = onToggleWifi) {
+                    Text(if (showWifiPanel) "收起 Wi-Fi 控制設定" else "設定 Wi-Fi 控制")
+                }
+                if (showWifiPanel) WifiControlPanel(
+                    isMockActive = mockActive,
+                    foreground = foreground,
+                    muted = muted,
+                    onMessage = onMessage,
                 )
             }
         }

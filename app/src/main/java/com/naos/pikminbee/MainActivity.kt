@@ -138,8 +138,10 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val EXTRA_OPEN_SETTINGS = "com.naos.pikminbee.OPEN_SETTINGS"
         const val EXTRA_OPEN_FLOWER_VISION = "com.naos.pikminbee.OPEN_FLOWER_VISION"
+        const val EXTRA_OPEN_MODE = "com.naos.pikminbee.OPEN_MODE"
         val settingsRequests = MutableStateFlow(0L)
         val flowerVisionRequests = MutableStateFlow(0L)
+        val mapModeRequests = MutableStateFlow(-1)
     }
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
@@ -148,6 +150,8 @@ class MainActivity : ComponentActivity() {
             settingsRequests.value++
         if (intent.getBooleanExtra(EXTRA_OPEN_FLOWER_VISION, false))
             flowerVisionRequests.value++
+        val selectedMode = intent.getIntExtra(EXTRA_OPEN_MODE, -1)
+        if (selectedMode in 0..3) mapModeRequests.value = selectedMode
     }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -216,9 +220,17 @@ private fun PikminBeeScreen() {
     var latitudeText by remember { mutableStateOf(selected.latitude.toString()) }
     var longitudeText by remember { mutableStateOf(selected.longitude.toString()) }
     var tab by remember {
-        mutableStateOf(if ((context as? MainActivity)?.intent
-                ?.getBooleanExtra(MainActivity.EXTRA_OPEN_FLOWER_VISION, false) == true)
-            ToolTab.FLOWERS else ToolTab.TELEPORT)
+        val requestedMode = (context as? MainActivity)?.intent
+            ?.getIntExtra(MainActivity.EXTRA_OPEN_MODE, -1) ?: -1
+        mutableStateOf(
+            when {
+                requestedMode in 0..3 -> ToolTab.entries[requestedMode]
+                (context as? MainActivity)?.intent
+                    ?.getBooleanExtra(MainActivity.EXTRA_OPEN_FLOWER_VISION, false) == true ->
+                    ToolTab.FLOWERS
+                else -> ToolTab.TELEPORT
+            },
+        )
     }
     LaunchedEffect(tab) { controlsScroll.scrollTo(0) }
     var showWifiPanel by remember { mutableStateOf(false) }
@@ -515,6 +527,7 @@ private fun PikminBeeScreen() {
     }
     val settingsRequest by MainActivity.settingsRequests.collectAsState()
     val visionRequest by MainActivity.flowerVisionRequests.collectAsState()
+    val modeRequest by MainActivity.mapModeRequests.collectAsState()
     var showOverlayGuide by remember { mutableStateOf(false) }
     var showOverlayAfterGuide by remember { mutableStateOf(false) }
     var openDetailsRequest by remember { mutableIntStateOf(
@@ -659,6 +672,17 @@ private fun PikminBeeScreen() {
             message = "請在花朵辨識面板取得 Android 畫面擷取同意"
         }
     }
+    LaunchedEffect(modeRequest) {
+        if (modeRequest in 0..3) {
+            tab = ToolTab.entries[modeRequest]
+            activePage = BeePage.MAP
+            routeEditingStopIndex = null
+            routeStopActionIndex = null
+            closeDetailsRequest++
+            MainActivity.mapModeRequests.value = -1
+        }
+    }
+
     var coordinateInput by remember { mutableStateOf("") }
     var coordinateInputDismissToken by remember { mutableIntStateOf(0) }
     LaunchedEffect(selected, selectionExplicit) {

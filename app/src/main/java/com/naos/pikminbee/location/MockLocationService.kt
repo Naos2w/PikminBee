@@ -305,16 +305,13 @@ class MockLocationService : Service() {
                                 startService(command(this, actionName))
                             },
                             onStartRoute = { startService(command(this, ACTION_START_DRAFT_ROUTE)) },
-                            onSpeedSelected = { preset ->
-                                startService(speedIntent(this, preset))
-                            },
                             openMap = {
                                 startActivity(Intent(this, MainActivity::class.java)
                                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
                             },
-                            onFlowerVision = {
+                            onNavigateMode = { selectedMode ->
                                 startActivity(Intent(this, MainActivity::class.java)
-                                    .putExtra(MainActivity.EXTRA_OPEN_FLOWER_VISION, true)
+                                    .putExtra(MainActivity.EXTRA_OPEN_MODE, selectedMode)
                                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
                             })
                     }

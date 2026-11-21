@@ -2,6 +2,9 @@ package com.naos.pikminbee.ui
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import android.content.pm.PackageManager
 import android.hardware.Sensor
 import android.hardware.SensorManager
@@ -27,6 +30,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -85,6 +89,10 @@ fun HealthConnectSettings(dark: Boolean, onMessage: (String) -> Unit) {
     val source = RealStepSourcePolicy.select(native, hasHardware)
 
     var virtualOptIn by remember { mutableStateOf(estimateLedger.optIn()) }
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    var showSensorAdvanced by rememberSaveable { mutableStateOf(false) }
+    var confirmVirtualSync by remember { mutableStateOf(false) }
+    var awaitingWritePermission by remember { mutableStateOf(false) }
     var physicalOptIn by remember { mutableStateOf(physicalLedger.optIn()) }
     var readAllowed by remember { mutableStateOf(false) }
     var writeAllowed by remember { mutableStateOf(false) }
@@ -131,11 +139,24 @@ fun HealthConnectSettings(dark: Boolean, onMessage: (String) -> Unit) {
                 hcToday = HealthConnectRealSteps.todayAggregate(context)
                 ownVirtualToday = HealthConnectStepSync.todayOwnVirtualSteps(context)
             }
-            if (writeAllowed) {
-                if (virtualOptIn) EstimatedStepsSyncWorker.enqueue(context)
-                if (physicalOptIn && !native) PhysicalStepsSyncWorker.enqueue(context)
+            if (awaitingWritePermission) {
+                awaitingWritePermission = false
+                if (writeAllowed) {
+                    virtualOptIn = true
+                    estimateLedger.setOptIn(true)
+                    EstimatedStepsSyncWorker.enqueue(context)
+                    feedback = "已允許寫入手動估算步數"
+                } else {
+                    virtualOptIn = false
+                    estimateLedger.setOptIn(false)
+                    feedback = "尚未授權寫入，仍可正常使用地圖與行走"
+                }
+            } else {
+                if (writeAllowed && virtualOptIn) EstimatedStepsSyncWorker.enqueue(context)
+                feedback = "Health Connect 權限已更新"
             }
-            feedback = "Health Connect 授權已重新確認"
+            if (writeAllowed && physicalOptIn && !native)
+                PhysicalStepsSyncWorker.enqueue(context)
         }
     }
 
@@ -157,6 +178,19 @@ fun HealthConnectSettings(dark: Boolean, onMessage: (String) -> Unit) {
         while (true) {
             refresh()
             delay(60_000L)
+        }
+    }
+
+    fun openHealthConnectAccess() {
+        val intent = if (Build.VERSION.SDK_INT >= 34) {
+            Intent("android.health.connect.action.MANAGE_HEALTH_PERMISSIONS")
+                .putExtra(Intent.EXTRA_PACKAGE_NAME, context.packageName)
+        } else {
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.parse("package:com.google.android.apps.healthdata"))
+        }
+        runCatching { context.startActivity(intent) }.onFailure {
+            feedback = "無法開啟權限管理，請至系統設定搜尋 Health Connect"
         }
     }
 
@@ -191,13 +225,69 @@ fun HealthConnectSettings(dark: Boolean, onMessage: (String) -> Unit) {
         )
     }
 
+    if (confirmVirtualSync) {
+        AlertDialog(
+            onDismissRequest = { confirmVirtualSync = false },
+            title = { Text("同步虛擬估算步數？") },
+            text = {
+                Text("選擇開啟後，PikminBee 才會把模擬路線換算的步數以「手動輸入」" +
+                    "寫入 Health Connect。這不是手機實際感測到的運動。" +
+                    "只需 WRITE_STEPS，不必授予 READ_STEPS。可隨時關閉同步。")
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmVirtualSync = false
+                    if (writeAllowed) {
+                        virtualOptIn = true
+                        estimateLedger.setOptIn(true)
+                        EstimatedStepsSyncWorker.enqueue(context)
+                        feedback = "已開啟手動估算同步"
+                    } else if (available) {
+                        awaitingWritePermission = true
+                        hcRequest.launch(setOf(HealthConnectStepSync.WRITE_STEPS))
+                    } else {
+                        feedback = "此裝置無法使用 Health Connect，仍可使用本機估算"
+                    }
+                }) { Text("同意並繼續") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmVirtualSync = false }) { Text("先不啟用") }
+            },
+        )
+    }
+
+    if (!expanded) {
+        MapGlass(dark, Modifier.fillMaxWidth()) {
+            Column(Modifier.fillMaxWidth().padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                Text("Health Connect · 選用", fontSize = 17.sp,
+                    color = foreground, fontWeight = FontWeight.SemiBold)
+                Text("不連結也能使用地圖、瞬移、路徑與本機步數估算。",
+                    fontSize = 13.sp, color = muted)
+                Text(
+                    when {
+                        !available -> "此裝置暫無可用的 Health Connect"
+                        virtualOptIn && writeAllowed -> "已啟用虛擬估算步數同步"
+                        readAllowed -> "已允許讀取今日步數"
+                        else -> "未啟用 · 不會傳送虛擬步數"
+                    },
+                    fontSize = 12.sp, color = foreground,
+                )
+                Button(
+                    onClick = { expanded = true },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(if (available) "設定 Health Connect" else "查看本機步數") }
+            }
+        }
+    } else {
     MapGlass(dark, Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically) {
-                Text("Health Connect · 步數", fontSize = 18.sp,
+                Text("Health Connect · 連結設定", fontSize = 17.sp,
                     fontWeight = FontWeight.SemiBold, color = foreground)
+                TextButton(onClick = { expanded = false }) { Text("收起") }
                 IconButton(
                     onClick = { scope.launch { refresh() } },
                     modifier = Modifier.size(48.dp)
@@ -205,6 +295,10 @@ fun HealthConnectSettings(dark: Boolean, onMessage: (String) -> Unit) {
                 ) { NaosActionIcon(NaosActionGlyph.REFRESH, foreground) }
             }
 
+            Text("步驟 1 · 讀取今日步數（選用 READ_STEPS）",
+                fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = foreground)
+            Text("只想查看今日步數才需要讀取權限；不影響模擬定位。",
+                fontSize = 11.sp, color = muted)
             Text("今日 Health Connect 彙總步數：" +
                 (hcToday?.toString() ?: "尚未取得"),
                 fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = foreground)
@@ -217,10 +311,14 @@ fun HealthConnectSettings(dark: Boolean, onMessage: (String) -> Unit) {
             }, fontSize = 12.sp, color = foreground)
 
             if (available) {
-                Button(onClick = {
-                    hcRequest.launch(setOf(HealthConnectRealSteps.READ_STEPS))
-                }, modifier = Modifier.fillMaxWidth()) {
-                    Text(if (readAllowed) "重新確認讀取步數權限" else "授權 READ_STEPS／啟用系統計步")
+                if (!readAllowed) {
+                    Button(onClick = {
+                        hcRequest.launch(setOf(HealthConnectRealSteps.READ_STEPS))
+                    }, modifier = Modifier.fillMaxWidth()) {
+                        Text("允許讀取今日步數")
+                    }
+                } else {
+                    Text("已允許讀取今日步數", color = foreground, fontSize = 12.sp)
                 }
                 Text(if (native)
                     "真實行走由系統記錄；模擬 GPS 不會觸發計步感測器。"
@@ -233,6 +331,11 @@ fun HealthConnectSettings(dark: Boolean, onMessage: (String) -> Unit) {
             }
 
             if (source == RealStepSource.PHONE_STEP_SENSOR) {
+                TextButton(onClick = { showSensorAdvanced = !showSensorAdvanced }) {
+                    Text(if (showSensorAdvanced) "收起本機感測器設定"
+                        else "本機實際計步（進階／選用）")
+                }
+                if (showSensorAdvanced) {
                 Text("手機實際感測器步數（本機今日觀察）：" +
                     physicalLedger.todaysCount() + " 步",
                     color = foreground, fontSize = 13.sp)
@@ -280,6 +383,7 @@ fun HealthConnectSettings(dark: Boolean, onMessage: (String) -> Unit) {
                     TextButton(onClick = { confirmDiscard = "sensor" },
                         modifier = Modifier.fillMaxWidth()) { Text("清除未同步感測步數") }
                 }
+                }
             } else if (source == RealStepSource.UNAVAILABLE) {
                 Text("未偵測到手機硬體計步器，也未提供內建 HC 計步；請確認手錶或其他健康 App 是否已向 Health Connect 提供資料。",
                     fontSize = 12.sp, color = muted)
@@ -303,28 +407,33 @@ fun HealthConnectSettings(dark: Boolean, onMessage: (String) -> Unit) {
                 Text("啟用同步後定期保存；暫停與停止會保存該段估算，背景寫入可能延遲。",
                     fontSize = 11.sp, color = muted)
             }
+            Text("步驟 2 · 寫入虛擬估算（選用 WRITE_STEPS）",
+                fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = foreground)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("同步虛擬路徑估算步數", fontSize = 13.sp, color = foreground)
                     Text("明確開啟後才同步手動估算，不視為實際運動。",
                         fontSize = 11.sp, color = muted)
                 }
-                Switch(checked = virtualOptIn, onCheckedChange = {
-                    virtualOptIn = it
-                    estimateLedger.setOptIn(it)
-                    if (it && writeAllowed) EstimatedStepsSyncWorker.enqueue(context)
-                    onMessage(if (it) "已選擇同步虛擬估算步數，仍須確認 HC 寫入權限"
-                        else "已停止虛擬步數同步")
+                Switch(checked = virtualOptIn, enabled = available, onCheckedChange = { enable ->
+                    if (enable) {
+                        // Explicit rationale and scoped permission before opting in.
+                        confirmVirtualSync = true
+                    } else {
+                        virtualOptIn = false
+                        estimateLedger.setOptIn(false)
+                        feedback = "已停止同步；Health Connect 裡已寫入的紀錄不會自動刪除"
+                    }
                 })
             }
 
             Text("寫入步數授權：" + if (writeAllowed) "已授權" else "尚未授權",
                 fontSize = 12.sp, color = muted)
-            if (available) {
+            if (available && virtualOptIn && !writeAllowed) {
                 Button(onClick = {
                     hcRequest.launch(setOf(HealthConnectStepSync.WRITE_STEPS))
                 }, modifier = Modifier.fillMaxWidth()) {
-                    Text(if (writeAllowed) "重新確認 WRITE_STEPS 權限" else "授權 Health Connect 寫入步數")
+                    Text("重新授權寫入步數")
                 }
             }
             Text("待同步虛擬步行紀錄：" + virtualPending + " 筆",
@@ -348,9 +457,13 @@ fun HealthConnectSettings(dark: Boolean, onMessage: (String) -> Unit) {
                 TextButton(onClick = { confirmDiscard = "virtual" },
                     modifier = Modifier.fillMaxWidth()) { Text("清除未同步虛擬步數") }
             }
+            TextButton(onClick = ::openHealthConnectAccess, enabled = available) {
+                Text("管理或撤銷 Health Connect 權限")
+            }
             Text(feedback, fontSize = 11.sp, color = muted)
-            Text("未開啟同步或未取得寫入權限，就不會寫入虛擬步數。",
+            Text("這是選用功能；不授權也可使用路線。關閉同步不會刪除已寫入紀錄。",
                 fontSize = 11.sp, color = muted)
         }
+    }
     }
 }
