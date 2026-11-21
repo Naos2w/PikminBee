@@ -1,5 +1,13 @@
 # PikminBee TODO
 
+## P0 · Unwanted coordinate TextField focus on map (21 Nov 2026)
+- [x] Diagnose: `CoordinateTopBar` always mounted a focusable `BasicTextField`, even in read-only non-teleport modes. Android could focus its first text field automatically on activity/window resumption, showing keyboard/caret over the map.
+- [x] Map-first fix: render a non-focusable text label by default; mount a `BasicTextField` only after tapping a dedicated Edit icon in Teleport mode. Confirm (checkmark)/Go/Teleport dismiss keyboard and focus. Never request focus just because map GPS/selection text changes.
+- [x] Map pick, flower/waypoint selection, current-position action, tab change, details/explore open, app ON_STOP all end edit mode and clear the IME. Other tabs never render a coordinate input. Keep edit/confirm controls accessible with explicit content descriptions.
+- [x] Add pure JVM input-state regression tests for default/no-edit, explicit edit gating, mode/sheet invalidation and dismiss.
+- [x] MSI Kotlin compile, **185/185** JVM tests (0 failures/errors/skipped), Android Lint and `git diff --check` succeeded (Gradle exit 0); submit a checked DEV PR and only merge after GitHub source verify.
+- [ ] POCO acceptance: fresh app start and return from background must not open keyboard; drag/zoom map, switch all 4 tabs, tap routes/flowers, open details and back, then manually edit coordinates in Teleport, confirm and use Go. No production or UAT promotion without release approval.
+
 ## P1 · Real-time per-walk estimated steps + icon-first controls (21 Nov 2026)
 - [x] Source: moving distance = selected speed in m/s × elapsed time (bounded to remaining planned route); virtual estimate = floor(all-time accepted metres / fixed 0.72 m stride). This is a virtual estimate, not physical pedometer activity; the 10.8 km/h preset is not a calibrated running stride.
 - [x] Separate all-time virtual estimate from **per-walk** steps using an immutable walk-start baseline and a process-local observable flow shared by the main screen and floating overlay. Each new route resets its own displayed count; GPS virtual-step checkpoints do not reset its display.
