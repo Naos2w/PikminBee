@@ -1228,6 +1228,8 @@ private fun PikminBeeScreen() {
                                     selected = flowerPick,
                                     editingStopIndex = editingFlowerStopIndex,
                                     stops = flowerStops,
+                                    canEdit = walkPhase !in listOf(WalkPhase.MOVING, WalkPhase.PAUSED) &&
+                                        !planning,
                                     foreground = foreground, muted = muted,
                                     onAddSelected = {
                                         val chosen = flowerPick
