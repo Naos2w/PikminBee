@@ -1,5 +1,15 @@
 # PikminBee TODO
 
+## P0 · Same-private-network PC browser controller and single UAT build (21 Nov 2026)
+- [x] Add a **user-started, connected-device foreground LAN control service** that does not require mock GPS activation just to open the browser. No autonomous service restart after a process kill. Settings shows reachable phone IP:8765, fresh 6-digit PIN, phone-side approval/rejection, disable/revoke, and a notification stop action.
+- [x] Reuse the existing bounded local HTTP server, private-Wi-Fi-only listener, strict Host/Origin checks, PIN rate limit, 30-minute session, and local-only MapLibre bundle. No public port forwarding, VPN/Tailscale dependency, or new cloud backend.
+- [x] Implement PC controls: **瞬移 / 路徑 / 尋花 / 收藏** responsive web map, selectable route origin, waypoints, saved places and saved routes, speed, walk controls and real-time location, current route leg and estimated steps.
+- [x] Split remote route planning into **/api/route/preview** (no GPS movement) and **/api/route/start** (fresh matching preview ID + explicit second click). Reject stale, reused or unpreviewed routes; enforce extra browser acknowledgement for >40m pedestrian road snap, guard system mock/fine-location permission, and prevent waypoint edits while walking.
+- [x] Add regression tests for preview gates, stale/edited loop and double-start, and browser assets/service manifest requirements. Check JavaScript syntax with Node and Android Kotlin/JVM tests/Lint.
+- [x] MSI validation: Kotlin compile, **196/196** JVM tests (zero failures/errors/skips), Android Lint and Node.js browser-script syntax all passed; `git diff --check` clean.
+- [ ] Complete checked DEV PR, UAT semantic bump, checked develop→staging merge, manually dispatched fixed-signer UAT APK; verify package ID/versionCode/signing digest. No production main or POCO installation.
+- [ ] POCO/PC acceptance: same Wi-Fi or a routed private LAN, connect using phone IP:8765, enter PIN and approve on Android, select origin, preview road, start, pause/resume/stop, verify 2→3/step status, saved routes and rejection of invalid permissions, refresh/revoke/expiry/disconnect and network change. No device connected via ADB at development time.
+
 ## P0 · Route leg clarity, matching overlay navigation and optional integrations (21 Nov 2026)
 - [x] Correct route status semantics: `nextWaypoint=3` means the phone is walking from waypoint **2 → 3** (not “at 3/4”). Surface `activeLegLabel` consistently in the main mini-bar and floating summary, with start/arrival cases and JVM tests.
 - [x] Rename the arrow before Clear: **撤銷上一點** removes just the latest drafted waypoint; **清除全部** removes the entire draft. Avoid ambiguous icon-only destructive actions.

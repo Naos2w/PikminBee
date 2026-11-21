@@ -4,87 +4,123 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="referrer" content="no-referrer">
-<title>PikminBee · Wi-Fi 控制</title>
+<title>PikminBee · 電腦控制</title>
 <link rel="stylesheet" href="/vendor/maplibre-gl.css">
 <style>
-:root{color-scheme:dark;--bg:#111a27;--card:rgba(30,45,65,.90);--line:rgba(255,255,255,.13);--text:#eef4fb;--sub:#a9b8c9;--gold:#edbb5b;--button:#bb811e}
+:root{color-scheme:dark;--bg:#131d25;--card:#26343d;--soft:#30434f;--line:#435762;--text:#ecf4f5;--sub:#c2d0d3;--gold:#e4b257;--button:#527887;--danger:#af4550}
+@media(prefers-color-scheme:light){:root{color-scheme:light;--bg:#eef3f2;--card:#fff;--soft:#e5edee;--line:#c6d4d7;--text:#202f34;--sub:#586b70;--gold:#956219;--button:#d8e7ec;--danger:#b4515a}}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,BlinkMacSystemFont,"Noto Sans TC",sans-serif}
-.page{max-width:1140px;margin:auto;padding:18px 18px 36px}.head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 15px}
-h1{font-size:23px;letter-spacing:-.7px;margin:0}h2{font-size:15px;margin:0 0 12px}.sub,.muted{color:var(--sub);font-size:12px}
+.page{max-width:1240px;margin:auto;padding:18px 18px 36px}.head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 15px}
+h1{font-size:24px;letter-spacing:-.6px;margin:0}h2{font-size:16px;margin:0 0 10px}.sub,.muted{color:var(--sub);font-size:12px}
 .stamp{display:inline-flex;gap:7px;align-items:center;background:var(--card);padding:7px 12px;border:1px solid var(--line);border-radius:999px}
-.dot{background:#f6b347;border-radius:50%;width:8px;height:8px}.layout{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(295px,1fr);gap:14px}
-.glass{background:var(--card);border:1px solid var(--line);border-radius:23px;padding:17px;box-shadow:0 12px 35px rgba(0,0,0,.13)}
-#map{height:540px;border-radius:15px;overflow:hidden;background:#273a50}
+.dot{background:var(--gold);border-radius:50%;width:8px;height:8px}.layout{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(315px,1fr);gap:14px;align-items:start}
+.glass{background:var(--card);border:1px solid var(--line);border-radius:22px;padding:17px;box-shadow:0 6px 18px #00000010}
+#map{height:570px;border-radius:14px;overflow:hidden;background:#d7e4e7}
 .inline{display:flex;gap:9px;align-items:center;flex-wrap:wrap}.inline>*{flex:1;min-width:0}
 label{display:block;color:var(--sub);font-size:12px;margin-bottom:5px}
-input,select,button{font:inherit}input,select{width:100%;padding:11px;border:1px solid var(--line);border-radius:12px;background:#1d2e42;color:var(--text);min-height:46px}
-button{padding:11px 13px;border-radius:13px;border:1px solid var(--line);background:#25374c;color:var(--text);cursor:pointer;min-height:44px}
-button.primary{background:var(--button);color:#fff;border-color:#be8a25;font-weight:700}
-button:disabled{opacity:.42;cursor:not-allowed}button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
-.row{display:flex;gap:8px;flex-wrap:wrap;margin:9px 0}.row>*{flex:1}.spacer{height:12px}
-#pairbox{max-width:520px;margin:38px auto}#controls{display:none}#controls.is-visible{display:grid}.hint{background:rgba(229,173,73,.09);border:1px solid rgba(229,173,73,.18);border-radius:12px;padding:10px;margin-top:9px;color:#ecd4aa;font-size:12px}
-.mode-active{border-color:var(--gold);color:var(--gold);background:#3b3327}
-#message{min-height:20px;color:var(--gold);font-size:13px;margin:9px 0}
-#pointcount{margin:9px 0}.layout .glass:nth-child(2){max-height:700px;overflow:auto}
-@media(max-width:760px){.page{padding:12px 11px}.layout{display:flex;flex-direction:column}#controls.is-visible{display:flex}.glass{padding:13px;border-radius:18px}#map{height:340px}.layout .glass:nth-child(2){max-height:none}.head{flex-direction:row;align-items:start}h1{font-size:21px}}
+input,select,button{font:inherit}input,select{width:100%;padding:11px;border:1px solid var(--line);border-radius:11px;background:var(--soft);color:var(--text);min-height:46px}
+button{padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:var(--soft);color:var(--text);cursor:pointer;min-height:46px}
+button.primary{background:var(--button);color:var(--text);border-color:var(--button);font-weight:700}
+button.danger{background:var(--danger);border-color:var(--danger);color:white}
+button:disabled{opacity:.44;cursor:not-allowed}button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin:9px 0}.row>*{flex:1}
+.tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px;margin:10px 0 17px}
+.tabs button{padding:10px 3px;font-size:13px}.mode-active{border-color:var(--gold);color:var(--gold);background:var(--soft);font-weight:700}
+.spacer{height:12px}.hidden{display:none!important}
+#pairbox{max-width:520px;margin:40px auto}#controls{display:none}#controls.is-visible{display:grid}
+.hint{background:var(--soft);border:1px solid var(--line);border-radius:12px;padding:11px;margin-top:10px;color:var(--sub);font-size:12px}
+.warning{border-color:var(--gold);color:var(--text)}.metric{font-size:16px;font-weight:650}
+#progress{padding:10px 12px;background:var(--soft);border-radius:12px;margin:9px 0;font-size:14px}
+#progressmeter{height:5px;border-radius:4px;background:var(--line);overflow:hidden;margin-top:9px}
+#progressbar{height:100%;width:0;background:var(--gold)}
+#message{min-height:23px;color:var(--gold);font-size:13px;margin:9px 0}
+#pointcount{margin:9px 0}.layout .glass:nth-child(2){max-height:750px;overflow:auto}
+#saved-list{display:grid;gap:8px}#saved-list button{text-align:left}#selected{margin:9px 0}
+@media(max-width:760px){.page{padding:12px 11px}.layout{display:flex;flex-direction:column}#controls.is-visible{display:flex}.glass{padding:13px;border-radius:17px;width:100%}#map{height:340px}.layout .glass:nth-child(2){max-height:none}.head{align-items:start}h1{font-size:21px}.tabs button{font-size:12px}}
 </style>
 </head>
 <body>
 <main class="page">
 <header class="head">
- <div><h1>🐝 PikminBee</h1><div class="sub">蜜蜂探索世界 · 區域網路控制</div></div>
+ <div><h1>🐝 PikminBee</h1><div class="sub">電腦網頁控制 · Android 手機執行</div></div>
  <div class="stamp"><span class="dot"></span><span id="connection">等待配對</span></div>
 </header>
 <section class="glass" id="pairbox">
- <h2>用手機上的 6 位數配對碼連線</h2>
- <p class="muted">只有在 PikminBee 手機 App 內手動啟用 Wi-Fi 控制後才能使用。每次重新啟用都會更換配對碼。</p>
- <div class="inline"><input id="pin" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" placeholder="六位數配對碼" aria-label="六位數配對碼">
- <button class="primary" id="connect">連線</button></div>
- <div class="hint">只限可信任的私人 Wi-Fi。此區域網路頁面使用 HTTP、沒有端對端加密；請勿在公共 Wi-Fi 開啟。關閉手機上的 Wi-Fi 控制後，網頁授權立即失效。</div>
+ <h2>連結你的 PikminBee 手機</h2>
+ <p class="muted">手機設定 → 電腦遠端控制 → 開啟。電腦與手機連接至同一可互通私人區網，在此輸入手機顯示的六位數配對碼，並由手機核准。</p>
+ <div class="inline"><input id="pin" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off" placeholder="六位數配對碼" aria-label="六位數配對碼">
+ <button class="primary" id="connect">要求配對</button></div>
+ <div class="hint">只使用可信任的私人區網。HTTP 尚未加密，不要從網際網路公開手機連接埠。關閉手機上的控制開關，連線即撤銷。</div>
  <div id="pairmessage" aria-live="polite"></div>
 </section>
 <div class="layout" id="controls">
 <section class="glass">
- <div class="inline" style="margin-bottom:9px"><strong>世界地圖</strong>
-  <select id="theme" style="max-width:172px" aria-label="免 Key 地圖樣式">
-   <option value="auto">跟隨系統</option>
-   <option value="liberty">Liberty</option>
-   <option value="bright">Bright</option>
-   <option value="positron">Positron</option>
+ <div class="inline" style="margin-bottom:9px"><strong>控制地圖</strong>
+  <select id="theme" style="max-width:170px" aria-label="地圖樣式">
+   <option value="auto">跟隨系統</option><option value="liberty">Liberty</option>
+   <option value="bright">Bright</option><option value="positron">Positron</option>
    <option value="dark">Dark</option>
   </select>
  </div>
- <div id="map" aria-label="點選地圖以選取座標"></div>
- <div id="selected" class="muted" style="margin:10px 0">點一下地圖以選擇位置</div>
- <div class="muted">底圖：OpenFreeMap／OpenStreetMap（免 Google API Key）；圖磚仍需連線。切換底圖不會改變定位或路線。</div>
+ <div id="map" aria-label="點地圖選座標，需按下方按鈕才會變更手機位置"></div>
+ <div id="selected" class="muted">點一下地圖以選擇位置</div>
+ <div class="row"><button id="follow">定位至手機目前位置</button></div>
+ <p class="muted">選取地點不會自動瞬移或開始行走。圖磚來自 OpenFreeMap／OpenStreetMap，需要網路載入。</p>
 </section>
 <section class="glass">
- <h2>遠端 GPS 控制</h2>
- <div id="status" class="muted" aria-live="polite">正在讀取狀態…</div>
+ <h2>手機狀態</h2>
+ <div id="status" class="muted" aria-live="polite">正在讀取…</div>
+ <div id="progress" aria-live="polite">
+  <div id="stepstatus">目前沒有行走中的路線</div>
+  <div class="sub" id="legstatus"></div>
+  <div id="progressmeter"><div id="progressbar"></div></div>
+ </div>
+ <div class="tabs" aria-label="PikminBee 四個模式">
+  <button id="mode-teleport" class="mode-active">瞬移</button>
+  <button id="mode-route">路徑</button>
+  <button id="mode-flowers">尋花</button>
+  <button id="mode-saved">收藏</button>
+ </div>
+ <div id="location-panel">
+  <div class="inline">
+   <div><label for="lat">緯度 Latitude</label><input type="number" id="lat" step="any" placeholder="25.033000"></div>
+   <div><label for="lon">經度 Longitude</label><input type="number" id="lon" step="any" placeholder="121.565400"></div>
+  </div>
+  <div id="teleport-panel" class="row"><button id="teleport" class="primary">確認瞬移</button></div>
+ </div>
+ <div id="route-panel" class="hidden">
+  <div id="originlabel" class="sub">路線起點：尚未指定</div>
+  <div class="row"><button id="set-origin">將選取位置設為起點</button></div>
+  <div class="inline">
+   <div><label for="speed">目前速度</label><select id="speed">
+    <option value="SLOW">慢走 · 0.8 km/h</option>
+    <option value="WALK" selected>走路 · 1.4 km/h</option>
+    <option value="FAST">快走 · 10.8 km/h</option></select></div>
+   <div><label for="loop">循環路線</label><select id="loop">
+    <option value="false">不循環</option><option value="true">循環</option></select></div>
+  </div>
+  <div class="row"><span id="default-speed" class="muted">目前預設：走路</span><button id="make-speed-default">設為預設速度</button></div>
+  <div id="pointcount" class="muted">0 個路點</div>
+  <div id="routehint" class="sub">選擇起點及目的地，先規劃道路再開始。</div>
+  <div class="row"><button id="add">加入路點</button><button id="undo">撤銷上一點</button><button id="clear">清除全部</button></div>
+  <div class="row"><button id="plan" class="primary">① 規劃並預覽道路</button></div>
+  <div id="previewinfo" class="hint hidden" aria-live="polite"></div>
+  <label id="snapconfirmrow" class="hint warning hidden">
+   <input type="checkbox" id="confirm-snap" style="width:auto;min-height:0;margin-right:7px">
+   我已確認地圖上的道路吸附位置與偏移距離
+  </label>
+  <div class="row"><button id="start" class="primary" disabled>② 確認開始行走</button></div>
+ </div>
+ <div id="saved-panel" class="hidden">
+  <h2>已收藏地點與路線</h2>
+  <div id="saved-list" aria-live="polite">正在讀取…</div>
+ </div>
  <div class="spacer"></div>
- <div class="inline">
-  <div><label for="lat">緯度 Latitude</label><input type="number" id="lat" step="any" placeholder="25.033000"></div>
-  <div><label for="lon">經度 Longitude</label><input type="number" id="lon" step="any" placeholder="121.565400"></div>
- </div>
- <div class="row"><button class="primary" id="teleport">瞬移到座標</button><button id="follow">查看模擬位置</button></div>
- <div class="spacer"></div>
- <h2>多點道路／尋花</h2>
- <div class="row"><button id="mode-route" class="mode-active">多點路徑</button><button id="mode-flowers">手動尋花</button></div>
- <div class="inline">
-  <div><label for="speed">目前速度（km/h，可即時切換）</label><select id="speed"><option value="SLOW">慢走 0.8 km/h</option><option value="WALK" selected>走路 1.4 km/h</option><option value="FAST">快走 10.8 km/h</option></select></div>
-  <div><label for="loop">循環路線</label><select id="loop"><option value="false">不循環</option><option value="true">循環</option></select></div>
- </div>
- <div class="row">
-  <span id="default-speed" class="muted" aria-live="polite">個人預設：走路 1.4 km/h</span>
-  <button id="make-speed-default">將目前速度設為預設</button>
- </div>
- <div id="pointcount" class="muted" aria-live="polite">0 / 15 個路點</div>
- <div id="routehint" class="muted">尋花最多 14 點；循環道路最多 14 點，普通道路最多 15 點。</div>
- <div class="row"><button id="add">加入選取地點</button><button id="undo">撤銷</button><button id="clear">清除路點</button></div>
- <div class="row"><button id="start" class="primary">開始行走</button><button id="pause">暫停</button><button id="resume">繼續</button><button id="stop">停止</button></div>
+ <h2>行走操作</h2>
+ <div class="row"><button id="pause">暫停</button><button id="resume">繼續</button><button class="danger" id="stop">停止</button></div>
  <div class="row"><button id="real">恢復真實 GPS</button></div>
  <div id="message" aria-live="polite"></div>
- <div class="hint">尋花模式必須先由手機啟動模擬定位，才可透過網頁新增花點。停止行走與恢復真實 GPS 是不同指令；道路服務故障時不會改走直線。遊戲大花的官方即時座標尚未取得。</div>
+ <div class="hint">開始前必須先預覽路線。暫停與停止都由 Android App 執行；網頁斷線不會自動停止路線。GPS 模擬仍需在手機授予系統權限。</div>
 </section>
 </div>
 </main>

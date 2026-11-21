@@ -1,40 +1,40 @@
 const $ = id => document.getElementById(id);
 let token = null;
-let mode = "ROUTE";
+let mode = "TELEPORT";
+let chosen = {lat: 25.033, lon: 121.5654};
 let current = null;
-let chosen = {lat:25.033, lon:121.5654};
-let map = null;
-let maplibre = null;
-let positionMarker = null;
-let routeMarkers = [];
 let latest = null;
-let lastStopsKey = "";
-let lastLineKey = "";
-let refreshing = false;
 let connected = false;
-
-const setMessage = text => { $("message").textContent = text; };
-const setPairMessage = text => { $("pairmessage").textContent = text; };
+let refreshing = false;
+let map = null, maplibre = null;
+let positionMarker = null, originMarker = null, routeMarkers = [];
+let lastStopsKey = "", lastLineKey = "";
+const loops = {ROUTE: false, FLOWERS: true};
+const setMessage = value => { $("message").textContent = value; };
+const setPairMessage = value => { $("pairmessage").textContent = value; };
+const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 async function call(path, method = "GET", body = null, useToken = true) {
   const headers = {};
   if (method === "POST") headers["Content-Type"] = "application/json";
   if (useToken && token) headers["X-PikminBee-Token"] = token;
-  const response = await fetch(path, {
-    method, headers, body: body == null ? undefined : JSON.stringify(body),
-    credentials: "omit", cache: "no-store", redirect: "error"
-  });
-  const data = await response.json();
+  let response;
+  try {
+    response = await fetch(path, {
+      method, headers, body: body == null ? undefined : JSON.stringify(body),
+      credentials: "omit", cache: "no-store", redirect: "error"
+    });
+  } catch (_) { throw Error("無法連接手機，請確認私人 Wi-Fi 與網頁控制服務"); }
+  const data = await response.json().catch(() => ({}));
   if (response.status === 401 && useToken) {
-    token = null;
-    connected = false;
+    token = null; connected = false;
     $("controls").classList.remove("is-visible");
     $("pairbox").style.display = "block";
-    $("connection").textContent = "配對失效";
-    setPairMessage("連線已失效，請重新輸入手機上的配對碼。");
-    throw Error("配對失效");
+    $("connection").textContent = "配對已失效";
+    setPairMessage("會話已失效，請重新從手機取得配對碼。");
+    throw Error("配對已失效");
   }
-  if (!response.ok) throw Error(data.error || "請求失敗");
+  if (!response.ok) throw Error(data.error || "手機拒絕這項操作");
   return data;
 }
 
@@ -42,195 +42,317 @@ $("connect").addEventListener("click", async () => {
   $("connect").disabled = true;
   try {
     const pin = $("pin").value.trim();
-    if (!/^\d{6}$/.test(pin)) throw Error("請輸入手機顯示的 6 位數字");
-    const deviceName = (navigator.userAgentData?.platform || navigator.platform || "Browser").slice(0,32);
-    const paired = await call("/api/pair", "POST", {pin,deviceName}, false);
-    if (!paired.pendingId) throw Error("無法建立配對要求");
-    setPairMessage("已收到要求，請回到手機 PikminBee 核准此裝置…");
-    let approved = null;
+    if (!/^\d{6}$/.test(pin)) throw Error("請輸入手機上的六位數配對碼");
+    const platform = navigator.userAgentData?.platform || navigator.platform || "Browser";
+    const paired = await call("/api/pair", "POST", {
+      pin, deviceName: platform.slice(0, 32)
+    }, false);
+    if (!paired.pendingId) throw Error("無法建立手機配對要求");
+    setPairMessage("手機已收到要求，請在 PikminBee 點選「核准」…");
+    let approved;
     for (let i = 0; i < 42; i++) {
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      await pause(2000);
       const response = await fetch("/api/pair/status", {
-        headers: {"X-PikminBee-Pending":paired.pendingId},
+        headers: {"X-PikminBee-Pending": paired.pendingId},
         cache:"no-store", credentials:"omit", redirect:"error"
       });
       const answer = await response.json();
-      if (response.status === 403 || response.status === 401) {
-        throw Error(answer.error || "手機已拒絕、要求過期或裝置不符");
+      if (response.status === 401 || response.status === 403) {
+        throw Error(answer.error || "手機拒絕配對或配對已過期");
       }
-      if (!response.ok) throw Error(answer.error || "無法取得配對結果");
+      if (!response.ok) throw Error(answer.error || "無法讀取配對狀態");
       if (answer.token) { approved = answer; break; }
     }
-    if (!approved?.token) throw Error("手機核准逾時，請重新配對");
-    token = approved.token;
+    if (!approved?.token) throw Error("等待手機核准逾時");
+    token = approved.token; connected = true;
     $("pin").value = "";
     $("pairbox").style.display = "none";
     $("controls").classList.add("is-visible");
-    $("connection").textContent = "已連線";
-    connected = true;
+    $("connection").textContent = "電腦已連線";
     await refresh();
-    initialiseMap();
-  } catch (err) { setPairMessage(err.message || "無法連線"); }
-  finally { $("connect").disabled = false; }
+    await initialiseMap();
+  } catch (error) {
+    setPairMessage(error.message || "無法建立連線");
+  } finally { $("connect").disabled = false; }
 });
 $("pin").addEventListener("keydown", event => {
   if (event.key === "Enter") $("connect").click();
 });
 
-function selectMode(next) {
-  mode = next;
-  $("mode-route").classList.toggle("mode-active", mode === "ROUTE");
-  $("mode-flowers").classList.toggle("mode-active", mode === "FLOWERS");
-  updateRouteControls();
-  renderMap();
-}
-$("mode-route").addEventListener("click", () => selectMode("ROUTE"));
-$("mode-flowers").addEventListener("click", () => selectMode("FLOWERS"));
-$("loop").addEventListener("change", updateRouteControls);
-
-function updateRouteControls() {
-  const stops = mode === "ROUTE" ? (latest?.routeStops || []) : (latest?.flowerStops || []);
-  const max = mode === "FLOWERS" ? 14 : 15;
-  const hasPosition = !!latest?.position;
-  const loop = $("loop").value === "true";
-  const invalidLoop = mode === "ROUTE" && loop && stops.length > 14;
-  $("pointcount").textContent = stops.length + " / " + max + " 個路點";
-  $("add").disabled = stops.length >= max || (mode === "FLOWERS" && !hasPosition);
-  $("start").disabled = stops.length === 0 || !hasPosition || invalidLoop || !!latest?.planning;
-  $("routehint").textContent = !hasPosition && mode === "FLOWERS" ?
-    "請先從手機啟動模擬定位，再新增花點" :
-    invalidLoop ? "15 點道路路線無法直接循環；請撤銷一點或改為不循環" :
-    mode === "FLOWERS" ? "尋花路線最多 14 點；會拒絕重複／接近起點的花點" :
-    "道路路線最多 15 點；循環時最多 14 點";
-}
-
-function readCoordinate() {
-  const latText = $("lat").value.trim();
-  const lonText = $("lon").value.trim();
-  if (!latText || !lonText) throw Error("請先輸入經緯度，或點地圖選取位置");
-  const lat = Number(latText);
-  const lon = Number(lonText);
-  if (!Number.isFinite(lat) || !Number.isFinite(lon) ||
-      lat < -90 || lat > 90 || lon < -180 || lon > 180) throw Error("經緯度超出有效範圍");
-  return {lat,lon};
-}
 function showCoordinate(point) {
   chosen = point;
   $("lat").value = point.lat.toFixed(6);
   $("lon").value = point.lon.toFixed(6);
-  $("selected").textContent = "選取座標 · " + point.lat.toFixed(6) + ", " + point.lon.toFixed(6);
+  $("selected").textContent = "選取位置 · " + point.lat.toFixed(6) +
+    ", " + point.lon.toFixed(6);
 }
 showCoordinate(chosen);
 
-async function act(path, body, note) {
-  try {
-    const result = await call(path, "POST", body);
-    setMessage(result.message || note || "指令已送出");
-    await refresh();
-  } catch (err) { setMessage(err.message || "操作失敗"); }
+function readCoordinate() {
+  const latText = $("lat").value.trim(), lonText = $("lon").value.trim();
+  if (!latText || !lonText) throw Error("請先點地圖選位置或輸入經緯度");
+  const lat = Number(latText), lon = Number(lonText);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) ||
+      lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+    throw Error("無效的緯度或經度");
+  }
+  return {lat,lon};
 }
-$("teleport").addEventListener("click", () => {
-  try { act("/api/teleport", readCoordinate()); }
-  catch (e) { setMessage(e.message); }
+
+function selectMode(next) {
+  mode = next;
+  for (const [id,value] of [
+    ["mode-teleport","TELEPORT"],["mode-route","ROUTE"],
+    ["mode-flowers","FLOWERS"],["mode-saved","SAVED"]
+  ]) $("" + id).classList.toggle("mode-active", mode === value);
+  $("location-panel").classList.toggle("hidden", mode === "SAVED");
+  $("teleport-panel").classList.toggle("hidden", mode !== "TELEPORT");
+  $("route-panel").classList.toggle("hidden", mode !== "ROUTE" && mode !== "FLOWERS");
+  $("saved-panel").classList.toggle("hidden", mode !== "SAVED");
+  if (mode === "ROUTE" || mode === "FLOWERS") $("loop").value = String(loops[mode]);
+  $("confirm-snap").checked = false;
+  if (mode === "SAVED") refreshSaved();
+  updateRouteControls();
+  renderMap();
+}
+for (const [id,value] of [
+  ["mode-teleport","TELEPORT"],["mode-route","ROUTE"],
+  ["mode-flowers","FLOWERS"],["mode-saved","SAVED"]
+]) $(id).addEventListener("click", () => selectMode(value));
+selectMode("TELEPORT");
+$("loop").addEventListener("change", () => {
+  if (mode === "ROUTE" || mode === "FLOWERS") loops[mode] = $("loop").value === "true";
+  $("confirm-snap").checked = false;
+  updateRouteControls();
 });
-$("add").addEventListener("click", () => {
-  try { act("/api/points/add", {mode, ...readCoordinate()}); }
-  catch (e) { setMessage(e.message); }
+$("confirm-snap").addEventListener("change", updateRouteControls);
+
+async function act(path, body, note = "") {
+  try {
+    const reply = await call(path, "POST", body);
+    setMessage(reply.message || note || "指令已送出");
+    await refresh();
+    return true;
+  } catch (error) {
+    setMessage(error.message || "手機無法完成操作");
+    return false;
+  }
+}
+$("teleport").addEventListener("click", async () => {
+  try {
+    if (latest?.phase === "MOVING" || latest?.phase === "PAUSED") {
+      if (!confirm("目前路線尚未停止，先停止行走才能瞬移。")) return;
+      if (!await act("/api/control",{action:"stop"})) return;
+    }
+    if (!confirm("確定將手機模擬位置瞬移到所選座標？")) return;
+    await act("/api/teleport", readCoordinate());
+  } catch (error) { setMessage(error.message); }
 });
-$("undo").addEventListener("click", () => act("/api/points/undo", {mode}));
-$("clear").addEventListener("click", () => act("/api/points/clear", {mode}));
+$("set-origin").addEventListener("click", async () => {
+  try { await act("/api/origin", readCoordinate()); }
+  catch (error) { setMessage(error.message); }
+});
+$("add").addEventListener("click", async () => {
+  try { await act("/api/points/add", {mode,...readCoordinate()}); }
+  catch (error) { setMessage(error.message); }
+});
+$("undo").addEventListener("click", () => act("/api/points/undo",{mode}));
+$("clear").addEventListener("click", async () => {
+  if (confirm("要清除全部路點嗎？此操作不會移動 GPS。"))
+    await act("/api/points/clear",{mode});
+});
 $("speed").addEventListener("change", () => {
-  act("/api/speed", {speedPreset:$("speed").value});
+  act("/api/speed",{speedPreset:$("speed").value});
 });
 $("make-speed-default").addEventListener("click", () => {
-  act("/api/speed/default", {speedPreset:$("speed").value});
+  act("/api/speed/default",{speedPreset:$("speed").value});
 });
-$("start").addEventListener("click", () => act("/api/route/start", {
-  mode, speedPreset:$("speed").value, loop:$("loop").value === "true"
-}));
-for (const [element,action] of [["pause","pause"],["resume","resume"],["stop","stop"]]) {
-  $(element).addEventListener("click", () => act("/api/control", {action}));
-}
-$("real").addEventListener("click", () => {
-  if (window.confirm("確定要停止模擬定位並恢復真實 GPS？這也會關閉 Wi-Fi 控制。")) {
-    act("/api/control", {action:"restore-real"});
+$("plan").addEventListener("click", async () => {
+  $("confirm-snap").checked = false;
+  $("plan").disabled = true;
+  try {
+    await act("/api/route/preview",{mode,loop:$("loop").value === "true"});
+  } finally { updateRouteControls(); }
+});
+$("start").addEventListener("click", async () => {
+  const prepared = latest?.previews?.[mode];
+  if (!prepared?.id) { setMessage("請先預覽路線，再按開始"); return; }
+  if (prepared.loop !== ($("loop").value === "true")) {
+    setMessage("循環設定已改變，請重新規劃"); return;
   }
+  if (prepared.maxSnapMetres > 40 && !$("confirm-snap").checked) {
+    setMessage("請先確認道路吸附位置"); return;
+  }
+  if (!confirm("已確認路線預覽。現在開始從手機模擬行走？")) return;
+  $("start").disabled = true;
+  const accepted = await act("/api/route/start",{
+    mode, previewId: prepared.id, speedPreset:$("speed").value,
+    loop:$("loop").value === "true", confirmSnap:$("confirm-snap").checked
+  });
+  if (accepted) setMessage("已將開始行走指令送給手機；請查看最新狀態");
+  updateRouteControls();
+});
+for (const [id,action] of [["pause","pause"],["resume","resume"],["stop","stop"]]) {
+  $(id).addEventListener("click", async () => {
+    if (action === "stop" && !confirm("確定停止行走，將定位保留在目前位置？")) return;
+    await act("/api/control",{action});
+  });
+}
+$("real").addEventListener("click", async () => {
+  if (confirm("確定停止模擬 GPS，讓手機恢復真實定位？網頁控制連線仍會保留。"))
+    await act("/api/control",{action:"restore-real"});
 });
 
 const darkQuery = matchMedia("(prefers-color-scheme: dark)");
+const styles = ["auto","liberty","bright","positron","dark"];
 const storeKey = "pikminbee-map-appearance";
-const allowedStyles = ["auto","liberty","bright","positron","dark"];
 const savedStyle = localStorage.getItem(storeKey) || "auto";
-$("theme").value = allowedStyles.includes(savedStyle) ? savedStyle :
-  savedStyle === "light" ? "liberty" : savedStyle === "system" ? "auto" : "auto";
+$("theme").value = styles.includes(savedStyle) ? savedStyle : "auto";
 function styleUrl() {
-  const selected = $("theme").value;
-  const name = selected === "auto" ? (darkQuery.matches ? "dark" : "liberty") :
-    (allowedStyles.includes(selected) ? selected : "liberty");
+  const choice = $("theme").value;
+  const name = choice === "auto" ? (darkQuery.matches ? "dark" : "liberty") :
+    (styles.includes(choice) ? choice : "liberty");
   return "https://tiles.openfreemap.org/styles/" + name;
 }
 $("theme").addEventListener("change", () => {
-  localStorage.setItem(storeKey, $("theme").value);
+  localStorage.setItem(storeKey,$("theme").value);
   if (map) map.setStyle(styleUrl());
 });
 darkQuery.addEventListener?.("change", () => {
   if ($("theme").value === "auto" && map) map.setStyle(styleUrl());
 });
-
 async function initialiseMap() {
   if (map) return;
   try {
     maplibre = await import("/vendor/maplibre-gl.mjs");
     map = new maplibre.Map({
-      container:"map",
-      style: styleUrl(),
-      center:[chosen.lon,chosen.lat], zoom:13.5,
-      attributionControl:true
+      container:"map",style:styleUrl(),center:[chosen.lon,chosen.lat],
+      zoom:13.5,attributionControl:true
     });
     map.addControl(new maplibre.NavigationControl({showCompass:false}),"top-right");
-    map.on("click", e => {showCoordinate({lat:e.lngLat.lat,lon:e.lngLat.lng});renderMap();});
-    map.on("style.load", () => {lastLineKey = "";renderMap();});
+    map.on("click", e => {
+      showCoordinate({lat:e.lngLat.lat,lon:e.lngLat.lng});
+      renderMap();
+    });
+    map.on("style.load", () => { lastLineKey = ""; renderMap(); });
     map.on("load", renderMap);
-  } catch (err) {
-    $("map").textContent = "地圖資源無法載入，仍可使用經緯度欄位遠端控制。";
-    setMessage("地圖無法啟動（可能是瀏覽器不支援或圖磚網路中斷）：" + err.message);
+  } catch (error) {
+    $("map").textContent = "地圖無法載入。仍可手動輸入座標控制。";
+    setMessage("地圖資源無法載入：" + (error.message || "未知原因"));
   }
 }
-
 function renderMap() {
   if (!map || !map.loaded()) return;
-  const point = latest?.position || chosen;
-  if (point) {
-    if (!positionMarker) positionMarker = new maplibre.Marker({color:"#f3bd5a"})
-      .setLngLat([point.lon,point.lat]).addTo(map);
-    else positionMarker.setLngLat([point.lon,point.lat]);
-  }
-  const stops = mode === "ROUTE" ? (latest?.routeStops || []) : (latest?.flowerStops || []);
+  if (latest?.position) {
+    const p = latest.position;
+    if (!positionMarker) positionMarker = new maplibre.Marker({color:"#f2b858"})
+      .setLngLat([p.lon,p.lat]).setPopup(new maplibre.Popup().setText("手機模擬位置")).addTo(map);
+    else positionMarker.setLngLat([p.lon,p.lat]);
+  } else if (positionMarker) { positionMarker.remove(); positionMarker = null; }
+  const origin = latest?.origin;
+  if (origin) {
+    if (!originMarker) originMarker = new maplibre.Marker({color:"#4c8197"})
+      .setLngLat([origin.lon,origin.lat]).setPopup(new maplibre.Popup().setText("路線起點")).addTo(map);
+    else originMarker.setLngLat([origin.lon,origin.lat]);
+  } else if (originMarker) { originMarker.remove(); originMarker = null; }
+
+  const stops = mode === "FLOWERS" ? (latest?.flowerStops || []) :
+    mode === "ROUTE" ? (latest?.routeStops || []) : [];
   const key = mode + "|" + JSON.stringify(stops);
   if (key !== lastStopsKey) {
     routeMarkers.forEach(marker => marker.remove());
-    routeMarkers = stops.map((item,i) => new maplibre.Marker({color:"#50b8d5"})
-      .setLngLat([item.lon,item.lat])
-      .setPopup(new maplibre.Popup().setText("路點 " + (i+1))).addTo(map));
+    routeMarkers = stops.map((item,i) =>
+      new maplibre.Marker({color:i === stops.length-1 ? "#b9575b" : "#4e9f8c"})
+        .setLngLat([item.lon,item.lat])
+        .setPopup(new maplibre.Popup().setText("路點 " + (i+1))).addTo(map));
     lastStopsKey = key;
   }
-  const track = latest?.geometry || [];
-  const lineKey = JSON.stringify(track);
-  if (lineKey !== lastLineKey) {
-    const coordinates = track.map(item => [item.lon,item.lat]);
-    const data = {type:"FeatureCollection",features: coordinates.length >= 2 ? [{
-      type:"Feature",properties:{},geometry:{type:"LineString",coordinates}
-    }] : []};
-    if (map.getSource("bee-walk")) map.getSource("bee-walk").setData(data);
-    else {
-      map.addSource("bee-walk",{type:"geojson",data});
-      map.addLayer({id:"bee-walk-line",type:"line",source:"bee-walk",
-        paint:{"line-color":"#f0aa36","line-width":5,"line-opacity":.95}});
-    }
-    lastLineKey = lineKey;
+  const active = latest?.phase === "MOVING" || latest?.phase === "PAUSED" ||
+    (latest?.phase === "PARKED" && latest?.geometry?.length >= 2);
+  const road = active ? (latest?.geometry || []) :
+    (latest?.previews?.[mode]?.geometry || []);
+  const lineKey = mode + "|" + JSON.stringify(road);
+  if (lineKey === lastLineKey) return;
+  const coords = road.map(point => [point.lon,point.lat]);
+  const data = {type:"FeatureCollection",features:coords.length>=2?[{
+    type:"Feature",properties:{},geometry:{type:"LineString",coordinates:coords}
+  }]:[]};
+  if (map.getSource("bee-walk")) map.getSource("bee-walk").setData(data);
+  else {
+    map.addSource("bee-walk",{type:"geojson",data});
+    map.addLayer({id:"bee-walk-line",type:"line",source:"bee-walk",
+      paint:{"line-color":"#d39339","line-width":5,"line-opacity":.95}});
   }
+  lastLineKey = lineKey;
 }
-
+function formatDistance(metres) {
+  return metres >= 1000 ? (metres/1000).toFixed(2) + " 公里" :
+    Math.round(metres) + " 公尺";
+}
+function updateRouteControls() {
+  const navigating = mode === "ROUTE" || mode === "FLOWERS";
+  const stops = mode === "FLOWERS" ? (latest?.flowerStops || []) :
+    (latest?.routeStops || []);
+  const prepared = latest?.previews?.[mode];
+  const hasOrigin = !!latest?.origin;
+  const moving = latest?.phase === "MOVING";
+  const paused = latest?.phase === "PAUSED";
+  const busy = moving || paused || !!latest?.planning;
+  const loop = $("loop").value === "true";
+  const ready = !!prepared?.id && prepared.loop === loop;
+  const needSnap = ready && prepared.maxSnapMetres > 40;
+  const max = mode === "ROUTE" ? 15 : 14;
+  $("pointcount").textContent = stops.length + " / " + max + " 個路點";
+  $("originlabel").textContent = hasOrigin ? "目前起點：" +
+    latest.origin.lat.toFixed(6) + ", " + latest.origin.lon.toFixed(6) :
+    "尚未指定起點 · 在地圖選擇後按「設為起點」";
+  $("add").disabled = !navigating || busy || stops.length >= max ||
+    (mode === "FLOWERS" && !hasOrigin);
+  $("set-origin").disabled = !navigating || busy;
+  $("undo").disabled = !navigating || busy || stops.length === 0;
+  $("clear").disabled = !navigating || busy || stops.length === 0;
+  $("plan").disabled = !navigating || busy || !hasOrigin || stops.length === 0;
+  $("start").disabled = !navigating || busy || !ready ||
+    (needSnap && !$("confirm-snap").checked) ||
+    !latest?.mockPermissionReady;
+  $("snapconfirmrow").classList.toggle("hidden",!needSnap);
+  $("previewinfo").classList.toggle("hidden",!ready);
+  if (ready) {
+    $("previewinfo").textContent = "路線預覽 · " +
+      formatDistance(prepared.distanceMetres) + " · 最大道路吸附 " +
+      Math.round(prepared.maxSnapMetres) + " 公尺。請確認後再開始。";
+  }
+  $("routehint").textContent = !hasOrigin ? "先在地圖選取起點，再按「設為起點」。" :
+    stops.length === 0 ? "加入目的地，規劃只會預覽不會移動 GPS。" :
+    latest?.planning ? "正在查詢步行道路，不會移動手機。" :
+    ready ? "路線已預覽。確認道路和起點後可開始。" :
+    "請先按「規劃並預覽道路」。";
+  if (navigating && !latest?.mockPermissionReady && ready) {
+    $("routehint").textContent += " 開始前仍需在手機設定精確定位及模擬位置 App。";
+  }
+  $("pause").disabled = !moving;
+  $("resume").disabled = !paused;
+  $("stop").disabled = !moving && !paused;
+  $("teleport").disabled = moving || paused;
+}
+function updateStatus() {
+  const phase = latest?.phase || "IDLE";
+  const names = {MOVING:"行走中", PAUSED:"已暫停", PARKED:"已停止", IDLE:"待命"};
+  const progress = latest?.progress || {};
+  const count = Number(progress.estimatedSteps || 0);
+  $("stepstatus").textContent = (names[phase] || phase) +
+    " · 本次估算 " + count + " 步";
+  $("legstatus").textContent = (progress.activeLeg || "") +
+    (progress.totalMetres > 0 ? " · " +
+      formatDistance(progress.travelledMetres || 0) + " / " +
+      formatDistance(progress.totalMetres) + " · " +
+      Math.round((progress.fraction||0)*100) + "%" : "");
+  $("progressbar").style.width = Math.round(Math.min(1, Math.max(0, progress.fraction || 0))*100) + "%";
+  $("status").textContent = (latest?.status || "尚未模擬定位") +
+    (latest?.position ? " · " + latest.position.lat.toFixed(5) +
+      ", " + latest.position.lon.toFixed(5) : "");
+  if (latest?.note && /失敗|無法/.test(latest.note)) setMessage(latest.note);
+}
 async function refresh() {
   if (!token || refreshing) return;
   refreshing = true;
@@ -239,29 +361,71 @@ async function refresh() {
     current = latest.position;
     if (["SLOW","WALK","FAST"].includes(latest.speedPreset))
       $("speed").value = latest.speedPreset;
-    const names = {SLOW:"慢走 0.8 km/h",WALK:"走路 1.4 km/h",FAST:"快走 10.8 km/h"};
-    const savedDefault = latest.defaultSpeedPreset || "WALK";
-    $("default-speed").textContent = "個人預設：" + (names[savedDefault] || names.WALK);
-    $("make-speed-default").disabled = $("speed").value === savedDefault;
-    $("status").textContent = (latest.status || "尚未模擬") +
-      " · " + (latest.phase || "IDLE") +
-      (latest.position ? " · " + latest.position.lat.toFixed(5) +
-        ", " + latest.position.lon.toFixed(5) : "");
-    if (latest.note && latest.note.includes("失敗")) setMessage(latest.note);
+    const labels = {SLOW:"慢走 0.8",WALK:"走路 1.4",FAST:"快走 10.8"};
+    $("default-speed").textContent = "預設：" +
+      (labels[latest.defaultSpeedPreset] || labels.WALK) + " km/h";
+    $("make-speed-default").disabled = latest.speedPreset === latest.defaultSpeedPreset;
+    updateStatus();
     updateRouteControls();
     renderMap();
-  } catch (err) {
-    if (token) $("connection").textContent = "連線中斷";
-    if (token) setMessage(err.message || "無法取得手機狀態");
+  } catch (error) {
+    if (token) $("connection").textContent = "手機連線中斷";
+    if (token) setMessage(error.message || "無法更新手機狀態");
   } finally { refreshing = false; }
 }
 $("follow").addEventListener("click", () => {
-  const point = current;
-  if (map && point) map.flyTo({center:[point.lon,point.lat],zoom:15});
+  if (map && current) map.flyTo({center:[current.lon,current.lat],zoom:15});
+  else setMessage("手機尚未啟動模擬位置，可先從地圖選起點。");
 });
-setInterval(() => {
-  if (!document.hidden && connected && token) refresh();
-}, 2000);
+
+async function refreshSaved() {
+  if (!token || mode !== "SAVED") return;
+  const list = $("saved-list");
+  list.textContent = "正在讀取收藏…";
+  try {
+    const records = await call("/api/saved");
+    list.replaceChildren();
+    const addTitle = title => {
+      const line = document.createElement("strong");
+      line.textContent = title;
+      list.appendChild(line);
+    };
+    addTitle("收藏地點");
+    const places = records.places || [];
+    if (!places.length) {
+      const note = document.createElement("span"); note.className="muted";
+      note.textContent="尚未收藏地點"; list.appendChild(note);
+    }
+    for (const place of places) {
+      const button = document.createElement("button");
+      button.textContent = place.name + " · 選取位置";
+      button.addEventListener("click", () => {
+        showCoordinate(place.position);
+        selectMode("TELEPORT");
+        map?.flyTo({center:[place.position.lon,place.position.lat],zoom:15});
+      });
+      list.appendChild(button);
+    }
+    addTitle("收藏路線");
+    const routes = records.routes || [];
+    if (!routes.length) {
+      const note = document.createElement("span"); note.className="muted";
+      note.textContent="尚未收藏路線"; list.appendChild(note);
+    }
+    for (const route of routes) {
+      const button = document.createElement("button");
+      button.textContent = route.name + " · " + route.stops.length + " 點 · 載入草稿";
+      button.addEventListener("click", async () => {
+        if (await act("/api/saved/load",{id:route.id})) {
+          selectMode(route.mode);
+          setMessage("收藏路線已載入，請先預覽再開始");
+        }
+      });
+      list.appendChild(button);
+    }
+  } catch (error) { list.textContent = error.message || "無法讀取收藏"; }
+}
+setInterval(() => { if (!document.hidden && connected && token) refresh(); }, 2000);
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden && token) refresh();
 });
