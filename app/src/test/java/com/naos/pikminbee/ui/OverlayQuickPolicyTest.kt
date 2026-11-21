@@ -15,6 +15,20 @@ class OverlayQuickPolicyTest {
         assertEquals(OverlayPrimaryState.START, OverlayQuickPolicy.primary(WalkPhase.PARKED))
     }
 
+    @Test fun originalFloatingPanelKeepsItsOwnTwoRows() {
+        assertEquals(
+            listOf(OverlayQuickAction.PRIMARY, OverlayQuickAction.STOP,
+                OverlayQuickAction.REAL_GPS, OverlayQuickAction.VIRTUAL_GPS),
+            OverlayQuickPolicy.topRow,
+        )
+        assertEquals(
+            listOf(OverlayQuickAction.FLOWER_VISION, OverlayQuickAction.SPEED,
+                OverlayQuickAction.MAP, OverlayQuickAction.CLOSE),
+            OverlayQuickPolicy.bottomRow,
+        )
+        assertEquals(8, (OverlayQuickPolicy.topRow + OverlayQuickPolicy.bottomRow).distinct().size)
+    }
+
     @Test fun speedCyclesWithoutChangingSavedDefaults() {
         assertEquals(WalkSpeedPreset.WALK, OverlayQuickPolicy.nextSpeed(WalkSpeedPreset.SLOW))
         assertEquals(WalkSpeedPreset.FAST, OverlayQuickPolicy.nextSpeed(WalkSpeedPreset.WALK))
