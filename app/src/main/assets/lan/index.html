@@ -50,6 +50,9 @@ h2{font-size:17px;margin:0 0 10px;letter-spacing:-.2px}
 label{display:block;color:var(--sub);font-size:12px;margin-bottom:5px}
 input,select,button{font:inherit}
 input,select{width:100%;padding:11px;border:1px solid var(--line);border-radius:12px;background:var(--soft);color:var(--text);min-height:48px}
+/* Native Windows/Edge popups may otherwise show light items with white text. */
+select option{background-color:#1b2a33;color:#eaf2f2}
+@media(prefers-color-scheme:light){select option{background-color:#fff;color:#20313a}}
 button{padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:var(--soft);color:var(--text);cursor:pointer;min-height:48px}
 button:hover:not(:disabled){border-color:var(--subtle);background:var(--accent-soft)}
 button:active:not(:disabled){border-color:var(--accent)}
@@ -65,6 +68,24 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
 .tabs .mode-active{border-color:var(--rim);background:var(--accent-soft);color:var(--accent);font-weight:750;box-shadow:inset 0 1px 0 var(--rim)}
 .tabs button[aria-pressed=true]{color:var(--accent)}
 .mode-content{min-width:0}
+.position-note{margin:7px 0 3px;padding:8px 10px;border-radius:10px;background:var(--soft);font-size:12px}
+#real-location-status[data-state=ready]{color:var(--text)}
+#real-location-status[data-state=error]{color:var(--accent)}
+.route-order{display:grid;gap:7px;margin:8px 0 12px;padding:0;list-style:none}
+.stop-item{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 10px;background:var(--soft);border:1px solid var(--line);border-radius:12px}
+.stop-number{flex:0 0 auto;display:grid;place-items:center;width:30px;height:30px;border-radius:50%;background:var(--accent);color:var(--accent-ink);font-size:12px;font-weight:750}
+.stop-number.is-origin{background:var(--button);color:var(--text)}
+.stop-detail{min-width:100px;flex:1 1 115px}
+.stop-detail strong,.stop-detail small{display:block}
+.stop-detail small{font-size:11px;color:var(--sub);overflow-wrap:anywhere}
+.stop-actions{display:flex;gap:4px;flex:0 0 auto}
+.stop-actions button{min-width:36px;min-height:42px;padding:6px 8px;font-size:12px}
+.stop-actions button:disabled{opacity:.35}
+.ordinal-pin{display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:50%;border:2px solid #fff;background:#356b72;color:#fff;box-shadow:0 1px 4px #0006;font-size:12px;font-weight:800}
+.ordinal-pin.last{background:#9a4c55}
+.ordinal-pin.start{background:#436e85}
+.ordinal-pin.real{background:#327da9}
+.ordinal-pin.virtual{background:#a47631}
 .spacer{height:8px}
 .hidden{display:none!important}
 #pairbox{max-width:540px;margin:42px auto}
@@ -181,7 +202,8 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
   </div>
  </div>
  <div id="selected" class="muted" aria-live="polite">尚未選取位置 · 點地圖或輸入座標</div>
- <div class="row"><button id="follow">顯示手機模擬位置</button></div>
+ <div id="real-location-status" class="position-note" data-state="idle" role="status" aria-live="polite">真實 GPS 尚未查詢（地圖初始中心不是手機位置）</div>
+ <div class="row"><button id="follow">查看模擬位置</button><button id="find-real">查看手機真實 GPS</button></div>
  <details class="help-details">
   <summary>地圖操作說明</summary>
   <p>選位置不會自動瞬移或開始行走。底圖由 OpenFreeMap 提供，需要手機與瀏覽器可連線到圖磚服務；地圖失敗時仍可在控制區輸入經緯度。</p>
@@ -222,6 +244,9 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
   </div>
   <details class="advanced-details"><summary>進階：設定預設速度</summary><div class="row"><span id="default-speed" class="muted">目前預設：走路</span><button id="make-speed-default">設為預設速度</button></div></details>
   <div id="pointcount" class="muted">0 個路點</div>
+  <ol id="route-order" class="route-order" aria-label="路點順序" aria-live="polite"></ol>
+  <div id="flower-guide" class="hint hidden">尋花只使用你確認並加入的花點；不把一般地圖上的標記當作 Pikmin Bloom 大花。最多 14 點，可選循環，預覽道路後才開始。</div>
+  <div class="sub">清單與虛線只表示行走順序；須按「規劃並預覽道路」取得道路線。</div>
   <div id="routehint" class="sub">選擇起點及目的地，先規劃道路再開始。</div>
   <div class="row"><button id="add">加入路點</button><button id="undo">撤銷上一點</button><button id="clear">清除全部</button></div>
   <div class="row"><button id="plan" class="primary">① 規劃並預覽道路</button></div>
@@ -240,7 +265,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
  <div class="spacer"></div>
  <h2 class="motion-title">行走操作</h2>
  <div id="motion-controls" class="row motion-controls" aria-label="行走控制"><button id="pause">暫停</button><button id="resume">繼續</button><button class="danger" id="stop">停止</button></div>
- <div class="row"><button id="real">恢復真實 GPS</button></div>
+ <div class="row"><button id="real">恢復真實 GPS（停止模擬）</button></div>
  <div id="message" aria-live="polite"></div>
  <div class="hint">開始前必須先預覽路線。暫停與停止都由 Android App 執行；網頁斷線不會自動停止路線。GPS 模擬仍需在手機授予系統權限。</div>
 </section>

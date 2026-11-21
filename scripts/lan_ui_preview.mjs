@@ -26,7 +26,14 @@ const assets = {
 let state = {
   position: {lat:25.040815,lon:121.463424},
   origin: {lat:25.040815,lon:121.463424},
-  routeStops: [], flowerStops: [], geometry: [],
+  mockActive: true,
+  realGpsState:'mock',
+  realPosition:null,
+  // Synthetic numbered draft for visual QA only; this never reaches a phone.
+  routeStops: [
+    {lat:25.0441,lon:121.4661},{lat:25.0478,lon:121.4702},
+    {lat:25.0494,lon:121.4650}
+  ], flowerStops: [], geometry: [],
   previews: {}, phase:'PARKED', mode:'ROUTE', planning:false,
   mockPermissionReady:false, status:'手機待命 · 本機預覽',
   progress: {activeLeg:'起點 → 1',estimatedSteps:0,fraction:0,
@@ -59,6 +66,44 @@ createServer(async (req,res)=>{
   }
   if(req.method==='GET'&&url==='/api/saved'){
     send(res,{places:[],routes:[]});return;
+  }
+  if(req.method==='POST'&&url==='/api/control'){
+    const request=JSON.parse((await (async()=>{let body='';for await(const chunk of req)body+=chunk;return body})())||'{}');
+    if(request.action==='restore-real'){
+      state.mockActive=false;
+      state.position=null;
+      state.phase='IDLE';
+      state.realGpsState='idle';
+    }
+    send(res,{message:'本機模擬狀態已更新；沒有操控手機'},202);return;
+  }
+  if(req.method==='POST'&&url==='/api/location/real'){
+    if(state.mockActive){send(res,{error:'請先恢復真實 GPS'},409);return;}
+    state.realPosition={lat:25.0408,lon:121.4634,accuracy:12};
+    state.realGpsState='ready';
+    send(res,{message:'本機預覽的合成真實 GPS（並非手機定位）'},202);return;
+  }
+  if(req.method==='POST'&&(url==='/api/points/reorder'||url==='/api/points/remove')){
+    let body='';
+    for await(const chunk of req)body+=chunk;
+    const request=JSON.parse(body||'{}');
+    const items=request.mode==='FLOWERS'?'flowerStops':'routeStops';
+    const old=state[items].slice();
+    const index=request.index;
+    if(url.endsWith('reorder')){
+      const next=index+request.offset;
+      if(![-1,1].includes(request.offset)||index<0||next<0||
+          index>=old.length||next>=old.length){
+        send(res,{error:'路點順序無效'},409);return;
+      }
+      [old[index],old[next]]=[old[next],old[index]];
+    } else {
+      if(index<0||index>=old.length){send(res,{error:'路點無效'},409);return;}
+      old.splice(index,1);
+    }
+    state[items]=old;
+    state.previews={};
+    send(res,{message:'本機測試草稿順序已更新；沒有操控手機'},202);return;
   }
   if(req.method==='POST'&&url.startsWith('/api/')){
     send(res,{message:'僅供測試的網頁預覽：沒有向手機送出指令'},202);return;
