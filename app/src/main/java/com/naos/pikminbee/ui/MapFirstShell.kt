@@ -67,6 +67,7 @@ fun MapFirstShell(
     modeTitle: String,
     message: String,
     coordinateInput: String,
+    coordinateInputDismissToken: Int = 0,
     onCoordinateChange: (String) -> Unit,
     onCoordinateTeleport: () -> Unit,
     onCurrentLocation: () -> Unit,
@@ -308,11 +309,11 @@ fun MapFirstShell(
                     val total = walkingProgress.totalMetres / 1000.0
                     val done = walkingProgress.travelledMetres / 1000.0
                     val progressText = buildString {
-                        append("路點 ")
-                        append(walkingProgress.nextWaypoint?.toString() ?: "終點")
-                        append(" / ")
+                        append("路段 ")
+                        append(walkingProgress.activeLegLabel)
+                        append(" · 共 ")
                         append(walkingProgress.waypointCount.coerceAtLeast(modeStopsCount))
-                        append(" · ")
+                        append(" 點 · ")
                         append(String.format(Locale.US, "%.2f / %.2f km", done, total))
                         append(" · ")
                         append(routeSpeedKmh)
@@ -336,6 +337,8 @@ fun MapFirstShell(
             onValueChange = onCoordinateChange,
             onTeleport = onCoordinateTeleport,
             teleportEnabled = active == 0,
+            dismissEditingToken = coordinateInputDismissToken,
+            editingBlocked = detailsOpen || mapExplore,
             modeTitle = modeTitle,
             onHome = {
                 detailsOpen = false

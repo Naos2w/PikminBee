@@ -4,12 +4,20 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import androidx.core.content.ContextCompat
+import android.Manifest
+import android.content.pm.PackageManager
+import com.naos.pikminbee.ui.BeePermissions
+import com.naos.pikminbee.data.PreparedRouteState
+import com.naos.pikminbee.domain.PreparedWalkingRoute
+import com.naos.pikminbee.domain.WalkingGeometry
+import com.naos.pikminbee.domain.WalkPhase
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import com.naos.pikminbee.data.AppPreferences
 import com.naos.pikminbee.data.WalkSpeedState
 import com.naos.pikminbee.domain.WalkSpeedPreset
 import com.naos.pikminbee.domain.Coordinate
 import com.naos.pikminbee.domain.WalkMode
-import com.naos.pikminbee.domain.WalkPhase
 import com.naos.pikminbee.location.LocationStatus
 import com.naos.pikminbee.location.MockLocationService
 import com.naos.pikminbee.route.ValhallaPlanner
@@ -61,6 +69,12 @@ class LanController(private val context: Context) {
     private val pairing = LanPairing()
     private val rateLimiter = LanRateLimiter()
     private val planning = AtomicBoolean(false)
+    private val starting = AtomicBoolean(false)
+    private data class WebPreview(val id: String, val route: PreparedWalkingRoute)
+    private val previews = ConcurrentHashMap<WalkMode, WebPreview>()
+    @Volatile private var browserOrigin: Coordinate? = null
+    @Volatile private var usedPreviewId: String? = null
+    private fun origin(): Coordinate? = browserOrigin ?: LocationStatus.selected.value
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var server: LanHttpServer? = null
     private var bound: Inet4Address? = null
@@ -79,9 +93,9 @@ class LanController(private val context: Context) {
             LanStatus.display.value = LanDisplay(
                 active = true, address = "http://${ip.hostAddress}:8765/",
                 pairingPin = pairing.currentPin(),
-                note = "僅接受同一私人 Wi-Fi 網路，配對碼不會上傳雲端",
+                note = "僅接受可互通的私人區網，配對碼不會上傳雲端",
             )
-            "已開啟 Wi-Fi 網頁控制"
+            "已開啟電腦網頁控制"
         }.getOrElse {
             pairing.revoke()
             LanStatus.display.value = LanDisplay(note = "無法開啟：${it.message}")
@@ -103,6 +117,9 @@ class LanController(private val context: Context) {
     }
 
     fun stop(reason: String = "Wi-Fi 控制已關閉") {
+        previews.clear()
+        browserOrigin = null
+        usedPreviewId = null
         server?.stop()
         server = null
         bound = null
@@ -165,29 +182,38 @@ class LanController(private val context: Context) {
         }
         if (!pairing.authorised(req.token, req.remoteAddress)) return error(401, "請在手機取得配對碼後重新連線")
         if (req.method == "GET" && req.path == "/api/state") return ok(snapshot())
+        if (req.method == "GET" && req.path == "/api/saved") return ok(savedSnapshot())
         if (req.method != "POST") return error(404, "找不到操作")
         return when (req.path) {
             "/api/teleport" -> {
+                if (walking()) return error(409, "路線進行中；請先按停止，再確認瞬移")
+                if (!mockPermissionReady()) return error(409, "請先在手機完成精確定位及模擬位置 App 設定")
                 val target = coordinate(req.body) ?: return error(400, "經緯度無效")
-                context.startService(MockLocationService.teleportIntent(context, target))
-                accepted("已送出瞬移指令")
+                runCatching { ContextCompat.startForegroundService(context,
+                    MockLocationService.teleportIntent(context, target)) }
+                    .fold({ accepted("已送出瞬移指令") },
+                        { error(409, "無法瞬移：" + (it.message ?: "請確認手機狀態")) })
             }
             "/api/points/add" -> {
+                if (walking()) return error(409, "行走中無法修改路點，請先停止")
                 val json = parse(req.body) ?: return error(400, "JSON 無效")
                 val mode = mode(json.optString("mode")) ?: return error(400, "模式無效")
                 val target = coordinate(json) ?: return error(400, "經緯度無效")
                 val result = LanRouteDraftPolicy.add(
-                    mode, points(mode), target, LocationStatus.selected.value,
+                    mode, points(mode), target, origin(),
                 )
                 if (!result.accepted) return error(409, result.message)
                 savePoints(mode, result.stops)
+                invalidate(mode)
                 accepted(result.message)
             }
             "/api/points/undo", "/api/points/clear" -> {
+                if (walking()) return error(409, "行走中無法修改路點，請先停止")
                 val json = parse(req.body) ?: return error(400, "JSON 無效")
                 val mode = mode(json.optString("mode")) ?: return error(400, "模式無效")
                 val current = points(mode)
                 savePoints(mode, if (req.path.endsWith("undo")) current.dropLast(1) else emptyList())
+                invalidate(mode)
                 accepted("路點已更新")
             }
             "/api/speed" -> {
@@ -196,7 +222,9 @@ class LanController(private val context: Context) {
                     it.name == json.optString("speedPreset")
                 } ?: return error(400, "不支援的速度預設")
                 prefs.setWalkSpeedPreset(preset)
-                context.startService(MockLocationService.speedIntent(context, preset))
+                if (walking()) {
+                    context.startService(MockLocationService.speedIntent(context, preset))
+                }
                 accepted("本次速度已設定：${preset.display}")
             }
             "/api/speed/default" -> {
@@ -207,41 +235,123 @@ class LanController(private val context: Context) {
                 prefs.setDefaultWalkSpeedPreset(preset)
                 accepted("下次開啟 App 的預設速度已設為：${preset.display}")
             }
-            "/api/route/start" -> {
+            "/api/origin" -> {
+                if (walking()) return error(409, "行走中無法修改起點；請先停止")
+                val point = coordinate(req.body) ?: return error(400, "起點經緯度無效")
+                browserOrigin = point
+                invalidate(WalkMode.ROUTE)
+                invalidate(WalkMode.FLOWERS)
+                accepted("已設定路線起點；尚未移動 GPS")
+            }
+            "/api/saved/load" -> {
+                if (walking()) return error(409, "行走中無法載入路線；請先停止")
+                val id = parse(req.body)?.optString("id").orEmpty()
+                val route = prefs.savedRoutes().firstOrNull { it.id == id }
+                    ?: return error(404, "找不到收藏路線")
+                prefs.loadSavedRouteIntoDraft(route)
+                invalidate(route.mode)
+                accepted("已載入收藏路線，請先預覽道路")
+            }
+            "/api/route/preview" -> {
+                if (walking()) return error(409, "已有行走中的路線，請先停止")
                 val json = parse(req.body) ?: return error(400, "JSON 無效")
-                val mode = mode(json.optString("mode")) ?: return error(400, "模式無效")
-                val start = LocationStatus.selected.value
-                    ?: return error(409, "請先在手機啟動模擬定位並加入路點")
+                val walkMode = mode(json.optString("mode")) ?: return error(400, "模式無效")
+                val start = origin() ?: return error(409,
+                    "請先在地圖選起點並按「設為起點」，或先啟動手機定位")
+                val stops = points(walkMode).toList()
                 val loop = json.optBoolean("loop", false)
-                val preset = WalkSpeedPreset.entries.firstOrNull {
-                    it.name == json.optString("speedPreset")
-                } ?: return error(400, "不支援的速度預設；請選 0.8、1.4 或 10.8 km/h")
-                val anchors = try {
-                    LanRouteDraftPolicy.anchors(mode, start, points(mode), loop)
-                } catch (e: IllegalArgumentException) {
-                    return error(409, e.message ?: "路點無效")
-                }
+                val anchors = runCatching {
+                    LanRouteDraftPolicy.anchors(walkMode, start, stops, loop)
+                }.getOrElse { return error(409, it.message ?: "路點無效") }
                 if (!planning.compareAndSet(false, true))
-                    return error(409, "正在規劃另一條路線")
-                prefs.setWalkSpeedPreset(preset)
+                    return error(409, "仍在規劃上一條道路")
+                invalidate(walkMode)
+                LanStatus.display.value = LanStatus.display.value.copy(
+                    note = "正在規劃步行道路；不會移動模擬 GPS")
                 scope.launch {
                     try {
-                        val route = ValhallaPlanner.plan(anchors)
-                        context.startService(MockLocationService.routeIntent(
-                            context, route, WalkSpeedState.selected.value.metresPerSecond,
-                            mode, loop,
-                        ))
+                        val detailed = ValhallaPlanner.planDetailed(anchors)
+                        // Reject stale responses after draft edits or origin change.
+                        if (origin() != start || points(walkMode) != stops) {
+                            LanStatus.display.value = LanStatus.display.value.copy(
+                                note = "起點或路點已變更，請重新規劃")
+                        } else {
+                            val prepared = PreparedWalkingRoute(
+                                origin = start, stops = stops, geometry = detailed.geometry,
+                                loop = loop, snapMetres = detailed.snapMetres,
+                            )
+                            val id = UUID.randomUUID().toString()
+                            previews[walkMode] = WebPreview(id, prepared)
+                            PreparedRouteState.set(walkMode, prepared)
+                            LanStatus.display.value = LanStatus.display.value.copy(
+                                note = "已完成道路預覽。確認地圖路線後再按開始行走")
+                        }
                     } catch (e: Exception) {
                         LanStatus.display.value = LanStatus.display.value.copy(
-                            note = "道路規劃失敗：${e.message ?: "路線不可用"}")
+                            note = "道路預覽失敗：" + (e.message ?: "請稍後重試"))
                     } finally {
                         planning.set(false)
                     }
                 }
-                accepted("開始規劃行人道路")
+                accepted("正在規劃道路，不會移動 GPS")
+            }
+            "/api/route/start" -> {
+                if (planning.get()) return error(409, "道路仍在規劃，請先預覽")
+                if (walking()) return error(409, "已經在行走；請先停止")
+                if (!mockPermissionReady()) return error(409,
+                    "請先在手機授予精確定位，並於開發人員選項選取 PikminBee 為模擬位置 App")
+                val json = parse(req.body) ?: return error(400, "JSON 無效")
+                val walkMode = mode(json.optString("mode")) ?: return error(400, "模式無效")
+                val loop = json.optBoolean("loop", false)
+                val available = previews[walkMode]
+                val check = LanWebPreviewPolicy.canStart(
+                    available?.route, available?.id, json.optString("previewId"),
+                    origin(), points(walkMode), loop,
+                    json.optBoolean("confirmSnap", false), usedPreviewId,
+                )
+                when (check) {
+                    LanWebPreviewPolicy.StartCheck.MISSING ->
+                        return error(409, "請先按「規劃路線」，完成預覽後再開始")
+                    LanWebPreviewPolicy.StartCheck.STALE ->
+                        return error(409, "路點或起點已改變，請重新預覽")
+                    LanWebPreviewPolicy.StartCheck.CONFIRM_SNAP ->
+                        return error(409, "有路點離道路超過 40 公尺，請確認吸附位置")
+                    LanWebPreviewPolicy.StartCheck.ALREADY_USED ->
+                        return error(409, "此路線已啟動過；請重新預覽")
+                    LanWebPreviewPolicy.StartCheck.READY -> Unit
+                }
+                val preset = WalkSpeedPreset.entries.firstOrNull {
+                    it.name == json.optString("speedPreset")
+                } ?: return error(400, "請選擇有效速度")
+                if (!starting.compareAndSet(false, true))
+                    return error(409, "行走正在啟動，請勿重複點擊")
+                try {
+                    prefs.setWalkSpeedPreset(preset)
+                    ContextCompat.startForegroundService(context,
+                        MockLocationService.routeIntent(
+                            context, available!!.route.geometry,
+                            preset.metresPerSecond, walkMode, loop))
+                    usedPreviewId = available.id
+                    accepted("已要求手機沿預覽路線開始行走")
+                } catch (e: Exception) {
+                    error(409, "手機未能開始行走：" + (e.message ?: "請確認授權"))
+                } finally {
+                    starting.set(false)
+                }
             }
             "/api/control" -> {
                 val action = parse(req.body)?.optString("action") ?: return error(400, "指令無效")
+                val state = LocationStatus.phase.value
+                if (action == "pause" && state != WalkPhase.MOVING)
+                    return error(409, "目前沒有行走中路線可以暫停")
+                if (action == "resume" && state != WalkPhase.PAUSED)
+                    return error(409, "目前沒有已暫停路線可以繼續")
+                if (action == "stop" && state !in listOf(WalkPhase.MOVING, WalkPhase.PAUSED))
+                    return error(409, "目前沒有需要停止的路線")
+                if (action == "clear") {
+                    invalidate(WalkMode.ROUTE)
+                    invalidate(WalkMode.FLOWERS)
+                }
                 val serviceAction = when (action) {
                     "pause" -> MockLocationService.ACTION_PAUSE_ROUTE
                     "resume" -> MockLocationService.ACTION_RESUME_ROUTE
@@ -257,6 +367,40 @@ class LanController(private val context: Context) {
         }
     }
 
+    private fun walking(): Boolean = LocationStatus.phase.value in
+        listOf(WalkPhase.MOVING, WalkPhase.PAUSED)
+
+    private fun mockPermissionReady(): Boolean =
+        ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED &&
+            BeePermissions.inspect(context).selectedMockApp
+
+    private fun invalidate(mode: WalkMode) {
+        previews.remove(mode)
+        PreparedRouteState.set(mode, null)
+    }
+
+    private fun savedSnapshot(): String {
+        fun encoded(point: Coordinate) = JSONObject()
+            .put("lat", point.latitude).put("lon", point.longitude)
+        val places = JSONArray().apply {
+            prefs.places().take(100).forEach { item ->
+                put(JSONObject().put("id", item.id).put("name", item.name)
+                    .put("position", encoded(item.coordinate)))
+            }
+        }
+        val routes = JSONArray().apply {
+            prefs.savedRoutes().take(100).forEach { item ->
+                put(JSONObject().put("id", item.id).put("name", item.name)
+                    .put("mode", item.mode.name)
+                    .put("stops", JSONArray().apply {
+                        item.stops.forEach { put(encoded(it)) }
+                    }))
+            }
+        }
+        return JSONObject().put("places", places).put("routes", routes).toString()
+    }
+
     private fun asset(path: String, mime: String): LanReply = runCatching {
         LanReply(200, context.assets.open(path).bufferedReader(Charsets.UTF_8).use { it.readText() }, mime)
     }.getOrElse { error(404, "缺少控制頁面") }
@@ -267,15 +411,49 @@ class LanController(private val context: Context) {
         }
         val position = LocationStatus.selected.value
         val geometry = LocationStatus.geometry.value
-        val path = if (geometry.size > 250) geometry.filterIndexed { index, _ -> index % (geometry.size / 250 + 1) == 0 } +
-            geometry.last() else geometry
+        val path = if (geometry.size > 250)
+            geometry.filterIndexed { index, _ -> index % (geometry.size / 250 + 1) == 0 } +
+                geometry.last() else geometry
+        val routeStates = JSONObject()
+        for (mode in WalkMode.entries) {
+            val candidate = previews[mode]
+            val prepared = candidate?.route
+            if (candidate != null && prepared != null &&
+                prepared.isCurrent(origin(), points(mode), prepared.loop)) {
+                val sampled = prepared.geometry
+                val shown = if (sampled.size > 350)
+                    sampled.filterIndexed { index, _ -> index % (sampled.size / 350 + 1) == 0 } +
+                        sampled.last()
+                else sampled
+                routeStates.put(mode.name, JSONObject()
+                    .put("id", candidate.id)
+                    .put("loop", prepared.loop)
+                    .put("maxSnapMetres", prepared.maxSnapMetres)
+                    .put("originSnapMetres", prepared.originSnapMetres)
+                    .put("distanceMetres", WalkingGeometry.lengthMeters(prepared.geometry))
+                    .put("geometry", coordinates(shown)))
+            }
+        }
+        val progress = LocationStatus.progress.value
         return JSONObject()
             .put("status", LocationStatus.display.value)
             .put("note", LanStatus.display.value.note)
             .put("position", position?.let { JSONObject().put("lat", it.latitude).put("lon", it.longitude) })
+            .put("origin", origin()?.let { JSONObject().put("lat", it.latitude).put("lon", it.longitude) })
             .put("phase", LocationStatus.phase.value.name)
             .put("mode", LocationStatus.mode.value?.name)
             .put("planning", planning.get())
+            .put("mockPermissionReady", mockPermissionReady())
+            .put("progress", JSONObject()
+                .put("activeLeg", progress.activeLegLabel)
+                .put("fraction", progress.fraction.toDouble())
+                .put("travelledMetres", progress.travelledMetres)
+                .put("totalMetres", progress.totalMetres)
+                .put("nextWaypoint", progress.nextWaypoint)
+                .put("waypointCount", progress.waypointCount)
+                .put("remainingSeconds", progress.remainingSeconds)
+                .put("estimatedSteps", LocationStatus.walkEstimatedSteps.value))
+            .put("previews", routeStates)
             .put("speedPreset", WalkSpeedState.selected.value.name)
             .put("defaultSpeedPreset", WalkSpeedState.preferred.value.name)
             .put("routeStops", coordinates(prefs.routeDraft()))

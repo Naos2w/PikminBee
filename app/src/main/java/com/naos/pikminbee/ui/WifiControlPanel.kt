@@ -21,12 +21,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
 import com.naos.pikminbee.lan.LanStatus
-import com.naos.pikminbee.location.MockLocationService
+import com.naos.pikminbee.lan.LanControlService
 
 /** Remote control is off by default, never silently enabled on Wi-Fi connection. */
 @Composable
 fun WifiControlPanel(
-    isMockActive: Boolean,
+    @Suppress("UNUSED_PARAMETER") isMockActive: Boolean,
     foreground: Color,
     muted: Color,
     onMessage: (String) -> Unit,
@@ -34,25 +34,24 @@ fun WifiControlPanel(
     val context = LocalContext.current
     val lan by LanStatus.display.collectAsState()
     Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-        Text("Wi-Fi 網頁控制", fontWeight = FontWeight.SemiBold, color = foreground)
+        Text("電腦網頁控制", fontWeight = FontWeight.SemiBold, color = foreground)
         Text(
-            if (lan.active) "已連線到私人 Wi-Fi · 只限同一區網"
-            else "預設關閉。先啟動模擬位置，再透過私人 Wi-Fi 連線。",
+            if (lan.active) "網頁控制已開啟 · 同一可互通私人區網"
+            else "預設關閉。電腦與手機連線到同一私人區網後即可啟用，不必先啟動模擬位置。",
             color = muted, fontSize = 12.sp
         )
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (!lan.active) Button(
                 onClick = {
-                    context.startService(MockLocationService.command(
-                        context, MockLocationService.ACTION_ENABLE_LAN))
+                    runCatching { LanControlService.enable(context) }
+                        .onFailure { onMessage("無法啟動網頁控制：" + it.message) }
                 },
-                enabled = isMockActive,
                 modifier = Modifier.weight(1f),
-            ) { Text("開啟網頁控制", fontSize = 12.sp) }
+            ) { Text("開啟電腦控制", fontSize = 12.sp) }
             else OutlinedButton(
                 onClick = {
-                    context.startService(MockLocationService.command(
-                        context, MockLocationService.ACTION_DISABLE_LAN))
+                    context.startService(LanControlService.command(
+                        context, LanControlService.DISABLE))
                 },
                 modifier = Modifier.weight(1f),
             ) { Text("關閉並撤銷配對", fontSize = 12.sp) }
@@ -74,17 +73,17 @@ fun WifiControlPanel(
             Row(Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = {
-                    context.startService(MockLocationService.command(
-                        context, MockLocationService.ACTION_APPROVE_LAN))
+                    context.startService(LanControlService.command(
+                        context, LanControlService.APPROVE))
                 }, modifier = Modifier.weight(1f)) { Text("核准裝置", fontSize = 12.sp) }
                 OutlinedButton(onClick = {
-                    context.startService(MockLocationService.command(
-                        context, MockLocationService.ACTION_DENY_LAN))
+                    context.startService(LanControlService.command(
+                        context, LanControlService.DENY))
                 }, modifier = Modifier.weight(1f)) { Text("拒絕", fontSize = 12.sp) }
             }
         }
         Text(lan.note, color = muted, fontSize = 12.sp)
-        Text("安全提醒：區域網路 HTTP 未加密，只能在可信任的私人 Wi-Fi 使用。",
+        Text("使用電腦瀏覽器開啟上方網址，輸入配對碼後由手機核准。HTTP 未加密，請勿公開 8765 連接埠。",
             color = muted, fontSize = 11.sp)
     }
 }

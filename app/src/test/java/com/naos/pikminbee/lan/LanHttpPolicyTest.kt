@@ -87,6 +87,54 @@ class LanHttpPolicyTest {
         )
     }
 
+    @Test fun browserRequiresPreviewAndExplicitStartAndPairedAuth() {
+        val directory = sequenceOf(
+            File("src/main/assets/lan"),
+            File("app/src/main/assets/lan"),
+        ).firstOrNull { it.isDirectory } ?: error("Missing LAN assets")
+        val html = File(directory, "index.html").readText(Charsets.UTF_8)
+        val js = File(directory, "controller.js").readText(Charsets.UTF_8)
+        assertTrue(html.contains("id=\"plan\""))
+        assertTrue(html.contains("id=\"start\""))
+        assertTrue(html.contains("id=\"set-origin\""))
+        assertTrue(html.contains("id=\"mode-saved\""))
+        assertTrue(html.contains("id=\"confirm-snap\""))
+        assertTrue(js.contains("/api/route/preview"))
+        assertTrue(js.contains("previewId: prepared.id"))
+        assertTrue(js.contains("/api/route/start"))
+        assertTrue(js.contains("X-PikminBee-Token"))
+        assertTrue(js.contains("/api/saved"))
+        assertTrue(js.contains("confirmSnap"))
+        assertFalse(js.contains("setInterval(() => act("))
+    }
+
+    @Test fun browserJsUsesOnlyDomControlIdsPresentInHtml() {
+        val directory = sequenceOf(
+            File("src/main/assets/lan"),
+            File("app/src/main/assets/lan"),
+        ).firstOrNull { it.isDirectory } ?: error("Missing LAN assets")
+        val html = File(directory, "index.html").readText(Charsets.UTF_8)
+        val client = File(directory, "controller.js").readText(Charsets.UTF_8)
+        val ids = Regex("""\$\("([a-z0-9-]+)"\)""").findAll(client)
+            .map { it.groupValues[1] }.toSet()
+        assertTrue("No UI ids extracted", ids.size >= 25)
+        ids.forEach { id ->
+            assertTrue("Controller references missing HTML id: $id",
+                html.contains("id=\"$id\""))
+        }
+    }
+
+    @Test fun remoteControlUsesConnectedDeviceFgsNotMockGpsForOpening() {
+        val manifest = sequenceOf(
+            File("src/main/AndroidManifest.xml"),
+            File("app/src/main/AndroidManifest.xml"),
+        ).firstOrNull { it.isFile }?.readText(Charsets.UTF_8)
+            ?: error("Missing manifest")
+        assertTrue(manifest.contains("android:name=\".lan.LanControlService\""))
+        assertTrue(manifest.contains("android:foregroundServiceType=\"connectedDevice\""))
+        assertTrue(manifest.contains("FOREGROUND_SERVICE_CONNECTED_DEVICE"))
+    }
+
     private fun sha256(file: File): String {
         val digest = MessageDigest.getInstance("SHA-256")
         file.inputStream().buffered().use { stream ->

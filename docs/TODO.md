@@ -1,5 +1,34 @@
 # PikminBee TODO
 
+## P0 · Same-private-network PC browser controller and single UAT build (21 Nov 2026)
+- [x] Add a **user-started, connected-device foreground LAN control service** that does not require mock GPS activation just to open the browser. No autonomous service restart after a process kill. Settings shows reachable phone IP:8765, fresh 6-digit PIN, phone-side approval/rejection, disable/revoke, and a notification stop action.
+- [x] Reuse the existing bounded local HTTP server, private-Wi-Fi-only listener, strict Host/Origin checks, PIN rate limit, 30-minute session, and local-only MapLibre bundle. No public port forwarding, VPN/Tailscale dependency, or new cloud backend.
+- [x] Implement PC controls: **瞬移 / 路徑 / 尋花 / 收藏** responsive web map, selectable route origin, waypoints, saved places and saved routes, speed, walk controls and real-time location, current route leg and estimated steps.
+- [x] Split remote route planning into **/api/route/preview** (no GPS movement) and **/api/route/start** (fresh matching preview ID + explicit second click). Reject stale, reused or unpreviewed routes; enforce extra browser acknowledgement for >40m pedestrian road snap, guard system mock/fine-location permission, and prevent waypoint edits while walking.
+- [x] Add regression tests for preview gates, stale/edited loop and double-start, and browser assets/service manifest requirements. Check JavaScript syntax with Node and Android Kotlin/JVM tests/Lint.
+- [x] MSI validation: Kotlin compile, **196/196** JVM tests (zero failures/errors/skips), Android Lint and Node.js browser-script syntax all passed; `git diff --check` clean.
+- [ ] Complete checked DEV PR, UAT semantic bump, checked develop→staging merge, manually dispatched fixed-signer UAT APK; verify package ID/versionCode/signing digest. No production main or POCO installation.
+- [ ] POCO/PC acceptance: same Wi-Fi or a routed private LAN, connect using phone IP:8765, enter PIN and approve on Android, select origin, preview road, start, pause/resume/stop, verify 2→3/step status, saved routes and rejection of invalid permissions, refresh/revoke/expiry/disconnect and network change. No device connected via ADB at development time.
+
+## P0 · Route leg clarity, matching overlay navigation and optional integrations (21 Nov 2026)
+- [x] Correct route status semantics: `nextWaypoint=3` means the phone is walking from waypoint **2 → 3** (not “at 3/4”). Surface `activeLegLabel` consistently in the main mini-bar and floating summary, with start/arrival cases and JVM tests.
+- [x] Rename the arrow before Clear: **撤銷上一點** removes just the latest drafted waypoint; **清除全部** removes the entire draft. Avoid ambiguous icon-only destructive actions.
+- [x] Match the floating toolbar's lower four actions to the main dock: **瞬移 / 路徑 / 尋花 / 收藏**. They open the app in the selected tab without silently starting GPS; the upper four remain primary/stop/real GPS/virtual GPS. Walking-speed presets remain in route settings, not a floating shortcut. Long press the floating header bee to hide the overlay without stopping a walk.
+- [x] Restore **跟隨系統** alongside Light/Dark, making SYSTEM the default for new users and preserving an existing user selection. Add JVM appearance policy tests.
+- [x] Health Connect stays **optional and collapsed** by default; offer separate explicit READ_STEPS for today’s total and WRITE_STEPS for exporting *manual virtual estimates*. Require a purpose-specific consent dialog before enabling the virtual export; do not silently turn on synchronisation on a permission grant. Add manage/revoke access and keep Android sensor fallback behind advanced settings.
+- [x] Wi-Fi panel is separated as an optional settings card; existing LAN server/pairing code inspected, design and unimplemented security gates recorded in `docs/WIFI_REMOTE_CONTROL_PLAN.md`.
+- [x] MSI Kotlin compilation, **189/189** JVM tests (0 failures/errors/skips), Android Lint and `git diff --check` passed (Gradle exit 0). Submit the normal checked DEV PR; this batch is **not** yet in UAT 0.9.1.
+- [ ] Real POCO acceptance: visual current 2→3 segment/arrival, 4 overlay navigation icons to proper tabs, undo vs clear, automatic system theme changes, HC skip/READ-only/WRITE-only/deny/revoke without GPS disruption.
+- [ ] LAN later: implement paired web controller with preview → explicit start, reconcile shared mode state and security. **Current /api/route/start still starts directly**, so do not claim remote preview parity.
+
+## P0 · Unwanted coordinate TextField focus on map (21 Nov 2026)
+- [x] Diagnose: `CoordinateTopBar` always mounted a focusable `BasicTextField`, even in read-only non-teleport modes. Android could focus its first text field automatically on activity/window resumption, showing keyboard/caret over the map.
+- [x] Map-first fix: render a non-focusable text label by default; mount a `BasicTextField` only after tapping a dedicated Edit icon in Teleport mode. Confirm (checkmark)/Go/Teleport dismiss keyboard and focus. Never request focus just because map GPS/selection text changes.
+- [x] Map pick, flower/waypoint selection, current-position action, tab change, details/explore open, app ON_STOP all end edit mode and clear the IME. Other tabs never render a coordinate input. Keep edit/confirm controls accessible with explicit content descriptions.
+- [x] Add pure JVM input-state regression tests for default/no-edit, explicit edit gating, mode/sheet invalidation and dismiss.
+- [x] MSI Kotlin compile, **185/185** JVM tests (0 failures/errors/skipped), Android Lint and `git diff --check` succeeded (Gradle exit 0); submit a checked DEV PR and only merge after GitHub source verify.
+- [ ] POCO acceptance: fresh app start and return from background must not open keyboard; drag/zoom map, switch all 4 tabs, tap routes/flowers, open details and back, then manually edit coordinates in Teleport, confirm and use Go. No production or UAT promotion without release approval.
+
 ## P1 · Real-time per-walk estimated steps + icon-first controls (21 Nov 2026)
 - [x] Source: moving distance = selected speed in m/s × elapsed time (bounded to remaining planned route); virtual estimate = floor(all-time accepted metres / fixed 0.72 m stride). This is a virtual estimate, not physical pedometer activity; the 10.8 km/h preset is not a calibrated running stride.
 - [x] Separate all-time virtual estimate from **per-walk** steps using an immutable walk-start baseline and a process-local observable flow shared by the main screen and floating overlay. Each new route resets its own displayed count; GPS virtual-step checkpoints do not reset its display.

@@ -138,8 +138,10 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val EXTRA_OPEN_SETTINGS = "com.naos.pikminbee.OPEN_SETTINGS"
         const val EXTRA_OPEN_FLOWER_VISION = "com.naos.pikminbee.OPEN_FLOWER_VISION"
+        const val EXTRA_OPEN_MODE = "com.naos.pikminbee.OPEN_MODE"
         val settingsRequests = MutableStateFlow(0L)
         val flowerVisionRequests = MutableStateFlow(0L)
+        val mapModeRequests = MutableStateFlow(-1)
     }
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
@@ -148,6 +150,8 @@ class MainActivity : ComponentActivity() {
             settingsRequests.value++
         if (intent.getBooleanExtra(EXTRA_OPEN_FLOWER_VISION, false))
             flowerVisionRequests.value++
+        val selectedMode = intent.getIntExtra(EXTRA_OPEN_MODE, -1)
+        if (selectedMode in 0..3) mapModeRequests.value = selectedMode
     }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -216,9 +220,17 @@ private fun PikminBeeScreen() {
     var latitudeText by remember { mutableStateOf(selected.latitude.toString()) }
     var longitudeText by remember { mutableStateOf(selected.longitude.toString()) }
     var tab by remember {
-        mutableStateOf(if ((context as? MainActivity)?.intent
-                ?.getBooleanExtra(MainActivity.EXTRA_OPEN_FLOWER_VISION, false) == true)
-            ToolTab.FLOWERS else ToolTab.TELEPORT)
+        val requestedMode = (context as? MainActivity)?.intent
+            ?.getIntExtra(MainActivity.EXTRA_OPEN_MODE, -1) ?: -1
+        mutableStateOf(
+            when {
+                requestedMode in 0..3 -> ToolTab.entries[requestedMode]
+                (context as? MainActivity)?.intent
+                    ?.getBooleanExtra(MainActivity.EXTRA_OPEN_FLOWER_VISION, false) == true ->
+                    ToolTab.FLOWERS
+                else -> ToolTab.TELEPORT
+            },
+        )
     }
     LaunchedEffect(tab) { controlsScroll.scrollTo(0) }
     var showWifiPanel by remember { mutableStateOf(false) }
@@ -515,6 +527,7 @@ private fun PikminBeeScreen() {
     }
     val settingsRequest by MainActivity.settingsRequests.collectAsState()
     val visionRequest by MainActivity.flowerVisionRequests.collectAsState()
+    val modeRequest by MainActivity.mapModeRequests.collectAsState()
     var showOverlayGuide by remember { mutableStateOf(false) }
     var showOverlayAfterGuide by remember { mutableStateOf(false) }
     var openDetailsRequest by remember { mutableIntStateOf(
@@ -659,7 +672,19 @@ private fun PikminBeeScreen() {
             message = "請在花朵辨識面板取得 Android 畫面擷取同意"
         }
     }
+    LaunchedEffect(modeRequest) {
+        if (modeRequest in 0..3) {
+            tab = ToolTab.entries[modeRequest]
+            activePage = BeePage.MAP
+            routeEditingStopIndex = null
+            routeStopActionIndex = null
+            closeDetailsRequest++
+            MainActivity.mapModeRequests.value = -1
+        }
+    }
+
     var coordinateInput by remember { mutableStateOf("") }
+    var coordinateInputDismissToken by remember { mutableIntStateOf(0) }
     LaunchedEffect(selected, selectionExplicit) {
         coordinateInput = if (selectionExplicit) selected.label() else ""
     }
@@ -897,9 +922,13 @@ private fun PikminBeeScreen() {
                         else "下一點：第 ${roadStops.size + 1} 點 · 上滑復原或管理路點"
                     else message,
                 coordinateInput = coordinateInput,
+                coordinateInputDismissToken = coordinateInputDismissToken,
                 onCoordinateChange = { coordinateInput = it },
                 onCoordinateTeleport = ::applyCoordinateInput,
-                onCurrentLocation = ::goToCurrentMapPosition,
+                onCurrentLocation = {
+                    coordinateInputDismissToken++
+                    goToCurrentMapPosition()
+                },
                 onHome = {
                     activePage = BeePage.MAP
                     mapExplore = false
@@ -908,6 +937,7 @@ private fun PikminBeeScreen() {
                 openDetailsRequest = openDetailsRequest,
                 closeDetailsRequest = closeDetailsRequest,
                 onMode = { index ->
+                    coordinateInputDismissToken++
                     tab = ToolTab.entries[index]
                     routeEditingStopIndex = null
                     routeStopActionIndex = null
@@ -998,6 +1028,7 @@ private fun PikminBeeScreen() {
                     selected, allFlowers, 5000.0, maxCount = 100
                 ) else emptyList(),
                 onPick = { point ->
+                    coordinateInputDismissToken++
                     selectionExplicit = true
                     if (mapExplore) mapExplore = false
                     when (tab) {
@@ -1047,6 +1078,7 @@ private fun PikminBeeScreen() {
                     }
                 },
                 onFlowerPick = { flower ->
+                    coordinateInputDismissToken++
                     selectionExplicit = true
                     if (mapExplore) mapExplore = false
                     selected = flower.coordinate
@@ -1057,12 +1089,14 @@ private fun PikminBeeScreen() {
                 },
                 onStopPick = when (tab) {
                     ToolTab.ROUTE -> { index: Int ->
+                        coordinateInputDismissToken++
                         if (index in roadStops.indices) {
                             routeStopActionIndex = index
                             message = "已點選第 ${index + 1} 點，可刪除或重新選位置"
                         }
                     }
                     ToolTab.FLOWERS -> { index: Int ->
+                        coordinateInputDismissToken++
                         flowerStops.getOrNull(index)?.let { stop ->
                             if (mapExplore) mapExplore = false
                             selected = stop

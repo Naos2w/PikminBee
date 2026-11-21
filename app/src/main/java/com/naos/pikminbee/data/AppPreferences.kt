@@ -14,6 +14,18 @@ import kotlinx.coroutines.flow.MutableStateFlow
 enum class MapProvider { OPEN_FREE_MAP, GOOGLE_MAPS }
 enum class MapAppearance { SYSTEM, LIGHT, DARK }
 
+/** The OS choice is the default; users can still lock light or dark manually. */
+object MapAppearancePolicy {
+    fun fromStored(value: String?): MapAppearance =
+        MapAppearance.entries.firstOrNull { it.name == value } ?: MapAppearance.SYSTEM
+
+    fun isDark(mode: MapAppearance, systemDark: Boolean): Boolean = when (mode) {
+        MapAppearance.SYSTEM -> systemDark
+        MapAppearance.LIGHT -> false
+        MapAppearance.DARK -> true
+    }
+}
+
 data class SavedPlace(val id: Long, val name: String, val coordinate: Coordinate)
 
 /** One in-process draft state, observed by the phone UI, web API and GPS planner. */
@@ -99,10 +111,8 @@ class AppPreferences(private val context: Context) {
         BuildConfig.HAS_GOOGLE_MAPS_KEY,
     )
 
-    // The product exposes Light/Dark only. Older SYSTEM preference migrates to Light.
     fun appearance(): MapAppearance =
-        enumValues<MapAppearance>().firstOrNull { it.name == prefs.getString("appearance", "") }
-            ?.takeUnless { it == MapAppearance.SYSTEM } ?: MapAppearance.LIGHT
+        MapAppearancePolicy.fromStored(prefs.getString("appearance", null))
 
     fun freeMapStyle(): FreeMapStyle =
         enumValues<FreeMapStyle>().firstOrNull { it.name == prefs.getString("free_map_style", "") }

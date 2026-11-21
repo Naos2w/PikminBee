@@ -31,6 +31,23 @@ class RoutePlaybackProgressTest {
         assertEquals(0L, complete.remainingSeconds)
     }
 
+    @Test fun betweenSecondAndThirdWaypointShowsActualLeg() {
+        val checkpoints = listOf(350.0, 900.0, 1400.0, 2000.0)
+        val progress = RoutePlaybackProgress.snapshot(
+            1150.0, 2000.0, 1.4, checkpoints, false)
+        assertEquals(3, progress.nextWaypoint)
+        assertEquals("2 → 3", progress.activeLegLabel)
+        assertEquals(4, progress.waypointCount)
+    }
+
+    @Test fun startAndArrivalHaveExplicitLegLabels() {
+        val checkpoints = listOf(350.0, 900.0, 1400.0, 2000.0)
+        assertEquals("起點 → 1", RoutePlaybackProgress.snapshot(
+            100.0, 2000.0, 1.4, checkpoints, false).activeLegLabel)
+        assertEquals("已抵達第 4 點", RoutePlaybackProgress.snapshot(
+            2000.0, 2000.0, 1.4, checkpoints, false).activeLegLabel)
+    }
+
     @Test fun emptyRoadDoesNotInventProgress() {
         assertTrue(RoutePlaybackProgress.thresholds(emptyList(), emptyList()).isEmpty())
         val value = RoutePlaybackProgress.snapshot(50.0, 0.0, 0.0, emptyList(), false)
