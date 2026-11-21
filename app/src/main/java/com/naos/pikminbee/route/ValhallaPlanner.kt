@@ -15,6 +15,7 @@ import java.util.Locale
 object ValhallaPlanner {
     class RouteException(message: String) : Exception(message)
     private const val ENDPOINT = "https://valhalla1.openstreetmap.de/route"
+    private const val OPTIMISE_ENDPOINT = "https://valhalla1.openstreetmap.de/optimized_route"
     private const val MAX_RESPONSE_BYTES = 3_000_000
     // Valhalla may correlate a tap in a park or courtyard to the closest walkable edge.
     // Never silently choose an arbitrarily distant road.
@@ -63,8 +64,62 @@ object ValhallaPlanner {
         result
     }
 
-    private fun post(json: String): String {
-        val conn = (URL(ENDPOINT).openConnection() as HttpURLConnection).apply {
+    /**
+     * Optional, explicitly requested pedestrian-road stop ordering. Valhalla's
+     * optimized_route keeps the first/last anchors fixed, so a loop repeats its
+     * origin at the end. Only the ordering is returned; chosen GPS coordinates
+     * are never replaced by snapped road positions.
+     */
+    suspend fun optimiseFlowerStops(
+        origin: Coordinate, stops: List<Coordinate>, loop: Boolean,
+    ): List<Coordinate> = withContext(Dispatchers.IO) {
+        if (stops.size !in 2..14)
+            throw RouteException("道路順序最佳化需 2 到 14 個花點")
+        val anchors = if (loop) listOf(origin) + stops + origin else listOf(origin) + stops
+        if (anchors.size < 4) throw RouteException("此路線路點太少，維持原本順序即可")
+        if (WalkingGeometry.lengthMeters(anchors) > 40_000.0)
+            throw RouteException("路線超過 40 公里")
+        synchronized(cache) {
+            val now = System.currentTimeMillis()
+            if (now - lastRequestMillis < 2_000L)
+                throw RouteException("道路查詢過於頻繁，請稍後再試")
+            lastRequestMillis = now
+        }
+        val locations = JSONArray()
+        anchors.forEach {
+            locations.put(JSONObject()
+                .put("lat", it.latitude).put("lon", it.longitude)
+                .put("radius", MAX_SNAP_METERS.toInt()))
+        }
+        val request = JSONObject().put("locations", locations)
+            .put("costing", "pedestrian").put("directions_type", "none")
+            .put("shape_format", "polyline6").put("units", "km").toString()
+        parseOptimisedOrder(post(request, OPTIMISE_ENDPOINT), stops, loop)
+    }
+
+    /** Reject missing, repeated, altered or out-of-range original indices. */
+    fun parseOptimisedOrder(response: String, stops: List<Coordinate>, loop: Boolean): List<Coordinate> {
+        val locations = JSONObject(response).optJSONObject("trip")?.optJSONArray("locations")
+            ?: throw RouteException("道路服務沒有返回可確認的花點順序")
+        val expected = stops.size + 1 + if (loop) 1 else 0
+        if (locations.length() != expected)
+            throw RouteException("道路服務返回的花點數量不一致")
+        val indices = (0 until expected).map { i ->
+            val item = locations.optJSONObject(i)
+                ?: throw RouteException("花點順序資料無效")
+            if (!item.has("original_index"))
+                throw RouteException("道路服務缺少花點原始索引")
+            item.optInt("original_index", -1)
+        }
+        if (indices.first() != 0 || indices.last() != expected-1 ||
+            indices.sorted() != (0 until expected).toList())
+            throw RouteException("道路服務更改了起終點或重複路點")
+        return indices.drop(1).dropLast(1).map { stops[it - 1] } +
+            if (loop) emptyList() else listOf(stops.last())
+    }
+
+    private fun post(json: String, endpoint: String = ENDPOINT): String {
+        val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 8_000
             readTimeout = 18_000

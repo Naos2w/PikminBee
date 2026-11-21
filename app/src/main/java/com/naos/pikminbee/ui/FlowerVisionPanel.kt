@@ -57,6 +57,7 @@ fun FlowerVisionPanel(
     foreground: Color,
     muted: Color,
     onMessage: (String) -> Unit,
+    onSaveCandidate: (com.naos.pikminbee.domain.Coordinate) -> Unit,
     openRequest: Long = 0L,
 ) {
     val context = LocalContext.current
@@ -215,6 +216,7 @@ fun FlowerVisionPanel(
                     documentRevision = vision.documentRevision,
                     foreground = foreground,
                     muted = muted,
+                    onSaveCandidate = onSaveCandidate,
                 )
             }
         }

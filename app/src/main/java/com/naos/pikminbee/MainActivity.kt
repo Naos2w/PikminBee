@@ -1502,6 +1502,19 @@ private fun PikminBeeScreen() {
                                     foreground = foreground,
                                     muted = muted,
                                     onMessage = { message = it },
+                                    onSaveCandidate = { point ->
+                                        val candidateName = "影像候選 " +
+                                            System.currentTimeMillis().toString().takeLast(6)
+                                        runCatching {
+                                            flowerCatalog.addUnverifiedCandidate(candidateName, point)
+                                        }.onSuccess { added ->
+                                            message = if (added)
+                                                "已儲存待確認花點；請到花點資料庫本人確認後再加入路線"
+                                            else "附近已存在花點或資料庫已滿；沒有重複保存"
+                                        }.onFailure {
+                                            message = "候選花點無法儲存：" + (it.message ?: "未知錯誤")
+                                        }
+                                    },
                                     openRequest = if (visionRequest > 0L) visionRequest else
                                         if ((context as? MainActivity)?.intent
                                                 ?.getBooleanExtra(MainActivity.EXTRA_OPEN_FLOWER_VISION, false)
@@ -1592,6 +1605,12 @@ private fun PikminBeeScreen() {
                         tab = ToolTab.TELEPORT
                         focusMapPoint(place.coordinate)
                         message = "已在地圖選取「${place.name}」，尚未瞬移"
+                    },
+                    onRenamePlace = { place, name ->
+                        if (prefs.renamePlace(place.id, name)) {
+                            places = prefs.places()
+                            message = "已更新收藏名稱，不會移動 GPS"
+                        } else message = "收藏名稱無效或地點不存在"
                     },
                     onDeletePlace = { place ->
                         prefs.removePlace(place.id)

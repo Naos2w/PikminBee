@@ -18,6 +18,10 @@ import com.naos.pikminbee.domain.WalkPhase
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import com.naos.pikminbee.data.AppPreferences
+import com.naos.pikminbee.data.PlaceLookup
+import com.naos.pikminbee.flower.FlowerCatalogStore
+import com.naos.pikminbee.flower.FlowerEvidence
+import com.naos.pikminbee.flower.FlowerFinder
 import com.naos.pikminbee.data.WalkSpeedState
 import com.naos.pikminbee.domain.WalkSpeedPreset
 import com.naos.pikminbee.domain.Coordinate
@@ -71,6 +75,8 @@ object LanWifiAddress {
  */
 class LanController(private val context: Context) {
     private val prefs = AppPreferences(context)
+    private val flowers = FlowerCatalogStore(context)
+    private val placeLookup = PlaceLookup(context)
     private val pairing = LanPairing()
     private val rateLimiter = LanRateLimiter()
     private val planning = AtomicBoolean(false)
@@ -87,6 +93,7 @@ class LanController(private val context: Context) {
     @Volatile private var realFixTimestampMillis = 0L
     @Volatile private var realFixAccuracyMetres = -1f
     @Volatile private var realGpsState = "idle"
+    @Volatile private var realTimeZoneId: String? = null
     @Volatile private var lastObservedMock = false
     private fun origin(): Coordinate? = browserOrigin ?: LocationStatus.selected.value
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -133,6 +140,7 @@ class LanController(private val context: Context) {
     fun stop(reason: String = "Wi-Fi 控制已關閉") {
         realRequestGeneration.incrementAndGet()
         realFix = null
+        realTimeZoneId = null
         realGpsState = "idle"
         previews.clear()
         browserOrigin = null
@@ -217,6 +225,83 @@ class LanController(private val context: Context) {
                     .fold({ accepted("已送出瞬移指令") },
                         { error(409, "無法瞬移：" + (it.message ?: "請確認手機狀態")) })
             }
+            "/api/flowers/nearby" -> {
+                val json = parse(req.body) ?: return error(400, "JSON 無效")
+                val candidate = coordinate(json) ?: return error(400, "請選擇有效搜尋中心")
+                val radius = json.optDouble("radiusMetres", 2_000.0)
+                if (radius !in listOf(500.0, 2_000.0, 5_000.0))
+                    return error(400, "搜尋範圍限 500 公尺、2 公里或 5 公里")
+                val onlyChecked = json.optBoolean("onlyChecked", true)
+                val matches = FlowerFinder.nearby(
+                    candidate, flowers.all(), radius, onlyChecked, maxCount = 100)
+                val rows = JSONArray().apply {
+                    matches.forEach { spot ->
+                        put(JSONObject()
+                            .put("id", spot.id).put("name", spot.name)
+                            .put("lat", spot.coordinate.latitude)
+                            .put("lon", spot.coordinate.longitude)
+                            .put("distanceMetres",
+                                WalkingGeometry.distanceMeters(candidate, spot.coordinate))
+                            .put("evidence", spot.evidence.name))
+                    }
+                }
+                ok(JSONObject().put("flowers", rows)
+                    .put("source", "USER_CATALOGUE_NOT_GAME_API").toString())
+            }
+            "/api/flowers/optimise" -> {
+                if (walking()) return error(409, "行走中無法最佳化尋花順序")
+                val json = parse(req.body) ?: return error(400, "JSON 無效")
+                val loop = json.optBoolean("loop", true)
+                val start = origin() ?: return error(409, "請先指定尋花起點")
+                val stops = points(WalkMode.FLOWERS).toList()
+                if (stops.size < if (loop) 2 else 3)
+                    return error(409, "花點太少，維持目前順序即可")
+                if (stops.size > 14) return error(409, "最多 14 個尋花點")
+                if (!planning.compareAndSet(false, true))
+                    return error(409, "仍有道路規劃進行中")
+                LanStatus.display.value = LanStatus.display.value.copy(
+                    note = "正在向 Valhalla 請求步行道路順序，不會移動 GPS")
+                scope.launch {
+                    try {
+                        val updated = ValhallaPlanner.optimiseFlowerStops(start, stops, loop)
+                        if (origin() != start || points(WalkMode.FLOWERS) != stops) {
+                            LanStatus.display.value = LanStatus.display.value.copy(
+                                note = "花點或起點已變更，已保留目前順序")
+                        } else if (updated != stops) {
+                            savePoints(WalkMode.FLOWERS, updated)
+                            invalidate(WalkMode.FLOWERS)
+                            LanStatus.display.value = LanStatus.display.value.copy(
+                                note = "已套用步行道路建議順序，請重新預覽再開始")
+                        } else {
+                            LanStatus.display.value = LanStatus.display.value.copy(
+                                note = "目前順序已符合道路建議，未更動草稿")
+                        }
+                    } catch (e: Exception) {
+                        LanStatus.display.value = LanStatus.display.value.copy(
+                            note = "道路順序建議失敗，保留原順序：" +
+                                (e.message ?: "請稍後再試"))
+                    } finally { planning.set(false) }
+                }
+                accepted("正在規劃道路順序，完成前不能開始行走")
+            }
+            "/api/flowers/add" -> {
+                if (walking() || planning.get())
+                    return error(409, "行走或規劃中無法修改尋花路點")
+                val json = parse(req.body) ?: return error(400, "JSON 無效")
+                val id = json.optString("id")
+                val spot = flowers.all().firstOrNull { it.id == id }
+                    ?: return error(404, "花點不存在或已移除")
+                if (spot.evidence == FlowerEvidence.UNVERIFIED_IMPORT &&
+                    !json.optBoolean("confirmUnverified", false))
+                    return error(409, "匯入候選尚未確認，請明確同意後再加入")
+                val result = LanRouteDraftPolicy.add(
+                    WalkMode.FLOWERS, points(WalkMode.FLOWERS),
+                    spot.coordinate, origin())
+                if (!result.accepted) return error(409, result.message)
+                savePoints(WalkMode.FLOWERS, result.stops)
+                invalidate(WalkMode.FLOWERS)
+                accepted("已加入「${spot.name}」；請先預覽步行道路")
+            }
             "/api/points/add" -> {
                 if (walking()) return error(409, "行走中無法修改路點，請先停止")
                 val json = parse(req.body) ?: return error(400, "JSON 無效")
@@ -280,6 +365,22 @@ class LanController(private val context: Context) {
                 invalidate(WalkMode.ROUTE)
                 invalidate(WalkMode.FLOWERS)
                 accepted("已設定路線起點；尚未移動 GPS")
+            }
+            "/api/saved/place/rename" -> {
+                val json = parse(req.body) ?: return error(400, "JSON 無效")
+                val name = json.optString("name").trim()
+                if (name.isBlank() || name.length > 80)
+                    return error(400, "收藏地點名稱需為 1 到 80 字")
+                if (!prefs.renamePlace(json.optLong("id", -1), name))
+                    return error(404, "收藏地點不存在")
+                accepted("已更新收藏地點名稱，不會移動 GPS")
+            }
+            "/api/saved/place/delete" -> {
+                val id = parse(req.body)?.optLong("id", -1) ?: return error(400, "JSON 無效")
+                if (prefs.places().none { it.id == id })
+                    return error(404, "收藏地點不存在")
+                prefs.removePlace(id)
+                accepted("已刪除收藏地點，不會移動 GPS")
             }
             "/api/saved/load" -> {
                 if (walking()) return error(409, "行走中無法載入路線；請先停止")
@@ -401,6 +502,7 @@ class LanController(private val context: Context) {
                 if (action == "restore-real") {
                     realRequestGeneration.incrementAndGet()
                     realFix = null
+                    realTimeZoneId = null
                     realGpsState = "idle"
                 }
                 context.startService(MockLocationService.command(context, serviceAction))
@@ -423,6 +525,7 @@ class LanController(private val context: Context) {
         if (providers.isEmpty()) return error(409, "手機定位服務未啟用")
         val generation = realRequestGeneration.incrementAndGet()
         realFix = null
+        realTimeZoneId = null
         realFixTimestampMillis = 0L
         realFixAccuracyMetres = -1f
         realRequestedAtMillis = System.currentTimeMillis()
@@ -463,6 +566,14 @@ class LanController(private val context: Context) {
         realFixTimestampMillis = fix.time
         realFixAccuracyMetres = if (fix.hasAccuracy()) fix.accuracy else -1f
         realGpsState = "ready"
+        // Only the explicitly requested, verified non-mock fix may set the
+        // reference time zone; never fall back to system/Taiwan/mock time.
+        scope.launch {
+            val resolved = placeLookup.zoneForVerifiedPhysical(point)
+            if (generation == realRequestGeneration.get() &&
+                !LocationStatus.mockActive.value && LocationStatus.selected.value == null)
+                realTimeZoneId = resolved
+        }
     }
 
     private fun walking(): Boolean = LocationStatus.phase.value in
@@ -484,13 +595,19 @@ class LanController(private val context: Context) {
         val places = JSONArray().apply {
             prefs.places().take(100).forEach { item ->
                 put(JSONObject().put("id", item.id).put("name", item.name)
-                    .put("position", encoded(item.coordinate)))
+                    .put("position", encoded(item.coordinate))
+                    .put("countryCode", item.countryCode ?: JSONObject.NULL)
+                    .put("countryName", item.countryName ?: JSONObject.NULL)
+                    .put("city", item.city ?: JSONObject.NULL)
+                    .put("timeZoneId", item.timeZoneId ?: JSONObject.NULL)
+                    .put("createdAtMillis", item.createdAtMillis))
             }
         }
         val routes = JSONArray().apply {
             prefs.savedRoutes().take(100).forEach { item ->
                 put(JSONObject().put("id", item.id).put("name", item.name)
                     .put("mode", item.mode.name)
+                    .put("createdAtMillis", item.createdAtMillis)
                     .put("stops", JSONArray().apply {
                         item.stops.forEach { put(encoded(it)) }
                     }))
@@ -538,6 +655,7 @@ class LanController(private val context: Context) {
         if (mocked && !lastObservedMock) {
             realRequestGeneration.incrementAndGet()
             realFix = null
+            realTimeZoneId = null
             realGpsState = "idle"
         }
         lastObservedMock = mocked
@@ -558,6 +676,8 @@ class LanController(private val context: Context) {
             .put("note", LanStatus.display.value.note)
             .put("position", position?.let { JSONObject().put("lat", it.latitude).put("lon", it.longitude) })
             .put("mockActive", LocationStatus.mockActive.value)
+            .put("realTimeZoneId", if (realPosition != null)
+                realTimeZoneId ?: JSONObject.NULL else JSONObject.NULL)
             .put("realGpsState", gpsState)
             .put("realPosition", realPosition?.let {
                 JSONObject().put("lat", it.latitude).put("lon", it.longitude)
