@@ -80,11 +80,21 @@ class FloatingControls(
         }
     }
     private fun updateStepSummary() {
-        val virtual = EstimatedWalkStatus.state.value.estimatedSteps
+        val virtualTotal = EstimatedWalkStatus.state.value.estimatedSteps
+        val currentWalk = com.naos.pikminbee.location.LocationStatus.walkEstimatedSteps.value
         val physical = PhysicalStepsStatus.state.value
-        quickSteps?.text = if (physical.tracking || physical.todaySteps > 0) {
-            "虛擬 $virtual 步    實際 ${physical.todaySteps} 步"
-        } else "虛擬 $virtual 步    實際 —"
+        val hasWalk = lastMode != null && lastPhase in
+            listOf(WalkPhase.MOVING, WalkPhase.PAUSED, WalkPhase.PARKED)
+        quickSteps?.text = if (hasWalk) {
+            "本次估算 $currentWalk 步 · 累計 $virtualTotal 步" +
+                if (physical.tracking || physical.todaySteps > 0)
+                    "\n實際手機 ${physical.todaySteps} 步" else ""
+        } else {
+            "虛擬估算累計 $virtualTotal 步" +
+                if (physical.tracking || physical.todaySteps > 0)
+                    " · 實際 ${physical.todaySteps} 步" else ""
+        }
+        quickSteps?.contentDescription = quickSteps?.text
     }
     private var root: LinearLayout? = null
     private var panel: ScrollView? = null

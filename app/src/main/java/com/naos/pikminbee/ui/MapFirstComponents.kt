@@ -121,6 +121,94 @@ fun NaosModeIcon(index: Int, tint: Color, modifier: Modifier = Modifier) {
     }
 }
 
+/** Shared lightweight vector glyphs; only major actions keep a short text label. */
+enum class NaosActionGlyph {
+    PLAN, PLAY, PAUSE, STOP, UNDO, REAL_GPS, VIRTUAL_GPS, FLOWER, SPEED, STEPS, REFRESH
+}
+
+@Composable
+fun NaosActionIcon(
+    glyph: NaosActionGlyph, tint: Color, modifier: Modifier = Modifier,
+) {
+    if (glyph == NaosActionGlyph.FLOWER) {
+        NaosModeIcon(2, tint, modifier)
+        return
+    }
+    if (glyph == NaosActionGlyph.REAL_GPS) {
+        NaosModeIcon(4, tint, modifier)
+        return
+    }
+    Canvas(modifier.size(22.dp)) {
+        val scale = size.minDimension / 24f
+        fun pt(x: Float, y: Float) = Offset(x * scale, y * scale)
+        val pen = 1.9f * scale
+        when (glyph) {
+            NaosActionGlyph.PLAN -> {
+                drawLine(tint, pt(5f, 6f), pt(5f, 17f), pen, StrokeCap.Round)
+                drawLine(tint, pt(5f, 17f), pt(19f, 17f), pen, StrokeCap.Round)
+                drawCircle(tint, 2.5f * scale, pt(5f, 5f), style = Stroke(pen))
+                drawCircle(tint, 2.5f * scale, pt(19f, 19f), style = Stroke(pen))
+            }
+            NaosActionGlyph.PLAY -> {
+                val triangle = Path().apply {
+                    moveTo(7f*scale, 4f*scale)
+                    lineTo(20f*scale, 12f*scale)
+                    lineTo(7f*scale, 20f*scale)
+                    close()
+                }
+                drawPath(triangle, tint)
+            }
+            NaosActionGlyph.PAUSE -> {
+                drawLine(tint, pt(8f, 5f), pt(8f, 19f), pen*2f, StrokeCap.Round)
+                drawLine(tint, pt(16f, 5f), pt(16f, 19f), pen*2f, StrokeCap.Round)
+            }
+            NaosActionGlyph.STOP ->
+                drawRoundRect(tint, topLeft = pt(6f, 6f),
+                    size = Size(12f*scale, 12f*scale),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(2f*scale))
+            NaosActionGlyph.UNDO -> {
+                drawLine(tint, pt(11f, 5f), pt(5f, 11f), pen, StrokeCap.Round)
+                drawLine(tint, pt(5f, 11f), pt(11f, 17f), pen, StrokeCap.Round)
+                drawLine(tint, pt(5f, 11f), pt(17f, 11f), pen, StrokeCap.Round)
+            }
+            NaosActionGlyph.VIRTUAL_GPS -> {
+                val marker = Path().apply {
+                    moveTo(12f*scale, 22f*scale)
+                    cubicTo(9f*scale, 17f*scale, 5f*scale, 13f*scale, 5f*scale, 10f*scale)
+                    cubicTo(5f*scale, 0f, 19f*scale, 0f, 19f*scale, 10f*scale)
+                    cubicTo(19f*scale, 13f*scale, 15f*scale, 17f*scale, 12f*scale, 22f*scale)
+                    close()
+                }
+                drawPath(marker, tint, style = Stroke(pen, cap = StrokeCap.Round))
+                drawCircle(tint, 2.5f*scale, pt(12f, 9f), style = Stroke(pen))
+            }
+            NaosActionGlyph.SPEED -> {
+                drawArc(tint, 155f, 230f, false,
+                    topLeft = pt(3f, 3f), size = Size(18f*scale, 18f*scale),
+                    style = Stroke(pen, cap = StrokeCap.Round))
+                drawLine(tint, pt(12f, 16f), pt(17f, 9f), pen, StrokeCap.Round)
+                drawCircle(tint, 2f*scale, pt(12f, 16f))
+            }
+            NaosActionGlyph.STEPS -> {
+                drawOval(tint, topLeft = pt(5f, 11f),
+                    size = Size(5f*scale, 9f*scale))
+                drawOval(tint, topLeft = pt(14f, 4f),
+                    size = Size(5f*scale, 9f*scale))
+                drawCircle(tint, 1.6f*scale, pt(6f, 7.5f))
+                drawCircle(tint, 1.6f*scale, pt(18f, 16.5f))
+            }
+            NaosActionGlyph.REFRESH -> {
+                drawArc(tint, -65f, 280f, false, topLeft = pt(4f, 4f),
+                    size = Size(16f*scale, 16f*scale),
+                    style = Stroke(pen, cap = StrokeCap.Round))
+                drawLine(tint, pt(20f, 5f), pt(20f, 11f), pen, StrokeCap.Round)
+                drawLine(tint, pt(20f, 11f), pt(14f, 11f), pen, StrokeCap.Round)
+            }
+            NaosActionGlyph.REAL_GPS, NaosActionGlyph.FLOWER -> Unit
+        }
+    }
+}
+
 /** Small original bee mark; doubles as the map Home/recentre action. */
 @Composable
 fun NaosBeeHomeIcon(tint: Color, modifier: Modifier = Modifier) {

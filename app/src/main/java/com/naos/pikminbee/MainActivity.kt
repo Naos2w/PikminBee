@@ -238,6 +238,7 @@ private fun PikminBeeScreen() {
     val walkMode by LocationStatus.mode.collectAsState()
     val roadLine by LocationStatus.geometry.collectAsState()
     val walkingProgress by LocationStatus.progress.collectAsState()
+    val walkEstimatedSteps by LocationStatus.walkEstimatedSteps.collectAsState()
     val overlayVisible by LocationStatus.overlayVisible.collectAsState()
     // Only actual edits or loop changes clear a preview; GPS jitter is harmless.
     LaunchedEffect(flowerStops, flowerStart, flowerLoop) {
@@ -923,6 +924,10 @@ private fun PikminBeeScreen() {
                 flowerActive = walkMode == WalkMode.FLOWERS &&
                     walkPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED),
                 walkingProgress = walkingProgress,
+                walkEstimatedSteps = walkEstimatedSteps,
+                walkStopped = walkPhase == WalkPhase.PARKED &&
+                    ((tab == ToolTab.ROUTE && walkMode == WalkMode.ROUTE) ||
+                     (tab == ToolTab.FLOWERS && walkMode == WalkMode.FLOWERS)),
                 routeSpeedKmh = speedPreset.kilometresPerHour,
                 routeActive = walkMode == WalkMode.ROUTE &&
                     walkPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED),
@@ -1196,6 +1201,7 @@ private fun PikminBeeScreen() {
                                     origin = mockPosition ?: phonePosition,
                                     activeMode = walkMode,
                                     phase = walkPhase,
+                                    walkEstimatedSteps = walkEstimatedSteps,
                                     speedPreset = speedPreset,
                                     onSpeedSelected = ::chooseWalkSpeed,
                                     foreground = foreground, muted = muted,
@@ -1329,6 +1335,7 @@ private fun PikminBeeScreen() {
                                     origin = mockPosition ?: flowerStart,
                                     activeMode = walkMode,
                                     phase = walkPhase,
+                                    walkEstimatedSteps = walkEstimatedSteps,
                                     speedPreset = speedPreset,
                                     onSpeedSelected = ::chooseWalkSpeed,
                                     foreground = foreground, muted = muted,
