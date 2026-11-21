@@ -1,6 +1,10 @@
 package com.naos.pikminbee.lan
 
 import android.content.Context
+import android.location.Location
+import android.location.LocationManager
+import android.os.Build
+import androidx.core.location.LocationCompat
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import androidx.core.content.ContextCompat
@@ -31,6 +35,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.net.Inet4Address
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 data class LanDisplay(
     val active: Boolean = false,
@@ -74,6 +79,15 @@ class LanController(private val context: Context) {
     private val previews = ConcurrentHashMap<WalkMode, WebPreview>()
     @Volatile private var browserOrigin: Coordinate? = null
     @Volatile private var usedPreviewId: String? = null
+    // Real phone location is only sampled after an explicitly approved browser action.
+    // Never cache or publish a test-provider fix as a real physical position.
+    private val realRequestGeneration = AtomicInteger()
+    @Volatile private var realRequestedAtMillis = 0L
+    @Volatile private var realFix: Coordinate? = null
+    @Volatile private var realFixTimestampMillis = 0L
+    @Volatile private var realFixAccuracyMetres = -1f
+    @Volatile private var realGpsState = "idle"
+    @Volatile private var lastObservedMock = false
     private fun origin(): Coordinate? = browserOrigin ?: LocationStatus.selected.value
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var server: LanHttpServer? = null
@@ -117,6 +131,9 @@ class LanController(private val context: Context) {
     }
 
     fun stop(reason: String = "Wi-Fi 控制已關閉") {
+        realRequestGeneration.incrementAndGet()
+        realFix = null
+        realGpsState = "idle"
         previews.clear()
         browserOrigin = null
         usedPreviewId = null
@@ -213,6 +230,20 @@ class LanController(private val context: Context) {
                 invalidate(mode)
                 accepted(result.message)
             }
+            "/api/points/reorder", "/api/points/remove" -> {
+                if (walking()) return error(409, "行走中無法修改路點")
+                val json = parse(req.body) ?: return error(400, "JSON 無效")
+                val mode = mode(json.optString("mode")) ?: return error(400, "模式無效")
+                val index = json.optInt("index", -1)
+                val current = points(mode)
+                val result = if (req.path.endsWith("reorder"))
+                    LanRouteDraftPolicy.reorder(current, index, json.optInt("offset", 0))
+                else LanRouteDraftPolicy.remove(current, index)
+                if (!result.accepted) return error(409, result.message)
+                savePoints(mode, result.stops)
+                invalidate(mode)
+                accepted(result.message)
+            }
             "/api/points/undo", "/api/points/clear" -> {
                 if (walking()) return error(409, "行走中無法修改路點，請先停止")
                 val json = parse(req.body) ?: return error(400, "JSON 無效")
@@ -241,6 +272,7 @@ class LanController(private val context: Context) {
                 prefs.setDefaultWalkSpeedPreset(preset)
                 accepted("下次開啟 App 的預設速度已設為：${preset.display}")
             }
+            "/api/location/real" -> requestRealLocation()
             "/api/origin" -> {
                 if (walking()) return error(409, "行走中無法修改起點；請先停止")
                 val point = coordinate(req.body) ?: return error(400, "起點經緯度無效")
@@ -366,11 +398,71 @@ class LanController(private val context: Context) {
                     "restore-real" -> MockLocationService.ACTION_STOP
                     else -> return error(400, "不支援的指令")
                 }
+                if (action == "restore-real") {
+                    realRequestGeneration.incrementAndGet()
+                    realFix = null
+                    realGpsState = "idle"
+                }
                 context.startService(MockLocationService.command(context, serviceAction))
                 accepted("已送出控制指令")
             }
             else -> error(404, "未知 API")
         }
+    }
+
+    /** A phone-side opt-in on-demand read; not a background location stream. */
+    private fun requestRealLocation(): LanReply {
+        if (LocationStatus.mockActive.value || LocationStatus.selected.value != null)
+            return error(409, "請先按「恢復真實 GPS」停止模擬定位")
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) !=
+            PackageManager.PERMISSION_GRANTED)
+            return error(403, "請先在手機授予精確定位權限")
+        val manager = context.getSystemService(LocationManager::class.java)
+        val providers = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
+            .filter { runCatching { manager.isProviderEnabled(it) }.getOrDefault(false) }
+        if (providers.isEmpty()) return error(409, "手機定位服務未啟用")
+        val generation = realRequestGeneration.incrementAndGet()
+        realFix = null
+        realFixTimestampMillis = 0L
+        realFixAccuracyMetres = -1f
+        realRequestedAtMillis = System.currentTimeMillis()
+        realGpsState = "locating"
+        val previous = providers.mapNotNull { provider ->
+            runCatching { manager.getLastKnownLocation(provider) }.getOrNull()
+        }.filter {
+            LanRealGpsPolicy.isVerifiedFix(it.time, System.currentTimeMillis(),
+                LocationCompat.isMock(it))
+        }.maxByOrNull { it.time }
+        if (previous != null) {
+            acceptRealLocation(previous, generation)
+            return accepted("已取得近期手機真實位置（未更動模擬定位或選取座標）")
+        }
+        var requested = false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            providers.forEach { provider ->
+                if (runCatching {
+                    manager.getCurrentLocation(provider, null, context.mainExecutor) { fix ->
+                        if (fix != null) acceptRealLocation(fix, generation)
+                    }
+                }.isSuccess) requested = true
+            }
+        }
+        if (!requested) realGpsState = "unavailable"
+        return accepted(if (requested) "正在取得手機真實 GPS；可能需要手機 App 在前景"
+            else "無最近真實定位，請將手機 App 切至前景並開啟定位後再試")
+    }
+
+    private fun acceptRealLocation(fix: Location, generation: Int) {
+        if (generation != realRequestGeneration.get() || LocationStatus.mockActive.value ||
+            LocationStatus.selected.value != null ||
+            !LanRealGpsPolicy.isVerifiedFix(fix.time, System.currentTimeMillis(),
+                LocationCompat.isMock(fix))) return
+        val point = runCatching { Coordinate(fix.latitude, fix.longitude) }.getOrNull()
+            ?: return
+        realFix = point
+        realFixTimestampMillis = fix.time
+        realFixAccuracyMetres = if (fix.hasAccuracy()) fix.accuracy else -1f
+        realGpsState = "ready"
     }
 
     private fun walking(): Boolean = LocationStatus.phase.value in
@@ -441,10 +533,37 @@ class LanController(private val context: Context) {
             }
         }
         val progress = LocationStatus.progress.value
+        // A newly enabled mock provider invalidates any earlier real-location request.
+        val mocked = LocationStatus.mockActive.value
+        if (mocked && !lastObservedMock) {
+            realRequestGeneration.incrementAndGet()
+            realFix = null
+            realGpsState = "idle"
+        }
+        lastObservedMock = mocked
+        val now = System.currentTimeMillis()
+        val realPosition = realFix?.takeIf {
+            !LocationStatus.mockActive.value && LocationStatus.selected.value == null &&
+                LanRealGpsPolicy.isVerifiedFix(realFixTimestampMillis, now, false)
+        }
+        val gpsState = when {
+            LocationStatus.mockActive.value || LocationStatus.selected.value != null -> "mock"
+            realPosition != null -> "ready"
+            realGpsState == "locating" && now - realRequestedAtMillis < 25_000L -> "locating"
+            realGpsState == "idle" -> "idle"
+            else -> "unavailable"
+        }
         return JSONObject()
             .put("status", LocationStatus.display.value)
             .put("note", LanStatus.display.value.note)
             .put("position", position?.let { JSONObject().put("lat", it.latitude).put("lon", it.longitude) })
+            .put("mockActive", LocationStatus.mockActive.value)
+            .put("realGpsState", gpsState)
+            .put("realPosition", realPosition?.let {
+                JSONObject().put("lat", it.latitude).put("lon", it.longitude)
+                    .put("accuracy", if (realFixAccuracyMetres >= 0f)
+                        realFixAccuracyMetres.toDouble() else JSONObject.NULL)
+            })
             .put("origin", origin()?.let { JSONObject().put("lat", it.latitude).put("lon", it.longitude) })
             .put("phase", LocationStatus.phase.value.name)
             .put("mode", LocationStatus.mode.value?.name)

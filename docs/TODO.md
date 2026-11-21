@@ -1,5 +1,23 @@
 # PikminBee TODO
 
+## P0 · UAT 0.13.1 LAN Web feedback — true GPS, numbered route, dark Edge options (21 Nov 2026)
+- [x] Source diagnosis: `/api/state.position` is virtual GPS, `restore-real` only ends mock provider; the default Taipei map centre is **not** a phone GPS fix. Never report a mock or stale fix as real.
+- [x] Add paired, explicit on-demand real-phone GPS query only with fine-location permission and no active mock provider; reject Android mock fixes, expire old fixes, show separate real/virtual map markers and a status/readiness message. The browser must never move the phone by merely viewing or selecting coordinates.
+- [x] Number route and flower markers, draw dashed sequence preview separately from the actual road line, list origin and stops, and add server-validated reorder/remove with preview invalidation. Retain explicit preview-ID → Start gate.
+- [x] Fix native Edge/Windows map-style dropdown with explicit dark/light option background and foreground colours; retain opaque matte performance-first styling.
+- [x] Add pure JVM tests for mock-fix rejection and reorder boundaries, DOM/API contracts, and loopback-only synthetic Web preview flows. MSI full JVM suite and Kotlin compilation passed (2026-11-21); Node syntax and `git diff --check` passed.
+- [x] Browser loopback smoke: map loaded with origin + numbered 1/2/3 stops; reordering visibly changed route order; simulated mock-stop exposed a **clearly labelled synthetic** real fix, never a real phone location; 390px mobile stayed within viewport, browser console reported 0 errors (OpenFreeMap style warnings only).
+- [ ] Real POCO acceptance of on-demand physical GPS after restore (with and without cached fix, permissions disabled, background restrictions, and active mock); ensure browser LAN stays connected on restore and GPS is never mislabelled.
+- [ ] Real PC Edge verification of map style popup and numbered/reorderable waypoints, mobile widths, screen-reader labels, preview and Start gating; use CI Android verify before developing a new UAT.
+- [ ] Do not promote to staging/main or claim real-device acceptance before corresponding evidence.
+
+## P1 · 尋花 feature scope (manual confirmed flower locations first)
+- [x] Existing source supports manually selected confirmed flower stops, up to 14, min-distance/duplicate guards, loop and walking-road preview via Valhalla with explicit second Start. This **does not** discover live Pikmin Bloom large flowers automatically.
+- [x] Android phone already has a local flower catalogue (confirmed vs unverified import), JSON candidate import/GeoJSON export, and nearby lookup at 500 m / 2 km / 5 km with optional verified-only filter; nearest results are sorted by straight-line distance, NOT optimised walking distance.
+- [ ] Phase 1 Web parity: expose the **existing Android flower catalogue** through an authenticated, bounded LAN read endpoint and let the user select only explicitly chosen flowers; label provenance as checked vs unverified and never silently turn OSM POIs into game flowers.
+- [ ] Phase 2: optional route ordering/optimisation by pedestrian road distance from confirmed flower stops, retaining manual override, ordered list, loop and route preview; do not confuse straight-line nearby sorting with route optimisation.
+- [ ] Phase 3: review optional user-authorised image/manual-calibration flow with real POCO precision/recall evidence. No claim of automatic accurate real-world flower detection from unverified candidates.
+
 ## P0 · UAT 0.13.1 performance-first matte surfaces (21 Nov 2026)
 - [x] User chose no expensive glass effects for PikminBee; preserve mineral/honey colours, rounded controls, map-first navigation and accessibility. No Web backdrop-filter, shaders, map snapshot or refraction effects.
 - [x] Web PC/mobile panels, bottom mode dock and active walk buttons now use opaque lightweight surfaces, short shadows and no blur/animation. Android `MapGlass` already uses opaque Compose surfaces; obsolete optical helper classes are not wired into the active UI.

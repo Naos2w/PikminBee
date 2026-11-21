@@ -10,9 +10,10 @@ let refreshing = false;
 let map = null, maplibre = null;
 let mapStyleReady = false, mapWatchdog = null, mapResizeObserver = null;
 let mapLastError = "";
-let positionMarker = null, originMarker = null, selectionMarker = null;
+let positionMarker = null, realMarker = null, originMarker = null, selectionMarker = null;
 let routeMarkers = [];
-let lastStopsKey = "", lastLineKey = "";
+let lastStopsKey = "", lastLineKey = "", lastDraftKey = "", lastOrderKey = "";
+let focusRealWhenReady = false;
 const loops = {ROUTE: false, FLOWERS: true};
 const setMessage = value => { $("message").textContent = value; };
 const setPairMessage = value => { $("pairmessage").textContent = value; };
@@ -128,6 +129,7 @@ function selectMode(next) {
   $("teleport-panel").classList.toggle("hidden", mode !== "TELEPORT");
   $("route-panel").classList.toggle("hidden", mode !== "ROUTE" && mode !== "FLOWERS");
   $("saved-panel").classList.toggle("hidden", mode !== "SAVED");
+  $("flower-guide").classList.toggle("hidden", mode !== "FLOWERS");
   if (mode === "ROUTE" || mode === "FLOWERS") $("loop").value = String(loops[mode]);
   $("confirm-snap").checked = false;
   if (mode === "SAVED") refreshSaved();
@@ -243,8 +245,22 @@ for (const [id,action] of [["pause","pause"],["resume","resume"],["stop","stop"]
   });
 }
 $("real").addEventListener("click", async () => {
-  if (confirm("確定停止模擬 GPS，讓手機恢復真實定位？網頁控制連線仍會保留。"))
-    await act("/api/control",{action:"restore-real"});
+  if (!confirm("確定停止模擬 GPS，讓手機恢復真實定位？網頁控制連線仍會保留。")) return;
+  if (!await act("/api/control",{action:"restore-real"})) return;
+  // STOP is handled asynchronously by Android; only query after mock provider releases.
+  for (let i = 0; i < 8; i++) {
+    await pause(500);
+    try {
+      latest = await call("/api/state");
+      if (!latest.mockActive && latest.position == null) {
+        updateStatus(); renderMap();
+        focusRealWhenReady = true;
+        if (!await act("/api/location/real",{})) focusRealWhenReady = false;
+        return;
+      }
+    } catch (error) { setMessage(error.message || "無法讀取恢復狀態"); return; }
+  }
+  setMessage("已送出恢復指令，但手機尚未確認關閉模擬定位；請稍後按「查看手機真實 GPS」。");
 });
 
 const darkQuery = matchMedia("(prefers-color-scheme: dark)");
@@ -295,8 +311,8 @@ function reloadMap() {
   if (mapResizeObserver) { mapResizeObserver.disconnect(); mapResizeObserver = null; }
   clearMapWait();
   map = null; mapStyleReady = false; mapLastError = "";
-  positionMarker = null; originMarker = null; selectionMarker = null;
-  routeMarkers = []; lastLineKey = ""; lastStopsKey = "";
+  positionMarker = null; realMarker = null; originMarker = null; selectionMarker = null;
+  routeMarkers = []; lastLineKey = ""; lastDraftKey = ""; lastStopsKey = "";
   $("map").replaceChildren();
   initialiseMap();
 }
@@ -306,7 +322,7 @@ function chooseMapStyle() {
   if (map) {
     armMapWait();
     mapStyleReady = false;
-    lastLineKey = "";
+    lastLineKey = ""; lastDraftKey = "";
     try { map.setStyle(styleUrl()); map.resize(); }
     catch (error) { setMapStatus("error", "無法切換地圖樣式，請按重新載入地圖。"); }
   }
@@ -323,7 +339,7 @@ async function initialiseMap() {
     // Use the packaged MapLibre 6.18.0 worker. Auto-detection otherwise
     // requests a missing /vendor/maplibre-gl-worker.mjs?v=6.18.0 file.
     maplibre.setWorkerUrl("/vendor/maplibre-gl-worker.mjs");
-    const center = chosen || latest?.position || initialCenter;
+    const center = chosen || latest?.position || latest?.realPosition || initialCenter;
     map = new maplibre.Map({
       container:"map",style:styleUrl(),center:[center.lon,center.lat],
       zoom:13.5,attributionControl:true,
@@ -337,7 +353,7 @@ async function initialiseMap() {
     });
     map.on("style.load", () => {
       mapStyleReady = true;
-      lastLineKey = "";
+      lastLineKey = ""; lastDraftKey = "";
       renderMap();
     });
     map.on("error", event => {
@@ -376,17 +392,36 @@ async function initialiseMap() {
     setMessage("地圖初始化失敗：" + (error?.message || "未知原因"));
   }
 }
+function ordinalPin(label, variant = "") {
+  const pin = document.createElement("div");
+  pin.className = "ordinal-pin" + (variant ? " " + variant : "");
+  pin.textContent = String(label);
+  const meaning = {start:"路線起點",real:"手機真實 GPS",virtual:"手機模擬 GPS"};
+  pin.setAttribute("aria-label", meaning[variant] || "路點 " + label);
+  return pin;
+}
 function renderMap() {
   if (!map) return;
   if (latest?.position) {
     const p = latest.position;
-    if (!positionMarker) positionMarker = new maplibre.Marker({color:"#f2b858"})
-      .setLngLat([p.lon,p.lat]).setPopup(new maplibre.Popup().setText("手機模擬位置")).addTo(map);
+    if (!positionMarker) positionMarker = new maplibre.Marker({
+      element:ordinalPin("模","virtual"),anchor:"center"
+    }).setLngLat([p.lon,p.lat])
+      .setPopup(new maplibre.Popup().setText("手機模擬 GPS")).addTo(map);
     else positionMarker.setLngLat([p.lon,p.lat]);
   } else if (positionMarker) { positionMarker.remove(); positionMarker = null; }
+  // Physical and virtual phone locations must never share a marker or source.
+  const physical = latest?.mockActive ? null : latest?.realPosition;
+  if (physical) {
+    if (!realMarker) realMarker = new maplibre.Marker({
+      element:ordinalPin("真","real"),anchor:"center"
+    }).setLngLat([physical.lon,physical.lat])
+      .setPopup(new maplibre.Popup().setText("手機真實 GPS（非模擬）")).addTo(map);
+    else realMarker.setLngLat([physical.lon,physical.lat]);
+  } else if (realMarker) { realMarker.remove(); realMarker = null; }
   const origin = latest?.origin;
   if (origin) {
-    if (!originMarker) originMarker = new maplibre.Marker({color:"#4c8197"})
+    if (!originMarker) originMarker = new maplibre.Marker({element:ordinalPin("起", "start"),anchor:"center"})
       .setLngLat([origin.lon,origin.lat]).setPopup(new maplibre.Popup().setText("路線起點")).addTo(map);
     else originMarker.setLngLat([origin.lon,origin.lat]);
   } else if (originMarker) { originMarker.remove(); originMarker = null; }
@@ -406,15 +441,35 @@ function renderMap() {
   if (key !== lastStopsKey) {
     routeMarkers.forEach(marker => marker.remove());
     routeMarkers = stops.map((item,i) =>
-      new maplibre.Marker({color:i === stops.length-1 ? "#b9575b" : "#4e9f8c"})
+      new maplibre.Marker({element:ordinalPin(i + 1, i === stops.length-1 ? "last" : ""),anchor:"center"})
         .setLngLat([item.lon,item.lat])
-        .setPopup(new maplibre.Popup().setText("路點 " + (i+1))).addTo(map));
+        .setPopup(new maplibre.Popup().setText((mode === "FLOWERS" ? "花點 " : "路點 ") + (i+1)))
+        .addTo(map));
     lastStopsKey = key;
   }
   const active = latest?.phase === "MOVING" || latest?.phase === "PAUSED" ||
     (latest?.phase === "PARKED" && latest?.geometry?.length >= 2);
   const road = active ? (latest?.geometry || []) :
     (latest?.previews?.[mode]?.geometry || []);
+  // Dashed draft order is only a sequence guide, never a pedestrian-road preview.
+  const previewReady = (latest?.previews?.[mode]?.geometry || []).length >= 2;
+  const draft = !active && !previewReady && origin && stops.length ?
+    [origin, ...stops] : [];
+  const draftKey = mode + "|" + JSON.stringify(draft);
+  if (mapStyleReady && draftKey !== lastDraftKey) {
+    const guide = {type:"FeatureCollection",features:draft.length >= 2 ? [{
+      type:"Feature",properties:{},
+      geometry:{type:"LineString",coordinates:draft.map(p=>[p.lon,p.lat])}
+    }] : []};
+    if (map.getSource("bee-draft")) map.getSource("bee-draft").setData(guide);
+    else {
+      map.addSource("bee-draft",{type:"geojson",data:guide});
+      map.addLayer({id:"bee-draft-order",type:"line",source:"bee-draft",
+        paint:{"line-color":"#436e85","line-width":3,
+          "line-opacity":.9,"line-dasharray":[2,2]}});
+    }
+    lastDraftKey = draftKey;
+  }
   const lineKey = mode + "|" + JSON.stringify(road);
   if (lineKey === lastLineKey || !mapStyleReady) return;
   const coords = road.map(point => [point.lon,point.lat]);
@@ -433,6 +488,79 @@ function formatDistance(metres) {
   return metres >= 1000 ? (metres/1000).toFixed(2) + " 公里" :
     Math.round(metres) + " 公尺";
 }
+function renderRouteOrder() {
+  const stops = mode === "FLOWERS" ? (latest?.flowerStops || []) :
+    mode === "ROUTE" ? (latest?.routeStops || []) : [];
+  const origin = latest?.origin;
+  const busy = latest?.planning || latest?.phase === "MOVING" || latest?.phase === "PAUSED";
+  const key = mode + "|" + JSON.stringify(stops) + "|" +
+    JSON.stringify(origin) + "|" + busy;
+  if (key === lastOrderKey) return;
+  lastOrderKey = key;
+  const list = $("route-order");
+  list.replaceChildren();
+  if (mode !== "ROUTE" && mode !== "FLOWERS") return;
+  const label = mode === "FLOWERS" ? "花點" : "路點";
+  const coordinates = point => point.lat.toFixed(5) + ", " + point.lon.toFixed(5);
+  function addRow(point, index) {
+    const li = document.createElement("li");
+    li.className = "stop-item";
+    const num = document.createElement("span");
+    num.className = "stop-number" + (index < 0 ? " is-origin" : "");
+    num.textContent = index < 0 ? "起" : String(index + 1);
+    const details = document.createElement("div");
+    details.className = "stop-detail";
+    const strong = document.createElement("strong");
+    strong.textContent = index < 0 ? "路線起點" : label + " " + (index + 1);
+    const small = document.createElement("small");
+    small.textContent = point ? coordinates(point) : "尚未指定起點";
+    details.append(strong, small);
+    li.append(num, details);
+    if (index >= 0) {
+      const actions = document.createElement("div");
+      actions.className = "stop-actions";
+      for (const [caption,offset] of [["上移",-1],["下移",1]]) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.textContent = caption;
+        btn.setAttribute("aria-label", label + " " + (index + 1) + caption);
+        btn.disabled = !!busy || index + offset < 0 || index + offset >= stops.length;
+        btn.addEventListener("click", () =>
+          act("/api/points/reorder",{mode,index,offset}));
+        actions.appendChild(btn);
+      }
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.textContent = "刪除";
+      remove.disabled = !!busy;
+      remove.setAttribute("aria-label", "刪除" + label + " " + (index + 1));
+      remove.addEventListener("click", () =>
+        act("/api/points/remove",{mode,index}));
+      actions.appendChild(remove);
+      li.append(actions);
+    }
+    if (point) {
+      const view = document.createElement("button");
+      view.type = "button";
+      view.textContent = "查看";
+      view.setAttribute("aria-label", "在地圖查看" + (index < 0 ? "路線起點" : label + " " + (index + 1)));
+      view.addEventListener("click", () => {
+        map?.flyTo({center:[point.lon,point.lat],zoom:16});
+      });
+      li.append(view);
+    }
+    list.appendChild(li);
+  }
+  addRow(origin, -1);
+  stops.forEach((point,index) => addRow(point,index));
+  if (!stops.length) {
+    const empty = document.createElement("li");
+    empty.className = "muted";
+    empty.textContent = "尚未加入路點。先點地圖選位置，再按「加入路點」。";
+    list.appendChild(empty);
+  }
+}
+
 function updateRouteControls() {
   const navigating = mode === "ROUTE" || mode === "FLOWERS";
   const stops = mode === "FLOWERS" ? (latest?.flowerStops || []) :
@@ -446,7 +574,9 @@ function updateRouteControls() {
   const ready = !!prepared?.id && prepared.loop === loop;
   const needSnap = ready && prepared.maxSnapMetres > 40;
   const max = mode === "ROUTE" ? 15 : 14;
-  $("pointcount").textContent = stops.length + " / " + max + " 個路點";
+  $("pointcount").textContent = stops.length + " / " + max + " 個" +
+    (mode === "FLOWERS" ? "花點" : "路點") + " · 按清單順序行走";
+  renderRouteOrder();
   $("originlabel").textContent = hasOrigin ? "目前起點：" +
     latest.origin.lat.toFixed(6) + ", " + latest.origin.lon.toFixed(6) :
     "尚未指定起點 · 在地圖選擇後按「設為起點」";
@@ -497,6 +627,20 @@ function updateStatus() {
       ", " + latest.position.lon.toFixed(5) : "");
   $("mobile-state").textContent = names[phase] || "手機待命";
   $("mobile-steps").textContent = "本次估算 " + count + " 步";
+  const real = latest?.realPosition;
+  const gpsState = latest?.realGpsState || "idle";
+  const locationStatus = $("real-location-status");
+  locationStatus.dataset.state = gpsState === "ready" ? "ready" :
+    gpsState === "unavailable" ? "error" : gpsState;
+  locationStatus.textContent = gpsState === "ready" && real ?
+    "手機真實 GPS · " + real.lat.toFixed(6) + ", " + real.lon.toFixed(6) +
+    (Number.isFinite(real.accuracy) ? " · 精度約 " + Math.round(real.accuracy) + " 公尺" : "") :
+    gpsState === "mock" ? "目前為模擬 GPS；需先恢復真實 GPS 才能讀取真實位置" :
+    gpsState === "locating" ? "正在向手機取得真實 GPS（地圖不會自動瞬移）…" :
+    gpsState === "unavailable" ? "暫無近期真實 GPS，請開啟手機定位及 App 再試一次" :
+    "尚未查詢手機真實 GPS；地圖初始中心不是手機定位";
+  $("find-real").disabled = gpsState === "mock";
+  $("follow").disabled = !latest?.position;
   const activeWalk = phase === "MOVING" || phase === "PAUSED";
   $("motion-controls").classList.toggle("is-active", activeWalk);
   document.body.classList.toggle("has-active-controls", activeWalk);
@@ -520,11 +664,22 @@ async function refresh() {
     updateStatus();
     updateRouteControls();
     renderMap();
+    if (focusRealWhenReady && latest?.realGpsState === "ready" && latest?.realPosition) {
+      const p = latest.realPosition;
+      focusRealWhenReady = false;
+      map?.flyTo({center:[p.lon,p.lat],zoom:16});
+    }
+    if (focusRealWhenReady && latest?.realGpsState === "unavailable")
+      focusRealWhenReady = false;
   } catch (error) {
     if (token) $("connection").textContent = "手機連線中斷";
     if (token) setMessage(error.message || "無法更新手機狀態");
   } finally { refreshing = false; }
 }
+$("find-real").addEventListener("click", async () => {
+  focusRealWhenReady = true;
+  if (!await act("/api/location/real",{})) focusRealWhenReady = false;
+});
 $("follow").addEventListener("click", () => {
   if (!current) {
     setMessage("手機尚未啟動模擬定位；可先在地圖選起點，或輸入經緯度。");
