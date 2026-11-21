@@ -757,6 +757,28 @@ private fun PikminBeeScreen() {
         CompositionLocalProvider(
             LocalNaosVisualState provides NaosVisualState(naosFamily, naosMaterial, dark)
         ) {
+        confirmStartMode?.let { mode ->
+            val ready = PreparedRouteState.get(mode)
+            AlertDialog(
+                onDismissRequest = { confirmStartMode = null },
+                title = { Text("確認道路吸附位置") },
+                text = {
+                    Text("所選路點距離最近可步行道路最多約 " +
+                        "${ready?.maxSnapMetres?.toInt() ?: 0} 公尺。" +
+                        " 起點約偏移 ${ready?.originSnapMetres?.toInt() ?: 0} 公尺。" +
+                        " 開始後會先移動到吸附的道路位置，請確認地圖上的預覽路線。")
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        confirmStartMode = null
+                        startPreparedWalk(mode)
+                    }) { Text("確認並開始") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { confirmStartMode = null }) { Text("返回預覽") }
+                },
+            )
+        }
         if (showOverlayGuide) {
             OverlayGuideDialog(onFinished = {
                 prefs.markOverlayGuideSeen()
@@ -905,7 +927,11 @@ private fun PikminBeeScreen() {
                 routeActive = walkMode == WalkMode.ROUTE &&
                     walkPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED),
                 routePaused = walkPhase == WalkPhase.PAUSED,
-                routePreviewReady = routePreviewReady,
+                routePreviewReady = if (tab == ToolTab.FLOWERS)
+                    flowerPreviewReady else routePreviewReady,
+                routeSnapMetres = if (tab == ToolTab.FLOWERS)
+                    preparedFlowers?.maxSnapMetres ?: 0.0
+                    else preparedRoute?.maxSnapMetres ?: 0.0,
                 routePlanning = planning,
                 onRestoreRealGps = {
                     runCatching { context.startService(MockLocationService.command(
@@ -922,16 +948,22 @@ private fun PikminBeeScreen() {
                 onFlowerVision = { tab = ToolTab.FLOWERS; openDetailsRequest++ },
                 onRouteUndo = {
                     if (walkPhase !in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)) {
-                        prefs.saveRouteDraft(RoutePointDraft.undo(roadStops))
-                        routeEditingStopIndex = null
-                        message = "已返回上一個路點，直接點地圖重新選取"
+                        when (tab) {
+                            ToolTab.FLOWERS -> prefs.saveFlowerDraft(flowerStops.dropLast(1))
+                            ToolTab.ROUTE -> {
+                                prefs.saveRouteDraft(RoutePointDraft.undo(roadStops))
+                                routeEditingStopIndex = null
+                            }
+                            else -> Unit
+                        }
+                        message = "已移除最後一個路點，請點地圖重新選取"
                     }
                 },
-                onRoutePrimary = { handleRoutePrimary() },
+                onRoutePrimary = { handleJourneyPrimary() },
                 onRouteStop = {
                     context.startService(MockLocationService.command(
                         context, MockLocationService.ACTION_STOP_ROUTE))
-                    message = "已停止道路行走"
+                    message = "已停止行走"
                 },
                 mapContent = {
             LocationMap(
@@ -949,7 +981,7 @@ private fun PikminBeeScreen() {
                 },
                 road = displayedRoad,
                 previewRoad = when (tab) {
-                    ToolTab.FLOWERS -> !activeFlowerWalk && flowerRoadPreview.isNotEmpty()
+                    ToolTab.FLOWERS -> !activeFlowerWalk && flowerPreviewReady
                     ToolTab.ROUTE -> !activeRouteWalk && routePreviewReady
                     else -> false
                 },
@@ -1179,10 +1211,14 @@ private fun PikminBeeScreen() {
                                         routeEditingStopIndex = null
                                     },
                                     onMessage = { message = it },
-                                    onAskLocation = { requestLocation.launch(Manifest.permission.ACCESS_FINE_LOCATION) },
                                     preparedRoad = if (routePreviewReady) routeRoadPreview else emptyList(),
                                     routePlanning = planning,
-                                    onRoutePrimary = { handleRoutePrimary() },
+                                    snapMetres = preparedRoute?.maxSnapMetres ?: 0.0,
+                                    loop = false,
+                                    onLoopChange = {},
+                                    onRoutePrimary = { handleJourneyPrimary() },
+                                    onRouteStop = { context.startService(MockLocationService.command(
+                                        context, MockLocationService.ACTION_STOP_ROUTE)) },
                                 )
                             }
                             ToolTab.FLOWERS -> {
@@ -1297,17 +1333,14 @@ private fun PikminBeeScreen() {
                                     onUndo = { prefs.saveFlowerDraft(flowerStops.dropLast(1)) },
                                     onClear = { prefs.saveFlowerDraft(emptyList()) },
                                     onMessage = { message = it },
-                                    onAskLocation = { requestLocation.launch(Manifest.permission.ACCESS_FINE_LOCATION) },
-                                    onPreviewShown = { closeDetailsRequest++ },
-                                    onPreviewRoad = { geometry ->
-                                        flowerRoadPreview = geometry
-                                        if (geometry.size >= 2) {
-                                            mapExplore = true
-                                            moveMapCamera(MapCameraGeometry.forRoute(
-                                                mockPosition ?: flowerStart, flowerStops, geometry,
-                                            ))
-                                        }
-                                    },
+                                    preparedRoad = if (flowerPreviewReady) flowerRoadPreview else emptyList(),
+                                    routePlanning = planning,
+                                    snapMetres = preparedFlowers?.maxSnapMetres ?: 0.0,
+                                    loop = flowerLoop,
+                                    onLoopChange = { flowerLoop = it },
+                                    onRoutePrimary = { handleJourneyPrimary() },
+                                    onRouteStop = { context.startService(MockLocationService.command(
+                                        context, MockLocationService.ACTION_STOP_ROUTE)) },
                                 )
                                 FlowerCatalogPanel(
                                     spots = allFlowers,
