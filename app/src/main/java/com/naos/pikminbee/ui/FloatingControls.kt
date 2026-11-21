@@ -43,9 +43,9 @@ class FloatingControls(
     private val context: Context,
     private val sendAction: (String) -> Unit,
     private val onStartRoute: () -> Unit,
-    private val onSpeedSelected: (WalkSpeedPreset) -> Unit,
     private val openMap: () -> Unit,
-    private val onFlowerVision: () -> Unit,
+    /** Match the main bottom dock: Teleport / Route / Flowers / Saved. */
+    private val onNavigateMode: (Int) -> Unit,
 ) {
     companion object {
         const val PAUSE = "pause"
@@ -365,8 +365,8 @@ class FloatingControls(
         val progress = com.naos.pikminbee.location.LocationStatus.progress.value
         val journey = if (lastPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED) &&
             progress.totalMetres > 0.0) {
-            val stop = progress.nextWaypoint?.toString() ?: "終點"
-            " · $stop/${progress.waypointCount} · ${(progress.fraction * 100).toInt()}%"
+            " · ${progress.activeLegLabel}（共 ${progress.waypointCount} 點）" +
+                " · ${(progress.fraction * 100).toInt()}%"
         } else ""
         quickSummary?.text = "$label · ${currentSpeed.kilometresPerHour} km/h$journey"
         val primaryLabel = when (primary) {
@@ -385,13 +385,10 @@ class FloatingControls(
         iconUpdate(OverlayQuickAction.VIRTUAL_GPS, OverlayGlyph.VIRTUAL,
             "回到上次虛擬位置，不繼續行走",
             AppPreferences(context).lastVirtualPosition() != null)
-        val capturing = BloomVisionState.state.value.phase == BloomVisionState.Phase.CAPTURING
-        iconUpdate(OverlayQuickAction.FLOWER_VISION, OverlayGlyph.FLOWER,
-            if (capturing) "停止畫面偵測花" else "開啟畫面偵測花並取得系統授權")
-        iconUpdate(OverlayQuickAction.SPEED, OverlayGlyph.SPEED,
-            "切換行走速度，目前 ${currentSpeed.kilometresPerHour} km/h")
-        iconUpdate(OverlayQuickAction.MAP, OverlayGlyph.MAP, "開啟 PikminBee 地圖")
-        iconUpdate(OverlayQuickAction.CLOSE, OverlayGlyph.CLOSE, "關閉懸浮視窗，不停止行走")
+        iconUpdate(OverlayQuickAction.TELEPORT, OverlayGlyph.TELEPORT, "開啟瞬移模式")
+        iconUpdate(OverlayQuickAction.ROUTE, OverlayGlyph.ROUTE, "開啟路徑模式")
+        iconUpdate(OverlayQuickAction.FLOWERS, OverlayGlyph.FLOWER, "開啟尋花模式")
+        iconUpdate(OverlayQuickAction.SAVED, OverlayGlyph.BOOKMARK, "開啟收藏")
         refreshBeeLogo()
     }
 
@@ -481,10 +478,11 @@ class FloatingControls(
             setImageDrawable(NaosOverlayActionIcon(OverlayGlyph.BEE,
                 BeeLogoPolicy.HONEY, dp(30)))
             setPadding(dp(6), dp(6), dp(6), dp(6))
-            contentDescription = "收合懸浮控制，保持目前行走狀態"
+            contentDescription = "點一下收合懸浮控制；長按關閉懸浮視窗，不停止行走"
             isClickable = true
             isFocusable = true
             setOnClickListener { toggleExpanded() }
+            setOnLongClickListener { sendAction(HIDE); true }
             headerBeeIcon = this
         }, LinearLayout.LayoutParams(dp(48), dp(48)))
         actions.addView(header)
@@ -515,10 +513,10 @@ class FloatingControls(
             Triple(OverlayQuickAction.STOP, OverlayGlyph.STOP, "停止行走"),
             Triple(OverlayQuickAction.REAL_GPS, OverlayGlyph.REAL, "還原真實定位"),
             Triple(OverlayQuickAction.VIRTUAL_GPS, OverlayGlyph.VIRTUAL, "恢復虛擬定位"),
-            Triple(OverlayQuickAction.FLOWER_VISION, OverlayGlyph.FLOWER, "畫面偵測花"),
-            Triple(OverlayQuickAction.SPEED, OverlayGlyph.SPEED, "切換走路速度"),
-            Triple(OverlayQuickAction.MAP, OverlayGlyph.MAP, "打開地圖"),
-            Triple(OverlayQuickAction.CLOSE, OverlayGlyph.CLOSE, "關閉懸浮"),
+            Triple(OverlayQuickAction.TELEPORT, OverlayGlyph.TELEPORT, "瞬移"),
+            Triple(OverlayQuickAction.ROUTE, OverlayGlyph.ROUTE, "路徑"),
+            Triple(OverlayQuickAction.FLOWERS, OverlayGlyph.FLOWER, "尋花"),
+            Triple(OverlayQuickAction.SAVED, OverlayGlyph.BOOKMARK, "收藏"),
         )
         buttons.chunked(4).forEach { group ->
             val row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
@@ -529,20 +527,10 @@ class FloatingControls(
                         OverlayQuickAction.STOP -> sendAction(STOP_WALK)
                         OverlayQuickAction.REAL_GPS -> sendAction(RESTORE_REAL)
                         OverlayQuickAction.VIRTUAL_GPS -> sendAction(RESTORE_VIRTUAL)
-                        OverlayQuickAction.FLOWER_VISION -> {
-                            if (BloomVisionState.state.value.phase ==
-                                BloomVisionState.Phase.CAPTURING) {
-                                context.startService(BloomCaptureService.stopIntent(context))
-                            } else onFlowerVision()
-                        }
-                        OverlayQuickAction.SPEED -> {
-                            val next = OverlayQuickPolicy.nextSpeed(currentSpeed)
-                            currentSpeed = next
-                            onSpeedSelected(next)
-                            refreshQuick()
-                        }
-                        OverlayQuickAction.MAP -> openMap()
-                        OverlayQuickAction.CLOSE -> sendAction(HIDE)
+                        OverlayQuickAction.TELEPORT -> onNavigateMode(0)
+                        OverlayQuickAction.ROUTE -> onNavigateMode(1)
+                        OverlayQuickAction.FLOWERS -> onNavigateMode(2)
+                        OverlayQuickAction.SAVED -> onNavigateMode(3)
                     }
                 }, LinearLayout.LayoutParams(0, dp(52), 1f).apply {
                     marginEnd = dp(4)

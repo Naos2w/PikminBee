@@ -180,15 +180,18 @@ fun JourneyControls(
             }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            IconButton(onClick = onUndo, enabled = canEdit && stops.isNotEmpty(),
-                modifier = Modifier.size(48.dp)
-                    .semantics { contentDescription = "移除上一個路點" }) {
+            TextButton(
+                onClick = onUndo,
+                enabled = canEdit && stops.isNotEmpty(),
+                modifier = Modifier.semantics { contentDescription = "撤銷最後加入的路點" },
+            ) {
                 NaosActionIcon(NaosActionGlyph.UNDO, foreground)
+                Text("撤銷上一點", color = foreground, fontSize = 12.sp)
             }
             TextButton(
-                onClick = { onClear(); onMessage("路點已清除") },
+                onClick = { onClear(); onMessage("所有路點已清除") },
                 enabled = canEdit && stops.isNotEmpty(),
-            ) { Text("清除路點") }
+            ) { Text("清除全部", fontSize = 12.sp) }
         }
     }
 }
