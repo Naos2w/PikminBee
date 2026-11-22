@@ -34,6 +34,15 @@ class OverlayQuickPolicyTest {
         assertEquals(OverlayQuickAction.VIRTUAL_GPS, OverlayQuickPolicy.selectedGps(true))
     }
 
+    @Test fun onlyOneGpsButtonCanBeHighlightedAndOtherActionsNeverLightUp() {
+        val actions = OverlayQuickPolicy.topRow + OverlayQuickPolicy.bottomRow
+        for (mockActive in listOf(false, true)) {
+            val active = actions.filter { OverlayQuickPolicy.isGpsHighlighted(it, mockActive) }
+            assertEquals(listOf(OverlayQuickPolicy.selectedGps(mockActive)), active)
+            assertFalse(OverlayQuickPolicy.isGpsHighlighted(OverlayQuickAction.MAP, mockActive))
+        }
+    }
+
     @Test fun speedCyclesWithoutChangingSavedDefaults() {
         assertEquals(WalkSpeedPreset.WALK, OverlayQuickPolicy.nextSpeed(WalkSpeedPreset.SLOW))
         assertEquals(WalkSpeedPreset.FAST, OverlayQuickPolicy.nextSpeed(WalkSpeedPreset.WALK))

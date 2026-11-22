@@ -402,6 +402,8 @@ class MockLocationService : Service() {
                 LocationStatus.display.value = "已回到虛擬位置 · 沒有自動行走"
                 scheduleTicks()
                 refreshNotification()
+                // Repaint the two GPS buttons immediately after provider confirmation.
+                updateOverlay()
                 return START_STICKY
             }
             ACTION_STOP -> {
