@@ -52,6 +52,7 @@ data class LanDisplay(
     val pairingPin: String = "",
     val pendingDevice: String = "",
     val note: String = "Wi-Fi 控制已關閉",
+    val physicalSharingAllowed: Boolean = false,
 )
 
 object LanStatus {
@@ -106,6 +107,10 @@ class LanController(private val context: Context) {
     @Volatile private var realFixTimestampMillis = 0L
     @Volatile private var realFixAccuracyMetres = -1f
     @Volatile private var realGpsState = "idle"
+    // Session-bound, explicit phone consent. Never persist accurate physical
+    // coordinates or the sharing grant in SharedPreferences/browser storage.
+    @Volatile private var physicalShareSessionToken: String? = null
+    @Volatile private var physicalSnapshot: LanPhysicalSnapshot? = null
     @Volatile private var verifiedTimeZoneReference: VerifiedRealTimeZone? = null
     private val realZoneLookupBusy = AtomicBoolean(false)
     @Volatile private var lastRealZoneLookupAtMillis = 0L
@@ -152,8 +157,46 @@ class LanController(private val context: Context) {
             pendingDevice = "", note = "已拒絕裝置配對")
     }
 
+    /** Called only from the visible Android Settings consent confirmation. */
+    fun approvePhysicalSharing() {
+        val session = pairing.activeSessionToken()
+        val fineGranted = ContextCompat.checkSelfPermission(context,
+            Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        if (session == null || !fineGranted || server == null) {
+            LanStatus.display.value = LanStatus.display.value.copy(
+                physicalSharingAllowed = false,
+                note = if (session == null) "請先完成網頁配對與手機核准，再同意分享真實位置"
+                    else "請先在 Android 授予精確定位權限")
+            return
+        }
+        physicalShareSessionToken = session
+        // VerifiedPhysicalFixState receives non-mock samples only, in the phone
+        // UI's foreground LocationManager listener. A mock provider never updates it.
+        physicalSnapshot = com.naos.pikminbee.ui.VerifiedPhysicalFixState.fresh()
+            ?.let { LanPhysicalSnapshot(it.coordinate, it.timestampMillis, it.accuracyMetres) }
+        LanStatus.display.value = LanStatus.display.value.copy(
+            physicalSharingAllowed = true,
+            note = if (physicalSnapshot != null)
+                "已允許這次配對瀏覽器查看最近真實 GPS（最多至定位後 30 分鐘）"
+            else "已允許分享，但尚無可信真實定位；請先切回真實 GPS 並取得定位")
+    }
+
+    /** Revocation also cancels in-flight GPS requests and removes precise data. */
+    fun revokePhysicalSharing(note: String = "已撤銷真實 GPS 分享") {
+        physicalShareSessionToken = null
+        physicalSnapshot = null
+        realRequestGeneration.incrementAndGet()
+        realFix = null
+        realFixTimestampMillis = 0L
+        realGpsState = "idle"
+        LanStatus.display.value = LanStatus.display.value.copy(
+            physicalSharingAllowed = false, note = note)
+    }
+
     fun stop(reason: String = "Wi-Fi 控制已關閉") {
         realRequestGeneration.incrementAndGet()
+        physicalShareSessionToken = null
+        physicalSnapshot = null
         realFix = null
         verifiedTimeZoneReference = null
         realGpsState = "idle"
@@ -171,6 +214,10 @@ class LanController(private val context: Context) {
 
     fun checkNetwork() {
         if (server == null) return
+        if (physicalShareSessionToken != null &&
+            physicalShareSessionToken != pairing.activeSessionToken()) {
+            revokePhysicalSharing("配對工作階段已到期；真實 GPS 分享已關閉")
+        }
         val now = android.os.SystemClock.elapsedRealtime()
         if (now - lastNetworkCheck < 10_000L) return
         lastNetworkCheck = now
@@ -222,14 +269,19 @@ class LanController(private val context: Context) {
         if (req.method == "GET" && req.path == "/api/pair/status") {
             val status = pairing.poll(req.remoteAddress, req.pendingId)
             return when (status.state) {
-                "approved" -> ok(JSONObject().put("token", status.token)
-                    .put("expiresInSeconds", 1800).toString())
+                "approved" -> {
+                    // Approving another browser revokes ALL prior precise-data consent.
+                    revokePhysicalSharing("新的網頁配對已核准；真實位置必須重新授權")
+                    ok(JSONObject().put("token", status.token)
+                        .put("expiresInSeconds", 1800).toString())
+                }
                 "pending" -> acceptedJson(JSONObject().put("status", "pending").toString())
                 else -> error(403, "裝置尚未核准、已拒絕或配對已過期")
             }
         }
         if (!pairing.authorised(req.token, req.remoteAddress)) return error(401, "請在手機取得配對碼後重新連線")
-        if (req.method == "GET" && req.path == "/api/state") return ok(snapshot())
+        if (req.method == "GET" && req.path == "/api/state")
+            return ok(snapshot(req.token))
         if (req.method == "GET" && req.path == "/api/saved") return ok(savedSnapshot())
         if (req.method != "POST") return error(404, "找不到操作")
         return when (req.path) {
@@ -374,7 +426,7 @@ class LanController(private val context: Context) {
                 prefs.setDefaultWalkSpeedPreset(preset)
                 accepted("下次開啟 App 的預設速度已設為：${preset.display}")
             }
-            "/api/location/real" -> requestRealLocation()
+            "/api/location/real" -> requestRealLocation(req.token)
             "/api/origin" -> {
                 if (walking()) return error(409, "行走中無法修改起點；請先停止")
                 val point = coordinate(req.body) ?: return error(400, "起點經緯度無效")
@@ -615,10 +667,30 @@ class LanController(private val context: Context) {
         }
     }
 
-    /** A phone-side opt-in on-demand read; not a background location stream. */
-    private fun requestRealLocation(): LanReply {
-        if (LocationStatus.mockActive.value || LocationStatus.selected.value != null)
-            return error(409, "請先按「恢復真實 GPS」停止模擬定位")
+    /** Request-specific, session-bound snapshot. No continuous real GPS stream. */
+    private fun visiblePhysicalSnapshot(
+        token: String?, nowMillis: Long = System.currentTimeMillis(),
+    ): LanPhysicalSnapshot? {
+        val value = physicalSnapshot
+        if (!LanPhysicalSharingPolicy.isFresh(value, nowMillis)) {
+            physicalSnapshot = null
+            return null
+        }
+        return value?.takeIf {
+            LanPhysicalSharingPolicy.mayExpose(
+                token, physicalShareSessionToken, it, nowMillis)
+        }
+    }
+
+    /** On-demand read after explicit PHONE consent + paired browser request. */
+    private fun requestRealLocation(token: String?): LanReply {
+        if (token.isNullOrBlank() || token != physicalShareSessionToken)
+            return error(403, "請先在手機 Wi-Fi 控制設定中同意分享真實位置")
+        if (LocationStatus.mockActive.value || LocationStatus.selected.value != null) {
+            if (visiblePhysicalSnapshot(token) != null)
+                return accepted("可查看先前驗證的真實位置快照；目前為虛擬 GPS，無法取得新的真實位置")
+            return error(409, "目前為虛擬 GPS 且沒有可信快照；請先切回真實 GPS 取得位置")
+        }
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) !=
             PackageManager.PERMISSION_GRANTED)
             return error(403, "請先在手機授予精確定位權限")
@@ -667,7 +739,15 @@ class LanController(private val context: Context) {
             ?: return
         realFix = point
         realFixTimestampMillis = fix.time
-        realFixAccuracyMetres = if (fix.hasAccuracy()) fix.accuracy else -1f
+        realFixAccuracyMetres = if (fix.hasAccuracy() &&
+            fix.accuracy.isFinite() && fix.accuracy >= 0f) fix.accuracy else -1f
+        // Only this explicit request, accepted after phone-level consent, may
+        // create/refresh the shared snapshot. No background or GPS-tick refresh.
+        if (physicalShareSessionToken != null &&
+            physicalShareSessionToken == pairing.activeSessionToken()) {
+            physicalSnapshot = LanPhysicalSnapshot(point, fix.time,
+                realFixAccuracyMetres.takeIf { it >= 0f })
+        }
         realGpsState = "ready"
         // Only the explicitly requested, verified non-mock fix may set the
         // reference time zone; never fall back to system/Taiwan/mock time.
@@ -755,7 +835,7 @@ class LanController(private val context: Context) {
         LanReply(200, context.assets.open(path).bufferedReader(Charsets.UTF_8).use { it.readText() }, mime)
     }.getOrElse { error(404, "缺少控制頁面") }
 
-    private fun snapshot(): String {
+    private fun snapshot(requesterToken: String?): String {
         fun coordinates(items: List<Coordinate>): JSONArray = JSONArray().apply {
             items.forEach { put(JSONObject().put("lat", it.latitude).put("lon", it.longitude)) }
         }
@@ -796,13 +876,15 @@ class LanController(private val context: Context) {
         }
         lastObservedMock = mocked
         val now = System.currentTimeMillis()
-        val realPosition = realFix?.takeIf {
-            !LocationStatus.mockActive.value && LocationStatus.selected.value == null &&
-                LanRealGpsPolicy.isVerifiedFix(realFixTimestampMillis, now, false)
-        }
+        val realSnapshot = visiblePhysicalSnapshot(requesterToken, now)
+        val mockEnabled = LocationStatus.mockActive.value ||
+            LocationStatus.selected.value != null
         val gpsState = when {
-            LocationStatus.mockActive.value || LocationStatus.selected.value != null -> "mock"
-            realPosition != null -> "ready"
+            requesterToken != physicalShareSessionToken || requesterToken.isNullOrBlank() -> "locked"
+            mockEnabled && realSnapshot != null -> "historical"
+            mockEnabled -> "mock"
+            realSnapshot != null && now - realSnapshot.capturedAtMillis <= 120_000L -> "ready"
+            realSnapshot != null -> "historical"
             realGpsState == "locating" && now - realRequestedAtMillis < 25_000L -> "locating"
             realGpsState == "idle" -> "idle"
             else -> "unavailable"
@@ -819,10 +901,17 @@ class LanController(private val context: Context) {
                 ?.let { it.physicalFixAtMillis + VerifiedRealTimeZone.MAX_AGE_MILLIS }
                 ?: JSONObject.NULL)
             .put("realGpsState", gpsState)
-            .put("realPosition", realPosition?.let {
-                JSONObject().put("lat", it.latitude).put("lon", it.longitude)
-                    .put("accuracy", if (realFixAccuracyMetres >= 0f)
-                        realFixAccuracyMetres.toDouble() else JSONObject.NULL)
+            .put("realLocationSharingApproved",
+                requesterToken != null && requesterToken == physicalShareSessionToken)
+            .put("realPosition", realSnapshot?.let {
+                JSONObject().put("lat", it.coordinate.latitude)
+                    .put("lon", it.coordinate.longitude)
+                    .put("accuracy", it.accuracyMetres?.toDouble() ?: JSONObject.NULL)
+                    .put("capturedAtMillis", it.capturedAtMillis)
+                    .put("expiresAtMillis",
+                        it.capturedAtMillis + LanPhysicalSharingPolicy.MAX_AGE_MILLIS)
+                    .put("historical", mockEnabled ||
+                        now - it.capturedAtMillis > 120_000L)
             })
             .put("origin", origin()?.let { JSONObject().put("lat", it.latitude).put("lon", it.longitude) })
             .put("phase", LocationStatus.phase.value.name)

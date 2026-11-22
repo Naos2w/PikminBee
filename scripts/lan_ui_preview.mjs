@@ -27,7 +27,8 @@ let state = {
   position: {lat:25.040815,lon:121.463424},
   origin: {lat:25.040815,lon:121.463424},
   mockActive: true,
-  realGpsState:'mock',
+  realGpsState:'locked',
+  realLocationSharingApproved:false,
   realPosition:null,
   realTimeZoneId:null,
   realTimeZoneExpiresAtMillis:null,
@@ -73,7 +74,33 @@ createServer(async (req,res)=>{
     send(res,{token:'preview-only-token'},200);return;
   }
   if(req.method==='GET'&&url==='/api/state'){
+    if(state.realPosition?.expiresAtMillis < Date.now()){
+      state.realPosition=null;
+      state.realGpsState=state.realLocationSharingApproved?'unavailable':'locked';
+    }
     send(res,state);return;
+  }
+  if(req.method==='POST'&&url==='/api/preview/grant-real'){
+    state.realLocationSharingApproved=true;
+    state.realGpsState=state.realPosition?'historical':
+      (state.mockActive?'mock':'idle');
+    send(res,{message:'合成授權：僅用於本機測試，沒有接觸手機'},202);return;
+  }
+  if(req.method==='POST'&&url==='/api/preview/revoke-real'){
+    state.realLocationSharingApproved=false;
+    state.realPosition=null;
+    state.realGpsState='locked';
+    send(res,{message:'合成真實位置已撤銷'},202);return;
+  }
+  if(req.method==='POST'&&url==='/api/preview/expire-real-position'){
+    if(state.realPosition)state.realPosition.expiresAtMillis=Date.now()-1000;
+    send(res,{message:'合成快照已過期'},202);return;
+  }
+  if(req.method==='POST'&&url==='/api/preview/active-walk'){
+    state.phase='MOVING';state.mockActive=true;
+    state.position={lat:25.04,lon:121.46};
+    state.progress={...state.progress,estimatedSteps:128,activeLeg:'1 → 2'};
+    send(res,{message:'合成行走中，未操作任何真實 GPS'},202);return;
   }
   if(req.method==='GET'&&url==='/api/saved'){
     send(res,{places:previewPlaces,routes:[],
@@ -138,23 +165,37 @@ createServer(async (req,res)=>{
       state.mockActive=false;
       state.position=null;
       state.phase='IDLE';
-      state.realGpsState='idle';
+      state.realGpsState=state.realPosition?'historical':
+        (state.realLocationSharingApproved?'idle':'locked');
     }
+    if(request.action==='pause'&&state.phase==='MOVING')state.phase='PAUSED';
+    if(request.action==='resume'&&state.phase==='PAUSED')state.phase='MOVING';
+    if(request.action==='stop'&&['MOVING','PAUSED'].includes(state.phase))
+      state.phase='PARKED';
     send(res,{message:'本機模擬狀態已更新；沒有操控手機'},202);return;
   }
   if(req.method==='POST'&&url==='/api/location/real'){
-    if(state.mockActive){send(res,{error:'請先恢復真實 GPS'},409);return;}
-    state.realPosition={lat:25.0408,lon:121.4634,accuracy:12};
+    if(!state.realLocationSharingApproved){
+      send(res,{error:'本機合成預覽：先呼叫 grant-real 模擬手機同意'},403);return;
+    }
+    if(state.mockActive){
+      send(res,{error:'模擬定位中不可取得新的真實 GPS'},409);return;
+    }
+    const capturedAtMillis=Date.now();
+    state.realPosition={lat:25.0408,lon:121.4634,accuracy:12,
+      capturedAtMillis,expiresAtMillis:capturedAtMillis+30*60_000,
+      historical:false};
     state.realGpsState='ready';
     state.realTimeZoneId='Asia/Taipei';
-    state.realTimeZoneExpiresAtMillis=Date.now()+30*60_000;
+    state.realTimeZoneExpiresAtMillis=capturedAtMillis+30*60_000;
     send(res,{message:'本機預覽的合成真實 GPS（並非手機定位）'},202);return;
   }
   if(req.method==='POST'&&url==='/api/teleport'){
-    state.mockActive=true;state.realGpsState='mock';state.realPosition=null;
+    state.mockActive=true;
+    state.realGpsState=state.realPosition?'historical':'mock';
+    if(state.realPosition)state.realPosition.historical=true;
     state.position={lat:25.0330,lon:121.5654};
-    // Previously verified physical time-zone reference is retained for only
-    // its original 30-minute window, even though real coordinates are hidden.
+    // Synthetic historical physical coordinate stays only until its original TTL.
     send(res,{message:'合成虛擬位置已啟用（未操控手機）'},202);return;
   }
   if(req.method==='POST'&&(url==='/api/points/reorder'||url==='/api/points/remove')){

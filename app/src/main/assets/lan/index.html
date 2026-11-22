@@ -213,6 +213,163 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
  .saved-scroll{max-height:66svh}
  #flower-list{max-height:190px}
 }
+
+/* Wi-Fi Web V2 FINAL: a single full-viewport map under device-specific overlays.
+ * Retain the existing mineral/honey semantic tokens and opaque matte surfaces. */
+body.remote-active{height:100dvh;overflow:hidden}
+body.remote-active .page{max-width:none;margin:0;padding:0;width:100%;height:100dvh}
+body.remote-active .head{position:fixed;z-index:24;top:12px;left:17px;right:auto;
+  margin:0;padding:7px 12px;background:var(--surface);border:1px solid var(--line);
+  border-radius:16px;box-shadow:var(--shadow);gap:12px}
+body.remote-active .head h1{font-size:18px}
+body.remote-active .head .sub{font-size:10px}
+body.remote-active .head .stamp{padding:5px 8px}
+body.remote-active #controls.is-visible{display:block;position:fixed;inset:0;overflow:hidden}
+body.remote-active #map-panel{position:absolute;inset:0;top:0;min-width:0;max-width:none;
+  margin:0;padding:0;border:0;border-radius:0;background:transparent;box-shadow:none;z-index:1}
+body.remote-active #map-wrap{position:absolute;inset:0;border:0;border-radius:0}
+body.remote-active #map{height:100%;width:100%;min-height:0;max-height:none}
+body.remote-active .map-header{position:absolute;z-index:11;top:17px;right:18px;
+  width:auto;max-width:calc(100vw - 330px);justify-content:flex-end;
+  margin:0!important;flex-wrap:nowrap;pointer-events:auto}
+body.remote-active .map-header>*{flex:0 0 auto}
+body.remote-active .map-header strong{display:none}
+body.remote-active #map-status{background:var(--surface);box-shadow:var(--shadow)}
+body.remote-active .map-locations{position:absolute;z-index:9;bottom:18px;left:96px;
+  width:min(330px,calc(100vw - 112px));max-height:60dvh;overflow:auto;
+  background:var(--surface);border:1px solid var(--line);border-radius:15px;
+  box-shadow:var(--shadow);padding:0}
+body.remote-active .map-locations summary{cursor:pointer;list-style:none;min-height:48px;
+  padding:13px 15px;font-weight:650;font-size:12px;display:flex;align-items:center}
+body.remote-active .map-locations summary::-webkit-details-marker{display:none}
+body.remote-active .map-locations summary:after{content:"⌄";margin-left:auto;color:var(--sub)}
+body.remote-active .map-locations[open] summary:after{content:"⌃"}
+body.remote-active .location-details{padding:0 12px 12px;border-top:1px solid var(--line)}
+body.remote-active .location-details .row{margin:6px 0}
+body.remote-active .location-details button{min-height:42px;font-size:11px;padding:7px}
+body.remote-active #selected{font-size:11px;margin:8px 0}
+body.remote-active .mobile-overview{display:none}
+body.remote-active .help-details{margin:0}
+body.remote-active #map-panel>.help-details{display:none}
+body.remote-active #control-panel{position:absolute;z-index:14;right:16px;top:80px;bottom:16px;
+  width:368px;min-width:0;height:auto;margin:0;padding:12px 15px 17px;
+  border-radius:20px;background:var(--surface);border:1px solid var(--rim);
+  box-shadow:var(--shadow);overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}
+body.remote-active #control-panel .control-title{padding:2px 2px 10px}
+body.remote-active #control-panel #mode-panel-title{font-size:20px;margin:4px 0 0}
+body.remote-active #control-panel .control-title .eyebrow{font-size:9px}
+body.remote-active #panel-toggle{display:grid;place-items:center;flex:none;
+  width:42px;height:42px;min-height:42px;border:1px solid var(--line);
+  border-radius:12px;font-size:22px;background:var(--soft)}
+body.remote-active #sheet-handle{display:none}
+body.remote-active #control-panel .tabs{position:fixed;z-index:20;left:15px;top:95px;right:auto;
+  bottom:auto;width:66px;display:flex;flex-direction:column;margin:0;
+  padding:5px;gap:3px;background:var(--surface);border:1px solid var(--rim);
+  border-radius:17px;box-shadow:var(--shadow)}
+body.remote-active #control-panel .tabs button{width:54px;min-height:64px;padding:7px 3px;
+  font-size:10px;border-radius:12px;flex:none}
+body.remote-active #control-panel .tabs svg{width:21px;height:21px}
+body.remote-active:not([data-device="mobile"]) #control-panel[data-panel="closed"]{top:81px;bottom:auto;width:54px;
+  height:54px;min-height:0;padding:5px;overflow:hidden;border-radius:15px}
+body.remote-active:not([data-device="mobile"]) #control-panel[data-panel="closed"]>:not(.control-title):not(.tabs){display:none!important}
+body.remote-active:not([data-device="mobile"]) #control-panel[data-panel="closed"] .control-title{margin:0;padding:0;border:0}
+body.remote-active:not([data-device="mobile"]) #control-panel[data-panel="closed"] .control-title>div{display:none}
+body.remote-active:not([data-device="mobile"]) #control-panel[data-panel="closed"] #panel-toggle{width:42px;height:42px}
+body.remote-active #compact-walk-controls{display:none}
+body.remote-active .maplibregl-ctrl-top-right{top:78px;right:400px}
+body.remote-active .maplibregl-ctrl-bottom-right{right:18px}
+body.remote-active:has(#control-panel[data-panel="closed"]) .maplibregl-ctrl-top-right{right:85px}
+body.remote-active #control-panel .mode-content{min-width:0}
+body.remote-active #control-panel input#coordinate{width:100%;font-variant-numeric:tabular-nums}
+body.remote-active #control-panel .row>*{min-width:0}
+@media(min-width:601px) and (max-width:1060px){
+  body.remote-active #control-panel{width:326px;right:12px;top:80px;bottom:12px}
+  body.remote-active:not([data-device="mobile"]) #control-panel[data-panel="closed"]{width:54px;bottom:auto}
+  body.remote-active .map-header{top:17px;right:12px;max-width:calc(100vw - 270px)}
+  body.remote-active .head{left:13px}
+  body.remote-active .map-locations{left:88px;width:min(290px,calc(100vw - 110px))}
+  body.remote-active .maplibregl-ctrl-top-right{right:352px}
+  body.remote-active:has(#control-panel[data-panel="closed"]) .maplibregl-ctrl-top-right{right:82px}
+}
+@media(max-width:600px), (min-width:601px) and (max-width:760px) and (max-height:800px){
+  body.remote-active .page{padding:0}
+  body.remote-active .head{left:11px;top:11px;right:auto;padding:5px 9px;gap:5px}
+  body.remote-active .head h1{font-size:15px}
+  body.remote-active .head .sub{display:none}
+  body.remote-active .head svg{height:23px;width:23px;vertical-align:-5px}
+  body.remote-active .head .stamp{font-size:10px;padding:5px}
+  body.remote-active .map-header{top:76px;left:10px;right:10px;
+    width:auto;max-width:none;gap:6px;justify-content:flex-end}
+  body.remote-active .map-header select{width:124px!important;max-width:124px!important;
+    min-height:42px;font-size:11px}
+  body.remote-active #map-status{display:none}
+  body.remote-active .bookmark-btn{min-height:42px;padding:6px 9px}
+  body.remote-active #mobile-overview{position:absolute;display:flex;top:71px;
+    left:11px;z-index:10;width:max-content;max-width:calc(100vw - 190px);
+    min-height:42px;margin:0;padding:5px 8px;gap:3px;flex-direction:column;
+    justify-content:center;border:1px solid var(--line);background:var(--surface)}
+  body.remote-active #mobile-overview strong{font-size:11px;line-height:1.25}
+  body.remote-active #mobile-overview span{font-size:10px}
+  body.remote-active .map-locations{left:10px;right:auto;bottom:calc(160px + env(safe-area-inset-bottom));
+    width:min(305px,calc(100vw - 20px));max-height:40dvh;overflow:auto}
+  body.remote-active.has-compact-walk .map-locations{bottom:calc(252px + env(safe-area-inset-bottom))}
+  body.remote-active #control-panel{position:fixed;left:0;right:0;top:auto;
+    bottom:calc(84px + env(safe-area-inset-bottom));width:100%;max-width:none;
+    height:56px;min-height:56px;padding:0 13px 10px;border-radius:20px 20px 0 0;
+    overflow-y:auto;overflow-x:hidden;z-index:20;overscroll-behavior:contain}
+  body.remote-active #control-panel[data-sheet="half"]{
+    height:min(45dvh,calc(100dvh - 150px - env(safe-area-inset-bottom)))}
+  body.remote-active #control-panel[data-sheet="expanded"]{
+    height:min(85dvh,calc(100dvh - 123px - env(safe-area-inset-bottom)))}
+  body.remote-active #control-panel[data-sheet="collapsed"]{
+    height:56px;min-height:56px;overflow:hidden}
+  body.remote-active:not([data-device="mobile"]) #control-panel[data-panel="closed"]{width:100%;height:56px;
+    top:auto;bottom:calc(84px + env(safe-area-inset-bottom));padding:0 13px}
+  body.remote-active #control-panel #sheet-handle{display:flex;flex-direction:column;
+    justify-content:center;align-items:center;position:sticky;top:0;z-index:25;
+    background:var(--surface);border:0;border-bottom:1px solid var(--line);
+    border-radius:0;margin:0 -13px;padding:3px 12px;min-height:56px;
+    width:calc(100% + 26px);touch-action:none;color:var(--sub);box-shadow:none;
+    font-size:11px;font-weight:600}
+  body.remote-active .drag-indicator{width:38px;height:4px;border-radius:999px;
+    background:var(--subtle);margin:0 0 6px}
+  body.remote-active #control-panel[data-sheet="collapsed"]>:not(#sheet-handle):not(.tabs){
+    display:none!important}
+  body.remote-active #control-panel .control-title{padding:12px 0 7px}
+  body.remote-active #control-panel #panel-toggle{display:none}
+  body.remote-active #control-panel .tabs{position:fixed;left:10px;right:10px;
+    top:auto;bottom:calc(8px + env(safe-area-inset-bottom));width:auto;
+    display:grid;grid-template-columns:repeat(4,minmax(0,1fr));padding:5px;
+    margin:0;border-radius:20px;gap:3px;z-index:39;box-shadow:var(--shadow)}
+  body.remote-active #control-panel .tabs button{width:100%;min-width:0;min-height:66px;
+    font-size:11px;display:flex;flex-direction:column;align-items:center;gap:2px}
+  body.remote-active #control-panel .tabs svg{width:21px;height:21px}
+  body.remote-active #control-panel #mode-content{overflow:visible;padding-bottom:18px}
+  body.remote-active #control-panel #motion-controls{position:relative;bottom:auto;
+    left:auto;right:auto;padding:0;border:0;box-shadow:none;background:transparent}
+  body.remote-active #control-panel .motion-title{margin-top:8px}
+  body.remote-active #compact-walk-controls:not(.hidden){display:flex;flex-direction:column;
+    position:fixed;z-index:24;left:10px;right:10px;bottom:calc(154px + env(safe-area-inset-bottom));
+    border:1px solid var(--rim);border-radius:16px;background:var(--surface);
+    padding:7px 9px;gap:3px;box-shadow:var(--shadow)}
+  body.remote-active .compact-walk-summary{font-size:11px;font-weight:700}
+  body.remote-active #compact-walk-controls .row{display:flex;gap:7px;margin:0}
+  body.remote-active #compact-walk-controls .row button{flex:1;min-height:43px}
+  body.remote-active .maplibregl-ctrl-top-right,
+  body.remote-active:has(#control-panel[data-panel="closed"]) .maplibregl-ctrl-top-right{
+    top:130px;right:8px}
+  body.remote-active .maplibregl-ctrl-bottom-right{display:none}
+}
+@media(max-width:380px){
+  body.remote-active .head{padding:5px 7px}
+  body.remote-active .head .stamp{font-size:9px}
+  body.remote-active .map-header select{max-width:112px!important}
+  body.remote-active .map-locations{width:min(292px,calc(100vw - 20px))}
+}
+@media(prefers-reduced-motion:reduce){
+  body.remote-active #control-panel,body.remote-active .tabs{transition:none!important}
+}
+
 </style>
 </head>
 <body>
@@ -252,16 +409,31 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
     <a id="external-map" href="https://www.openstreetmap.org/" target="_blank" rel="noopener noreferrer">外部查看地圖</a></div>
   </div>
  </div>
- <div id="selected" class="muted" aria-live="polite">尚未選取位置 · 點地圖或輸入座標</div>
- <div id="real-location-status" class="position-note" data-state="idle" role="status" aria-live="polite">真實 GPS 尚未查詢（地圖初始中心不是手機位置）</div>
- <div class="row"><button id="follow">查看模擬位置</button><button id="find-real">查看手機真實 GPS</button></div>
+ <details id="map-locations" class="map-locations">
+  <summary id="location-toggle-label">GPS 狀態 · 點此查看真實／虛擬／選取位置</summary>
+  <div class="location-details">
+   <div id="virtual-location-status" class="position-note" aria-live="polite">虛擬 GPS 尚未啟用</div>
+   <div id="real-location-status" class="position-note" data-state="idle" role="status" aria-live="polite">真實 GPS 尚未授權分享</div>
+   <div id="selected" class="muted" aria-live="polite">尚未選取位置 · 點地圖或輸入座標</div>
+   <div class="row"><button id="follow" type="button">查看虛擬位置</button>
+    <button id="find-real" type="button">查看最後真實位置</button></div>
+   <small class="muted">兩個 GPS 標記與地圖選取位置互相獨立。查看標記不會瞬移或切換 GPS。</small>
+  </div>
+ </details>
  <details class="help-details">
   <summary>地圖操作說明</summary>
   <p>選位置不會自動瞬移或開始行走。底圖由 OpenFreeMap 提供，需要手機與瀏覽器可連線到圖磚服務；地圖失敗時仍可在控制區輸入經緯度。</p>
  </details>
 </section>
-<section class="glass control-panel" id="control-panel">
- <div class="control-title"><div><span class="eyebrow">ANDROID · REMOTE</span><h2>手機狀態</h2></div></div>
+<section class="glass control-panel" id="control-panel" data-sheet="collapsed" data-panel="open">
+ <button type="button" id="sheet-handle" aria-label="展開或收合操作面板" aria-expanded="false">
+  <span class="drag-indicator" aria-hidden="true"></span>
+  <span id="sheet-summary">瞬移 · 向上展開控制</span>
+ </button>
+ <div class="control-title">
+  <div><span class="eyebrow">ANDROID · REMOTE</span><h2 id="mode-panel-title">瞬移</h2></div>
+  <button type="button" id="panel-toggle" aria-label="收合或展開右側控制面板" aria-expanded="true">❯</button>
+ </div>
  <div id="status" class="muted" aria-live="polite">正在讀取…</div>
  <div id="progress" class="progress-card" aria-live="polite">
   <div id="stepstatus">目前沒有行走中的路線</div>
@@ -276,10 +448,11 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
  </nav>
  <div id="mode-content" class="mode-content">
  <div id="location-panel">
-  <div class="inline">
-   <div><label for="lat">緯度 Latitude</label><input type="number" id="lat" step="any" placeholder="25.033000"></div>
-   <div><label for="lon">經度 Longitude</label><input type="number" id="lon" step="any" placeholder="121.565400"></div>
-  </div>
+  <label for="coordinate">選取座標（緯度, 經度）</label>
+  <input type="text" id="coordinate" inputmode="decimal" autocomplete="off"
+   spellcheck="false" placeholder="25.033000, 121.565400"
+   aria-label="緯度與經度，使用逗號或空白分隔" maxlength="80">
+  <small class="muted">支援一次貼上兩個座標。點地圖只會選取，按確認後才會瞬移。</small>
   <div id="teleport-panel" class="row"><button id="teleport" class="primary">確認瞬移</button></div>
  </div>
  <div id="route-panel" class="hidden">
@@ -322,6 +495,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
  <section id="web-settings" class="hidden" aria-label="Web 控制設定">
    <h2>Web 控制設定</h2>
    <p class="muted">地圖底圖可由上方樣式選單切換。行走速度及循環設定在路徑／尋花模式內調整，手機權限與區網配對仍需在 Android App 管理。</p>
+   <p class="muted">真實 GPS 必須先在手機 Wi-Fi 控制設定中為目前配對瀏覽器同意分享。只有可信、非模擬的最近 30 分鐘快照會顯示；HTTP 私人區網尚未加密。</p>
    <button type="button" id="web-settings-close">返回控制</button>
  </section>
  </div>
@@ -333,6 +507,15 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
  <div class="hint">開始前必須先預覽路線。暫停與停止都由 Android App 執行；網頁斷線不會自動停止路線。GPS 模擬仍需在手機授予系統權限。</div>
 </section>
 </div>
+<section id="compact-walk-controls" class="compact-walk hidden"
+ aria-label="收合時的行走快捷操作" aria-live="polite">
+ <div class="compact-walk-summary" id="compact-walk-summary">行走中 · 本次估算 0 步</div>
+ <div class="row">
+  <button id="compact-pause" type="button">暫停</button>
+  <button id="compact-resume" type="button">繼續</button>
+  <button id="compact-stop" type="button" class="danger">停止</button>
+ </div>
+</section>
 <dialog id="saved-dialog" class="saved-dialog" aria-labelledby="saved-heading">
  <div class="saved-header"><h2 id="saved-heading">收藏地點與路線</h2><button id="close-saved" type="button" aria-label="關閉收藏清單">✕</button></div>
  <div class="row">
