@@ -29,6 +29,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.naos.pikminbee.data.SavedPlace
 import com.naos.pikminbee.data.SavedPlaceTimePolicy
+import com.naos.pikminbee.data.SavedPlaceMetadataPolicy
+import com.naos.pikminbee.data.VerifiedRealTimeZone
 import kotlinx.coroutines.delay
 
 /**
@@ -38,12 +40,15 @@ import kotlinx.coroutines.delay
 @Composable
 fun FavouritesPanel(
     places: List<SavedPlace>,
-    referenceRealZoneId: String?,
+    realZoneReference: VerifiedRealTimeZone?,
     foreground: Color,
     muted: Color,
     onSelectPlace: (SavedPlace) -> Unit,
     onRenamePlace: (SavedPlace, String) -> Unit,
     onDeletePlace: (SavedPlace) -> Unit,
+    backfillBusy: Boolean,
+    backfillMessage: String,
+    onBackfill: () -> Unit,
     routeContent: @Composable (String) -> Unit,
 ) {
     var search by remember { mutableStateOf("") }
@@ -68,6 +73,18 @@ fun FavouritesPanel(
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("收藏地點與路線", color = foreground, fontWeight = FontWeight.SemiBold,
             fontSize = 18.sp)
+        if (places.any(SavedPlaceMetadataPolicy::incomplete)) {
+            OutlinedButton(
+                enabled = !backfillBusy,
+                onClick = onBackfill,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text(if (backfillBusy) "正在補齊收藏資訊…" else "補齊舊收藏國家／時區（每次最多 5 筆）") }
+            Text("僅點擊後查詢 Photon／TimeAPI；不改動你的收藏名稱、座標或 GPS。",
+                color = muted, fontSize = 11.sp)
+        }
+        if (backfillMessage.isNotBlank()) {
+            Text(backfillMessage, color = muted, fontSize = 12.sp)
+        }
         OutlinedTextField(
             value = search, onValueChange = { search = it.take(80) },
             placeholder = { Text("搜尋地名、城市、國家或路線") },
@@ -102,7 +119,7 @@ fun FavouritesPanel(
                         color = muted, fontSize = 12.sp)
                     val local = SavedPlaceTimePolicy.localClock(place.timeZoneId, nowMillis)
                     val difference = SavedPlaceTimePolicy.differenceLabel(
-                        place.timeZoneId, referenceRealZoneId, nowMillis)
+                        place.timeZoneId, realZoneReference?.freshId(nowMillis), nowMillis)
                     Text(if (local == null) "當地時間待確認"
                         else "當地 $local · ${difference ?: "時差待確認"}",
                         color = foreground, fontSize = 12.sp)
