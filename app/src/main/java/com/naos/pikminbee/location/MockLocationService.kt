@@ -304,9 +304,30 @@ class MockLocationService : Service() {
                                     FloatingControls.RESTORE_VIRTUAL -> ACTION_VIRTUAL_GPS_OVERLAY
                                     else -> ACTION_HIDE_OVERLAY
                                 }
-                                startService(command(this, actionName))
+                                val request = command(this, actionName)
+                                runCatching { startService(request) }.onFailure { failure ->
+                                    // Android can reject startService from a visible
+                                    // overlay after restoring REAL (no foreground mock
+                                    // service). The already-running owner Service can
+                                    // handle this explicit GPS click directly instead.
+                                    if (actionName == ACTION_REAL_GPS_OVERLAY ||
+                                        actionName == ACTION_VIRTUAL_GPS_OVERLAY) {
+                                        onStartCommand(request, 0, 0)
+                                    } else {
+                                        LocationStatus.display.value =
+                                            "無法操作懸浮控制：" + (failure.message ?: "系統限制")
+                                        updateOverlay()
+                                    }
+                                }
                             },
                             onStartRoute = { startService(command(this, ACTION_START_DRAFT_ROUTE)) },
+                            chooseVirtualPoint = {
+                                // Missing saved virtual fix is not a licence to use a
+                                // fabricated coordinate. Open Teleport to pick explicitly.
+                                startActivity(Intent(this, MainActivity::class.java)
+                                    .putExtra(MainActivity.EXTRA_OPEN_MODE, 0)
+                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+                            },
                             onSpeedSelected = { preset ->
                                 startService(speedIntent(this, preset))
                             },
@@ -368,16 +389,34 @@ class MockLocationService : Service() {
                 return if (providerActive) START_STICKY else START_NOT_STICKY
             }
             ACTION_REAL_GPS_OVERLAY -> {
+                if (!providerActive && !LocationStatus.mockActive.value) {
+                    // Tapping the active REAL button must not clear LAN, drafts,
+                    // the overlay or any useful virtual-position checkpoint.
+                    updateOverlay()
+                    return START_NOT_STICKY
+                }
                 target?.let { AppPreferences(this).rememberVirtualPosition(it) }
                 releaseMock(keepOverlay = true)
                 updateOverlay()
                 return START_NOT_STICKY
             }
             ACTION_VIRTUAL_GPS_OVERLAY -> {
+                if (providerActive && LocationStatus.mockActive.value) {
+                    // Already using mock GPS: do not reset or silently stop a route.
+                    updateOverlay()
+                    return START_STICKY
+                }
                 val remembered = AppPreferences(this).lastVirtualPosition()
                 if (remembered == null) {
-                    LocationStatus.display.value = "找不到最近的虛擬位置，請先在地圖選取"
+                    LocationStatus.display.value = "找不到最近的虛擬位置，請先在瞬移頁選點"
                     updateOverlay()
+                    // Handle expired position between the overlay click and this
+                    // command, not just the initial first-use case.
+                    runCatching {
+                        startActivity(Intent(this, MainActivity::class.java)
+                            .putExtra(MainActivity.EXTRA_OPEN_MODE, 0)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+                    }
                     return START_NOT_STICKY
                 }
                 if (!ensureProvider()) {
@@ -721,9 +760,17 @@ class MockLocationService : Service() {
             }
             true
         } catch (e: Exception) {
-            LocationStatus.display.value = "請在 Android 開發者選項中選取 PikminBee 作為模擬位置 App"
-            releaseMock(clearCheckpoint = false)
-            stopSelf()
+            val appLabel = applicationInfo.loadLabel(packageManager)
+            val explanation =
+                "請在 Android 開發者選項中選取 $appLabel 作為模擬位置 App"
+            // A failed attempt to return to virtual GPS should NOT dismiss
+            // the expanded controller while the user is trying to switch.
+            val preserveOverlay = floatingControls != null
+            releaseMock(clearCheckpoint = false, keepOverlay = preserveOverlay)
+            // releaseMock resets display to REAL mode; preserve the failure hint.
+            LocationStatus.display.value = explanation
+            updateOverlay()
+            if (!preserveOverlay) stopSelf()
             false
         }
     }
