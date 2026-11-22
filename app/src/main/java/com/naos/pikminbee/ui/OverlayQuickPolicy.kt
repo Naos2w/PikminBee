@@ -31,6 +31,11 @@ object OverlayQuickPolicy {
     fun selectedGps(mockActive: Boolean): OverlayQuickAction =
         if (mockActive) OverlayQuickAction.VIRTUAL_GPS else OverlayQuickAction.REAL_GPS
 
+    /** Only the confirmed current GPS mode has an active visual indicator. */
+    fun isGpsHighlighted(which: OverlayQuickAction, mockActive: Boolean): Boolean =
+        which in listOf(OverlayQuickAction.REAL_GPS, OverlayQuickAction.VIRTUAL_GPS) &&
+            which == selectedGps(mockActive)
+
     fun nextSpeed(current: WalkSpeedPreset): WalkSpeedPreset {
         val entries = WalkSpeedPreset.entries
         return entries[(entries.indexOf(current) + 1) % entries.size]
