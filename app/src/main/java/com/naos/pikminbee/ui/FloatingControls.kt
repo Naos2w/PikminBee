@@ -46,6 +46,7 @@ class FloatingControls(
     private val sendAction: (String) -> Unit,
     private val onStartRoute: () -> Unit,
     private val openMap: () -> Unit,
+    private val chooseVirtualPoint: () -> Unit,
     private val onSpeedSelected: (WalkSpeedPreset) -> Unit,
     private val onFlowerVision: () -> Unit,
 ) {
@@ -302,6 +303,26 @@ class FloatingControls(
         }
     }
 
+    /** Both GPS icons are clickable. A missing old virtual fix opens explicit map
+     *  selection instead of leaving a grey, non-working GPS button. */
+    private fun clickGps(action: OverlayQuickAction) {
+        val mockActive = com.naos.pikminbee.location.LocationStatus.mockActive.value
+        val hasSaved = AppPreferences(context).lastVirtualPosition() != null
+        when (OverlayQuickPolicy.gpsPress(action, mockActive, hasSaved)) {
+            OverlayGpsPress.ALREADY_SELECTED ->
+                Toast.makeText(context,
+                    if (mockActive) "目前使用虛擬 GPS" else "目前使用真實 GPS 模式",
+                    Toast.LENGTH_SHORT).show()
+            OverlayGpsPress.SWITCH_REAL -> sendAction(RESTORE_REAL)
+            OverlayGpsPress.SWITCH_VIRTUAL -> sendAction(RESTORE_VIRTUAL)
+            OverlayGpsPress.SELECT_VIRTUAL_POINT -> {
+                Toast.makeText(context, "尚未有可恢復的虛擬位置，請先在瞬移頁選點",
+                    Toast.LENGTH_LONG).show()
+                chooseVirtualPoint()
+            }
+        }
+    }
+
     private fun iconAction(
         which: OverlayQuickAction, icon: OverlayGlyph, label: String, click: () -> Unit,
     ): ImageView = ImageView(context).apply {
@@ -391,7 +412,9 @@ class FloatingControls(
             lastPhase == WalkPhase.PAUSED -> "已暫停"
             lastPhase == WalkPhase.PARKED -> "已停止 · 原地停留"
             lastStatus.contains("失敗") || lastStatus.contains("無法") ||
-                lastStatus.contains("請先") || lastStatus.contains("確認") -> lastStatus.take(32)
+                lastStatus.contains("請先") || lastStatus.contains("請在") ||
+                lastStatus.contains("找不到") || lastStatus.contains("中斷") ||
+                lastStatus.contains("確認") -> lastStatus.take(32)
             visibleMode != null -> "待命 · ${if (visibleMode == WalkMode.FLOWERS) "尋花" else "路徑"}已就緒"
             routeReady && flowerReady -> "待命 · 請在主 App 選擇模式"
             else -> "待命 · 請在主 App 預覽道路"
@@ -415,11 +438,15 @@ class FloatingControls(
         }, primaryLabel)
         iconUpdate(OverlayQuickAction.STOP, OverlayGlyph.STOP, "停止行走，保持目前位置",
             OverlayQuickPolicy.canStop(lastPhase, planningRoute))
-        iconUpdate(OverlayQuickAction.REAL_GPS, OverlayGlyph.REAL, "還原真實 GPS，暫停模擬定位")
+        iconUpdate(OverlayQuickAction.REAL_GPS, OverlayGlyph.REAL,
+            "切換真實 GPS 模式，停止模擬定位及目前行走")
         iconUpdate(OverlayQuickAction.VIRTUAL_GPS, OverlayGlyph.VIRTUAL,
-            "回到上次虛擬位置，不繼續行走",
-            AppPreferences(context).lastVirtualPosition() != null ||
+            if (prefs.lastVirtualPosition() != null ||
                 com.naos.pikminbee.location.LocationStatus.mockActive.value)
+                "切換到上次虛擬位置，不會自動繼續行走"
+            else "尚無上次虛擬位置，點選以開啟地圖選點")
+        // Both icons stay tappable: without a saved virtual point we guide the
+        // user to choose one instead of swallowing touches on a disabled view.
         val capturing = BloomVisionState.state.value.phase == BloomVisionState.Phase.CAPTURING
         iconUpdate(OverlayQuickAction.FLOWER_VISION, OverlayGlyph.FLOWER,
             if (capturing) "停止畫面偵測花" else "開啟畫面偵測花並取得系統授權")
@@ -573,8 +600,8 @@ class FloatingControls(
                     when (which) {
                         OverlayQuickAction.PRIMARY -> performQuickAction()
                         OverlayQuickAction.STOP -> sendAction(STOP_WALK)
-                        OverlayQuickAction.REAL_GPS -> sendAction(RESTORE_REAL)
-                        OverlayQuickAction.VIRTUAL_GPS -> sendAction(RESTORE_VIRTUAL)
+                        OverlayQuickAction.REAL_GPS -> clickGps(OverlayQuickAction.REAL_GPS)
+                        OverlayQuickAction.VIRTUAL_GPS -> clickGps(OverlayQuickAction.VIRTUAL_GPS)
                         OverlayQuickAction.FLOWER_VISION -> {
                             if (BloomVisionState.state.value.phase ==
                                 BloomVisionState.Phase.CAPTURING) {

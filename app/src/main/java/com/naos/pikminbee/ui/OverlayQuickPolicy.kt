@@ -10,6 +10,10 @@ enum class OverlayQuickAction {
 
 enum class OverlayPrimaryState { START, PAUSE, RESUME }
 
+/** GPS mode toggles change only the OTHER mode; absence of a saved mock fix
+ *  needs an explicit map point, never a fabricated/default coordinate. */
+enum class OverlayGpsPress { ALREADY_SELECTED, SWITCH_REAL, SWITCH_VIRTUAL, SELECT_VIRTUAL_POINT }
+
 object OverlayQuickPolicy {
     /** Keep the previous UAT's compact 2×4 overlay controls. */
     val topRow = listOf(
@@ -35,6 +39,17 @@ object OverlayQuickPolicy {
     fun isGpsHighlighted(which: OverlayQuickAction, mockActive: Boolean): Boolean =
         which in listOf(OverlayQuickAction.REAL_GPS, OverlayQuickAction.VIRTUAL_GPS) &&
             which == selectedGps(mockActive)
+
+    fun gpsPress(
+        action: OverlayQuickAction, mockActive: Boolean, hasRememberedVirtual: Boolean,
+    ): OverlayGpsPress = when {
+        action !in listOf(OverlayQuickAction.REAL_GPS, OverlayQuickAction.VIRTUAL_GPS) ->
+            OverlayGpsPress.ALREADY_SELECTED
+        action == selectedGps(mockActive) -> OverlayGpsPress.ALREADY_SELECTED
+        action == OverlayQuickAction.REAL_GPS -> OverlayGpsPress.SWITCH_REAL
+        hasRememberedVirtual -> OverlayGpsPress.SWITCH_VIRTUAL
+        else -> OverlayGpsPress.SELECT_VIRTUAL_POINT
+    }
 
     fun nextSpeed(current: WalkSpeedPreset): WalkSpeedPreset {
         val entries = WalkSpeedPreset.entries
