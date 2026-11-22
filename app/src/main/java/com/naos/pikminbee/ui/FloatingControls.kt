@@ -9,6 +9,8 @@ import androidx.compose.ui.graphics.toArgb
 import android.graphics.PixelFormat
 import android.os.Build
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.LayerDrawable
+import android.graphics.drawable.Drawable
 import android.graphics.drawable.RippleDrawable
 import android.view.Gravity
 import android.view.MotionEvent
@@ -229,18 +231,33 @@ class FloatingControls(
         // No repeated strokes or glowing/neon borders.
     }
 
-    private fun actionBackground(which: OverlayQuickAction, enabled: Boolean): GradientDrawable {
-        val isActiveGps = which == OverlayQuickPolicy.selectedGps(
-            com.naos.pikminbee.location.LocationStatus.mockActive.value)
+    /** Active GPS uses a solid accent, a CONTRASTING rim and a tiny dot.
+     *  Both use the approved theme palette; no glowing or animated effects. */
+    private fun actionBackground(which: OverlayQuickAction, enabled: Boolean): Drawable {
+        val activeGps = OverlayQuickPolicy.isGpsHighlighted(
+            which, com.naos.pikminbee.location.LocationStatus.mockActive.value)
+        val palette = colors()
         val color = when (which) {
             OverlayQuickAction.PRIMARY -> BeeActionColors.primary(lastPhase)
             OverlayQuickAction.STOP -> BeeActionColors.stop(enabled)
             else -> null
         }
-        return GradientDrawable().apply {
+        val base = GradientDrawable().apply {
             cornerRadius = dp(14).toFloat()
-            setColor(color ?: if (isActiveGps) colors().accent.toArgb() else colors().soft.toArgb())
-            if (isActiveGps) setStroke(dp(2).coerceAtLeast(1), colors().accent.toArgb())
+            setColor(color ?: if (activeGps) palette.accent.toArgb() else palette.soft.toArgb())
+            // Using the SAME rim and fill colour made the selected state hard to see.
+            if (activeGps) setStroke(dp(2).coerceAtLeast(1), palette.onAccent.toArgb())
+        }
+        if (!activeGps) return base
+        val dot = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(palette.onAccent.toArgb())
+        }
+        return LayerDrawable(arrayOf(base, dot)).apply {
+            setLayerGravity(1, Gravity.TOP or Gravity.END)
+            setLayerWidth(1, dp(8))
+            setLayerHeight(1, dp(8))
+            setLayerInset(1, 0, dp(5), dp(5), 0)
         }
     }
 
@@ -312,8 +329,8 @@ class FloatingControls(
         which: OverlayQuickAction, icon: OverlayGlyph, label: String, enabled: Boolean = true,
     ) {
         quickActions[which]?.apply {
-            val activeGps = which == OverlayQuickPolicy.selectedGps(
-                com.naos.pikminbee.location.LocationStatus.mockActive.value)
+            val activeGps = OverlayQuickPolicy.isGpsHighlighted(
+                which, com.naos.pikminbee.location.LocationStatus.mockActive.value)
             val ink = when {
                 !enabled -> colors().muted.toArgb()
                 which == OverlayQuickAction.PRIMARY -> BeeActionColors.ON_BRIGHT
@@ -337,9 +354,20 @@ class FloatingControls(
                 )
                 tag = renderKey
             }
-            contentDescription = label
+            isSelected = activeGps
+            contentDescription = when (which) {
+                OverlayQuickAction.REAL_GPS, OverlayQuickAction.VIRTUAL_GPS ->
+                    label + if (activeGps) " · 目前使用此 GPS 模式" else " · 未啟用"
+                else -> label
+            }
             isEnabled = enabled
-            alpha = if (enabled) 1f else .42f
+            alpha = when {
+                !enabled -> .42f
+                activeGps -> 1f
+                which == OverlayQuickAction.REAL_GPS ||
+                    which == OverlayQuickAction.VIRTUAL_GPS -> .72f
+                else -> 1f
+            }
         }
     }
 

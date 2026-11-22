@@ -1,5 +1,13 @@
 # PikminBee TODO
 
+## P0 · UAT 0.15.1 floating GPS mode indicator follow-up (2026-11-22)
+- [x] Checked actual 0.15.1 source: the expanded overlay chooses REAL/VIRTUAL from `LocationStatus.mockActive` (confirmed mock-provider state). But selected button's border was the same colour as its fill, the unchecked button had no distinguishing low-priority treatment, and virtual restoration did not call `updateOverlay()` explicitly after success (it relied on the synchronous tick refresh).
+- [x] Use only existing mineral/honey semantic colours, without new words or animated effects: selected GPS icon has solid accent, visibly contrasting on-accent rim, 8dp corner dot, full opacity and accessible selected state/long-press explanation; inactive GPS icon uses the existing soft surface and lower opacity.
+- [x] Explicitly repaint after successful virtual GPS restore, while keeping the actual mock-provider state as the only source of truth; real GPS restoration retains its existing direct repaint.
+- [x] Added policy regression for exactly one highlighted GPS action; MSI full offline Android Kotlin/JVM `:app:testDebugUnitTest` passed.
+- [ ] GitHub CI `android / verify` (JVM + Lint) then squash merge DEV fix.
+- [ ] User's actual installed **0.15.1 cannot contain this follow-up fix**. Physical POCO light/dark, mock on/off and failed-restore visual acceptance requires a later signed UAT; do not claim it was seen on device. No auto-install or production main change.
+
 ## P0 · Approved UI/UX & favourites redesign — 2026-11-22
 **Settled scope:** Keep existing low-saturation mineral blue/honey theme and lightweight opaque matte components. Android and Web are deliberately platform-specific, not identical layouts. No automated UAT or main promotion in feature PRs.
 
