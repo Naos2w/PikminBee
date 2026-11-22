@@ -109,10 +109,27 @@ jobs:
             exit 1
           fi
           sha256sum "$APK"
+      - name: Give verified UAT APK its semantic-version filename
+        if: github.event_name == 'workflow_dispatch' && inputs.package_apk == true
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          METADATA="app/build/outputs/apk/debug/output-metadata.json"
+          VERSION="$(python3 scripts/uat_release_filename.py "$METADATA")"
+          VERSIONED_APK="app/build/outputs/apk/debug/PikminBee-UAT-${VERSION}.apk"
+          # Copy ONLY after verifying package identity and pinned certificate.
+          # APK contents, signature and installed package ID remain unchanged.
+          cp -- "$APK" "$VERSIONED_APK"
+          cmp -s -- "$APK" "$VERSIONED_APK"
+          echo "UAT_APK_PATH=$VERSIONED_APK" >> "$GITHUB_ENV"
+          echo "UAT_ARTIFACT_NAME=PikminBee-UAT-${VERSION}-signed" >> "$GITHUB_ENV"
+          sha256sum "$VERSIONED_APK"
       - name: Upload manually requested UAT APK
         if: github.event_name == 'workflow_dispatch' && inputs.package_apk == true
         uses: actions/upload-artifact@v4
         with:
-          name: PikminBee-UAT-stable-signed
-          path: app/build/outputs/apk/debug/*.apk
+          name: ${{ env.UAT_ARTIFACT_NAME }}
+          path: ${{ env.UAT_APK_PATH }}
+          if-no-files-found: error
           retention-days: 7
