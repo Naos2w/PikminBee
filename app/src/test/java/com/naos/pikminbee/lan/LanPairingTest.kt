@@ -70,6 +70,25 @@ class LanPairingTest {
         assertFalse(pairing.authorised(nextToken, ip))
     }
 
+    @Test fun physicalShareSessionIsExactlyOneUnexpiredBrowserAndNewPairingInvalidatesOld() {
+        val pair = pairer()
+        val peerA = "192.168.1.12"
+        val first = pair.pair(peerA, pair.currentPin(), "A").pendingId
+        assertNull(pair.activeSessionToken())
+        assertTrue(pair.approve())
+        val tokenA = pair.poll(peerA, first).token!!
+        assertEquals(tokenA, pair.activeSessionToken())
+        val peerB = "192.168.1.13"
+        val second = pair.pair(peerB, pair.currentPin(), "B").pendingId
+        assertTrue(pair.approve())
+        val tokenB = pair.poll(peerB, second).token!!
+        assertEquals(tokenB, pair.activeSessionToken())
+        assertFalse(pair.authorised(tokenA, peerA))
+        time.addAndGet(30L * 60_000L + 1)
+        assertNull(pair.activeSessionToken())
+        assertFalse(pair.authorised(tokenB, peerB))
+    }
+
     @Test fun rateLimiterBlocksFloodAndResetsNextWindow() {
         val limiter = LanRateLimiter(clockMillis = { time.get() })
         repeat(45) { assertTrue(limiter.allow("192.168.0.10")) }

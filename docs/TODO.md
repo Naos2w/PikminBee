@@ -1,5 +1,19 @@
 # PikminBee TODO
 
+## P0 · Wi-Fi Web V2 FINAL implementation (user-approved 2026-11-22 23:55)
+**Source of truth:** `docs/WIFI_WEB_V2_FINAL_SPEC.md`. Scope is feature branch `feature/wifi-web-v2-final-20261122`, no automatic production changes.
+- [x] Re-read actual approved V2 final spec and current Android/LAN source; kept existing route preview→explicit Start, pairing PIN and phone approval, mineral/honey matte theme.
+- [x] Android Wi-Fi Settings: copy icon + 「複製」 immediately to right of URL; previous big copy button opens the system default browser; retain pairing, revoke and HTTP risk text.
+- [x] Web single combined `lat, lon` field, allows comma / fullwidth comma / whitespace; validates latitude and longitude ranges; viewing or editing point never moves GPS without explicit confirmation.
+- [x] Map-first Web full-viewport map canvas; desktop right panel defaults open (368px), tablet drawer portrait collapsed/landscape open (326px) with manual override retention; 690×920 explicitly considered portrait tablet.
+- [x] Mobile starts with collapsed 56px Bottom Sheet + bottom four-tab navigation. New functional mode opens halfway; re-tapping current mode collapses; Settings tap-only; handle switches collapsed/half/expanded; no map gesture theft.
+- [x] When mobile walk MOVING/PAUSED and Sheet collapsed, compact status and pause/resume/confirmed-stop remain available without expanding; controls follow Android-reported phase.
+- [x] Phone-side explicit consent for the **currently paired Web token** required before precise physical coordinates can leave Android. Memory-only, verified non-mock, at most 30 minutes after sample timestamp; revoke, new pairing and LAN stop clear the shared snapshot. Virtual/real/selected coordinates remain different markers and statuses.
+- [x] JVM tests for the session token policy and expiry; source-level browser DOM contracts; loopback browser smoke: 390×740, 690×920, 830×650, 1280×680, 1440×900 full map with no horizontal overflow; consent→physical→mock historical→expire/revoke; mobile mode toggle, compact pause/resume, combined coordinate validation. No access to the real POCO.
+- [ ] Submit checked feature PR to `develop`, require Android JVM/Lint GitHub CI before Squash Merge.
+- [ ] **Physical device and private LAN acceptance remains open:** POCO Android Chrome/Edge, PC Edge, real permissions and HTTP risk, 30-min revoke after exact fix time, network failure/repair, actual map gestures, route preview/start/pause/resume/stop, keyboard/focus and tablet rotation.
+- [ ] Staging UAT package and any production promotion require a separate release gate. Never directly alter `main` or auto-install to POCO.
+
 ## P0 · Floating GPS buttons must SWITCH modes (UAT 0.17.1 follow-up)
 - [x] Reviewed actual DEV/staging source: both buttons were wired to `ACTION_REAL_GPS_OVERLAY` and `ACTION_VIRTUAL_GPS_OVERLAY`, and the **lit** mode is derived from the confirmed `LocationStatus.mockActive`. However the **virtual button was disabled when no virtual checkpoint within 12 hours**; tapping an already-selected virtual icon could reset and stop an ongoing route.
 - [x] Keep **2×4 icon-only overlay** and approved colour palette. Both GPS icons always respond to a tap. Tapping **the other** requests switching; tapping the active one does not reset walk or GPS. The mock-provider state alone determines which lights up, not the last tap.

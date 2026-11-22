@@ -23,7 +23,10 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.naos.pikminbee.domain.Coordinate
 
 /** Verified physical GPS reference, memory-only. Mock samples never enter this flow. */
-data class VerifiedDeviceFix(val coordinate: Coordinate, val timestampMillis: Long)
+data class VerifiedDeviceFix(
+    val coordinate: Coordinate, val timestampMillis: Long,
+    val accuracyMetres: Float? = null,
+)
 
 object VerifiedPhysicalFixState {
     val latest = MutableStateFlow<VerifiedDeviceFix?>(null)
@@ -55,7 +58,10 @@ fun rememberDeviceLocation(refresh: Int = 0): State<Coordinate?> {
                             !LocationStatus.mockActive.value &&
                             System.currentTimeMillis() - location.time in 0..120_000L) {
                             VerifiedPhysicalFixState.latest.value =
-                                VerifiedDeviceFix(point, location.time)
+                                VerifiedDeviceFix(point, location.time,
+                                    location.accuracy.takeIf {
+                                        location.hasAccuracy() && it.isFinite() && it >= 0f
+                                    })
                         }
                     }
             }
