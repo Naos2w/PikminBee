@@ -95,6 +95,13 @@ class LanPairing(
         return ApprovalStatus("approved", current.token)
     }
 
+    /** Only one pairing session is active: a new browser approval revokes the old one. */
+    @Synchronized fun activeSessionToken(): String? {
+        val now = clockMillis()
+        tokens.entries.removeIf { now >= it.value.expiresAt }
+        return tokens.keys.firstOrNull()
+    }
+
     fun authorised(token: String?, remoteAddress: String): Boolean {
         if (token == null || token.length !in 40..64) return false
         val session = tokens[token] ?: return false

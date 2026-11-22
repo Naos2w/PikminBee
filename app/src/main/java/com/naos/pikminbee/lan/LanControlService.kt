@@ -27,6 +27,8 @@ class LanControlService : Service() {
         const val DISABLE = "com.naos.pikminbee.lan.DISABLE"
         const val APPROVE = "com.naos.pikminbee.lan.APPROVE"
         const val DENY = "com.naos.pikminbee.lan.DENY"
+        const val SHARE_PHYSICAL = "com.naos.pikminbee.lan.SHARE_PHYSICAL"
+        const val REVOKE_PHYSICAL = "com.naos.pikminbee.lan.REVOKE_PHYSICAL"
         private const val CHANNEL = "pikminbee_remote_control"
         private const val NOTIFICATION_ID = 2097
 
@@ -97,6 +99,14 @@ class LanControlService : Service() {
             }
             DENY -> {
                 controller?.denyPending()
+                START_NOT_STICKY
+            }
+            SHARE_PHYSICAL -> {
+                controller?.approvePhysicalSharing()
+                START_NOT_STICKY
+            }
+            REVOKE_PHYSICAL -> {
+                controller?.revokePhysicalSharing()
                 START_NOT_STICKY
             }
             DISABLE -> {
