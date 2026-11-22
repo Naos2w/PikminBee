@@ -43,6 +43,30 @@ class OverlayQuickPolicyTest {
         }
     }
 
+    @Test fun gpsButtonsActuallySwitchOnlyWhenOtherModeSelected() {
+        assertEquals(OverlayGpsPress.SWITCH_REAL, OverlayQuickPolicy.gpsPress(
+            OverlayQuickAction.REAL_GPS, mockActive = true, hasRememberedVirtual = true))
+        assertEquals(OverlayGpsPress.SWITCH_VIRTUAL, OverlayQuickPolicy.gpsPress(
+            OverlayQuickAction.VIRTUAL_GPS, mockActive = false, hasRememberedVirtual = true))
+        assertEquals(OverlayGpsPress.SELECT_VIRTUAL_POINT, OverlayQuickPolicy.gpsPress(
+            OverlayQuickAction.VIRTUAL_GPS, mockActive = false, hasRememberedVirtual = false))
+        // A click on the already-lit button must not stop or reset a running route.
+        assertEquals(OverlayGpsPress.ALREADY_SELECTED, OverlayQuickPolicy.gpsPress(
+            OverlayQuickAction.VIRTUAL_GPS, mockActive = true, hasRememberedVirtual = false))
+        assertEquals(OverlayGpsPress.ALREADY_SELECTED, OverlayQuickPolicy.gpsPress(
+            OverlayQuickAction.REAL_GPS, mockActive = false, hasRememberedVirtual = true))
+        assertEquals(OverlayGpsPress.ALREADY_SELECTED, OverlayQuickPolicy.gpsPress(
+            OverlayQuickAction.STOP, mockActive = true, hasRememberedVirtual = true))
+    }
+
+    @Test fun gpsModeHighlightRemainsProviderDrivenUntilSwitchSucceeds() {
+        val request = OverlayQuickPolicy.gpsPress(OverlayQuickAction.VIRTUAL_GPS,
+            mockActive = false, hasRememberedVirtual = true)
+        assertEquals(OverlayGpsPress.SWITCH_VIRTUAL, request)
+        assertEquals(OverlayQuickAction.REAL_GPS, OverlayQuickPolicy.selectedGps(false))
+        assertEquals(OverlayQuickAction.VIRTUAL_GPS, OverlayQuickPolicy.selectedGps(true))
+    }
+
     @Test fun speedCyclesWithoutChangingSavedDefaults() {
         assertEquals(WalkSpeedPreset.WALK, OverlayQuickPolicy.nextSpeed(WalkSpeedPreset.SLOW))
         assertEquals(WalkSpeedPreset.FAST, OverlayQuickPolicy.nextSpeed(WalkSpeedPreset.WALK))

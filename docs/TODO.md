@@ -1,5 +1,15 @@
 # PikminBee TODO
 
+## P0 · Floating GPS buttons must SWITCH modes (UAT 0.17.1 follow-up)
+- [x] Reviewed actual DEV/staging source: both buttons were wired to `ACTION_REAL_GPS_OVERLAY` and `ACTION_VIRTUAL_GPS_OVERLAY`, and the **lit** mode is derived from the confirmed `LocationStatus.mockActive`. However the **virtual button was disabled when no virtual checkpoint within 12 hours**; tapping an already-selected virtual icon could reset and stop an ongoing route.
+- [x] Keep **2×4 icon-only overlay** and approved colour palette. Both GPS icons always respond to a tap. Tapping **the other** requests switching; tapping the active one does not reset walk or GPS. The mock-provider state alone determines which lights up, not the last tap.
+- [x] **Virtual → Real:** remember current virtual point, stop fake GPS / any active walk, keep overlay visible, update highlight only after provider stops. No claim of an actual physical satellite fix.
+- [x] **Real → Virtual:** restore the most recently saved **unexpired** virtual point; do not auto-resume walk. If no eligible point exists, show concise Toast and open the main app in **瞬移** to pick coordinates; never fabricate a mock coordinate.
+- [x] Prevent a failed Android mock-provider permission/setup attempt from silently closing the floating controller; show the actual installed app label in the recovery hint (including after releaseMock resets display), keep REAL highlighted. If Android rejects background startService after switching to REAL, route the explicitly user-tapped GPS action through the still-alive owner Service instead of crashing or swallowing the click.
+- [x] Added JVM regression tests for the four GPS toggle decisions, including same-mode no-op and missing-last-point fallback.
+- [ ] Full source JVM and Lint CI + checked `fix/* → develop` Squash PR; subsequent checked `develop → staging` Merge Commit and signed UAT is required for phone validation.
+- [ ] POCO UAT: verify both taps switch and only the active GPS icon lights, no position/satellite quality misrepresentation, last point restored on switch-back, permissions-failed and no-saved-location guidance, walking safely stopped on Real and **never auto-resumed** on Virtual. User's existing 0.17.1 will not acquire these source changes without an updated APK.
+
 ## P0 · User-approved GPS / RWD / navigation / favourites audit — 2026-11-22
 **Compared against UAT 0.16.1 staging and latest develop source.** Keep mineral/honey colours and performance-first matte (no blur), and preserve the 2×4 icon-only floating controls.
 - [x] GPS floating REAL/VIRTUAL buttons show only one confirmed mock-provider mode using the existing high-contrast accent/ring/dot; long-press/guide carries meaning and no permanent new GPS text. The 0.16.1 fix already passed CI; physical-device visual acceptance remains below.
