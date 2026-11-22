@@ -740,6 +740,7 @@ async function refresh() {
     updateStatus();
     updateRouteControls();
     renderMap();
+    refreshSavedClocks();
     if (focusRealWhenReady && latest?.realGpsState === "ready" && latest?.realPosition) {
       const p = latest.realPosition;
       focusRealWhenReady = false;
@@ -788,8 +789,13 @@ function destinationTime(zone, realZone) {
   const date = new Date();
   const destination = zoneParts(zone, date);
   if (!destination) return "當地時間待確認 · 時差待確認";
-  const reference = latest?.realGpsState==="ready" && latest?.realPosition &&
-    !latest?.mockActive ? zoneParts(realZone,date) : null;
+  // A previously VERIFIED physical fix remains the comparison reference even
+  // after mock GPS starts; never infer it from browser/device/Taiwan time.
+  // The server enforces 30-minute TTL, and the browser checks it again to
+  // avoid showing a stale comparison when polling has stopped.
+  const reference = Number.isFinite(latest?.realTimeZoneExpiresAtMillis) &&
+    date.getTime() <= latest.realTimeZoneExpiresAtMillis ?
+      zoneParts(realZone,date) : null;
   if (!reference) return "當地 "+destination.clock+" · 時差待確認";
   const delta = destination.offsetMinutes-reference.offsetMinutes;
   if (!delta) return "當地 "+destination.clock+" · 與目前所在地同時區";
@@ -802,8 +808,17 @@ function labelledText(textValue, tag = "small") {
   element.textContent = textValue;
   return element;
 }
+function refreshSavedClocks() {
+  if (!$("saved-dialog").open) return;
+  document.querySelectorAll(".saved-clock").forEach(clock => {
+    clock.textContent=destinationTime(clock.dataset.timeZone||"",latest?.realTimeZoneId);
+  });
+}
 function renderSaved() {
   const list = $("saved-list");
+  const previousScroll=list.scrollTop;
+  const openDetails=new Set([...list.querySelectorAll("details[data-place-id][open]")]
+    .map(item=>item.dataset.placeId));
   list.replaceChildren();
   if (!savedRecords) return;
   const query = $("saved-search").value.trim().toLocaleLowerCase();
@@ -823,8 +838,13 @@ function renderSaved() {
       .map(ch=>0x1F1E6+ch.charCodeAt(0)-65)) : "";
     card.append(labelledText([flag,place.countryName||place.countryCode,place.city]
       .filter(Boolean).join(" · ")||"國家／城市待確認"));
-    card.append(labelledText(destinationTime(place.timeZoneId,latest?.realTimeZoneId)));
+    const clock=labelledText(destinationTime(place.timeZoneId,latest?.realTimeZoneId));
+    clock.className="saved-clock";
+    clock.dataset.timeZone=place.timeZoneId||"";
+    card.append(clock);
     const details=document.createElement("details");details.className="saved-details";
+    details.dataset.placeId=String(place.id);
+    details.open=openDetails.has(String(place.id));
     details.append(labelledText("座標及收藏日期","summary"));
     details.append(labelledText("GPS: "+place.position.lat.toFixed(6)+", "+
       place.position.lon.toFixed(6)));
@@ -876,23 +896,119 @@ function renderSaved() {
     card.append(button);list.append(card);
   }
   if (!routes.length) list.append(labelledText("沒有符合條件的收藏路線"));
+  list.scrollTop=previousScroll; // preserve position across refresh and long lists
 }
 async function refreshSaved() {
   if (!token || !$("saved-dialog").open) return;
-  $("saved-list").textContent="正在讀取收藏…";
+  if (!savedRecords) $("saved-list").textContent="正在讀取收藏…";
   try {
     savedRecords=await call("/api/saved");
     renderSaved();
-  } catch(error){$("saved-list").textContent=error.message||"無法讀取收藏";}
+    $("saved-enrich-status").textContent=savedRecords.enrichmentNote||"";
+    $("saved-enrich-button").disabled=!!savedRecords.enrichmentBusy;
+  } catch(error){$("saved-enrich-status").textContent=error.message||"無法讀取收藏";}
 }
+let pendingSavedPoint=null, savedLookupId=null, savedLookupGeneration=0;
+$("saved-add-button").addEventListener("click",async()=>{
+  pendingSavedPoint=null;savedLookupId=null;
+  $("saved-editor").classList.add("hidden");
+  try {
+    // Use an explicit map pick or manually entered coordinate, never the map's
+    // default camera centre or an automatically selected mock GPS position.
+    const point=readCoordinate();
+    const generation=++savedLookupGeneration;
+    pendingSavedPoint={lat:point.lat,lon:point.lon};
+    savedLookupId=null;
+    const fallback="位置 "+point.lat.toFixed(5)+", "+point.lon.toFixed(5);
+    $("saved-new-position").textContent="GPS: "+point.lat.toFixed(6)+", "+point.lon.toFixed(6);
+    $("saved-new-name").value=fallback;
+    $("saved-new-status").textContent="正在取得附近地標／商家與時區建議…";
+    $("saved-editor").classList.remove("hidden");
+    const request=await call("/api/saved/place/lookup","POST",point);
+    if(generation!==savedLookupGeneration||!$("saved-dialog").open) return;
+    savedLookupId=request.lookupId;
+    for(let i=0;i<16;i++){
+      await pause(800);
+      if(generation!==savedLookupGeneration||!$("saved-dialog").open) return;
+      const result=await call("/api/saved/place/lookup/status","POST",{
+        lookupId:savedLookupId
+      });
+      if(result.status!=="ready")continue;
+      if($("saved-new-name").value===fallback)
+        $("saved-new-name").value=result.name||fallback;
+      const parts=[result.countryName,result.city,
+        result.timeZoneId?destinationTime(result.timeZoneId,latest?.realTimeZoneId):null]
+        .filter(Boolean);
+      $("saved-new-status").textContent=parts.join(" · ")||
+        "未找到附近地標，可自行修改名稱再儲存";
+      return;
+    }
+    $("saved-new-status").textContent="查詢尚未完成，可直接使用座標名稱儲存";
+  }catch(error){
+    $("saved-new-status").textContent=error.message||"地名查詢失敗，可手動輸入";
+    if(!pendingSavedPoint) setMessage("請先在地圖選一點或輸入有效的經緯度");
+  }
+});
+$("saved-cancel").addEventListener("click",()=>{
+  savedLookupGeneration++;
+  pendingSavedPoint=null;savedLookupId=null;
+  $("saved-editor").classList.add("hidden");
+});
+$("saved-save").addEventListener("click",async()=>{
+  if(!pendingSavedPoint){
+    $("saved-new-status").textContent="請先選取收藏座標";return;
+  }
+  const name=$("saved-new-name").value.trim();
+  if(!name||name.length>80){
+    $("saved-new-status").textContent="收藏名稱必須介於 1 到 80 字";return;
+  }
+  $("saved-save").disabled=true;
+  try {
+    await call("/api/saved/place/add","POST",{
+      ...pendingSavedPoint,name,lookupId:savedLookupId
+    });
+    savedLookupGeneration++;
+    pendingSavedPoint=null;savedLookupId=null;
+    $("saved-editor").classList.add("hidden");
+    await refreshSaved();
+    $("saved-enrich-status").textContent="已儲存收藏，不會改變手機 GPS";
+  } catch(error){
+    $("saved-new-status").textContent=error.message||"儲存失敗";
+  }finally{$("saved-save").disabled=false;}
+});
+$("saved-enrich-button").addEventListener("click",async()=>{
+  $("saved-enrich-button").disabled=true;
+  try {
+    const result=await call("/api/saved/place/enrich","POST",{});
+    $("saved-enrich-status").textContent=result.message||
+      "正在補齊缺少的國家、城市與時區";
+    // Bound polling. Preserve scroll and expanded cards while metadata updates.
+    for(let i=0;i<50&&$("saved-dialog").open;i++){
+      await pause(1500);
+      savedRecords=await call("/api/saved");
+      renderSaved();
+      $("saved-enrich-status").textContent=savedRecords.enrichmentNote||"";
+      if(!savedRecords.enrichmentBusy)break;
+    }
+  }catch(error){
+    $("saved-enrich-status").textContent=error.message||"資料補齊失敗";
+  }finally{$("saved-enrich-button").disabled=false;}
+});
 $("show-saved").addEventListener("click",()=>{
+  savedRecords=null;
+  savedLookupGeneration++;
+  pendingSavedPoint=null;savedLookupId=null;
+  $("saved-editor").classList.add("hidden");
+  $("saved-enrich-status").textContent="";
   $("saved-dialog").showModal();
   $("saved-search").value="";
   refreshSaved();
 });
 $("close-saved").addEventListener("click",()=>$("saved-dialog").close());
 $("saved-search").addEventListener("input",renderSaved);
-setInterval(()=>{if(!document.hidden&&$("saved-dialog").open)renderSaved();},60000);
+// Update only the clock text once per minute. Rebuilding the list would reset
+// its scroll position and close expanded place details while the user reads them.
+setInterval(()=>{if(!document.hidden)refreshSavedClocks();},60000);
 setInterval(() => { if (!document.hidden && connected && token) refresh(); }, 2000);
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden && token) refresh();

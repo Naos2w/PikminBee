@@ -76,6 +76,8 @@ import com.naos.pikminbee.data.AppPreferences
 import com.naos.pikminbee.data.PlaceLookup
 import com.naos.pikminbee.data.PlaceSuggestion
 import com.naos.pikminbee.data.PlaceSuggestionPolicy
+import com.naos.pikminbee.data.SavedPlaceMetadataPolicy
+import com.naos.pikminbee.data.VerifiedRealTimeZone
 import com.naos.pikminbee.flower.FlowerCatalogStore
 import com.naos.pikminbee.flower.FlowerCatalogState
 import com.naos.pikminbee.flower.FlowerFinder
@@ -248,7 +250,9 @@ private fun PikminBeeScreen() {
     var showWifiPanel by remember { mutableStateOf(false) }
     var places by remember { mutableStateOf(prefs.places()) }
     var showFavourites by remember { mutableStateOf(false) }
-    var referenceRealZoneId by remember { mutableStateOf<String?>(null) }
+    var realZoneReference by remember { mutableStateOf<VerifiedRealTimeZone?>(null) }
+    var backfillingPlaces by remember { mutableStateOf(false) }
+    var backfillResult by remember { mutableStateOf("") }
     var pendingPlace by remember { mutableStateOf<Coordinate?>(null) }
     var suggestedName by remember { mutableStateOf("") }
     var placeSuggestion by remember { mutableStateOf<PlaceSuggestion?>(null) }
@@ -264,9 +268,12 @@ private fun PikminBeeScreen() {
     val work = rememberCoroutineScope()
     LaunchedEffect(showFavourites) {
         if (!showFavourites) return@LaunchedEffect
-        referenceRealZoneId = null
+        realZoneReference = null
         val verified = VerifiedPhysicalFixState.fresh() ?: return@LaunchedEffect
-        referenceRealZoneId = placeLookup.zoneForVerifiedPhysical(verified.coordinate)
+        val zone = placeLookup.zoneForVerifiedPhysical(verified.coordinate)
+        if (showFavourites && zone != null) {
+            realZoneReference = VerifiedRealTimeZone(zone, verified.timestampMillis)
+        }
     }
     val mockStatus by LocationStatus.display.collectAsState()
     val mockPosition by LocationStatus.selected.collectAsState()
@@ -1595,7 +1602,7 @@ private fun PikminBeeScreen() {
                 FavouritesPanel(
                     places = places,
                     // A system time zone is NOT proof of the phone's actual GPS time zone.
-                    referenceRealZoneId = referenceRealZoneId,
+                    realZoneReference = realZoneReference,
                     foreground = foreground,
                     muted = muted,
                     onSelectPlace = { place ->
@@ -1616,6 +1623,38 @@ private fun PikminBeeScreen() {
                         prefs.removePlace(place.id)
                         places = prefs.places()
                         message = "已移除收藏「${place.name}」"
+                    },
+                    backfillBusy = backfillingPlaces,
+                    backfillMessage = backfillResult,
+                    onBackfill = {
+                        if (!backfillingPlaces) {
+                            backfillingPlaces = true
+                            backfillResult = "正在查詢舊收藏缺少的國家、城市及時區…"
+                            work.launch {
+                                var improved = 0
+                                var attempted = 0
+                                try {
+                                    // Bounded, explicit batch: never poll Photon on GPS ticks.
+                                    val pending = prefs.places()
+                                        .filter(SavedPlaceMetadataPolicy::incomplete).take(5)
+                                    pending.forEach { place ->
+                                        val details = placeLookup.suggest(place.coordinate)
+                                        if (prefs.enrichSavedPlace(place.id, place.coordinate, details))
+                                            improved++
+                                        attempted++
+                                        places = prefs.places()
+                                        kotlinx.coroutines.delay(900L) // courteous public API pacing
+                                    }
+                                    backfillResult = "本次查詢 $attempted 筆，補齊 $improved 筆；" +
+                                        "無結果者保留原資料，可稍後再次嘗試"
+                                } catch (e: Exception) {
+                                    backfillResult = "補齊中斷：${e.message ?: "網路不可用"}，既有收藏不受影響"
+                                } finally {
+                                    backfillingPlaces = false
+                                    places = prefs.places()
+                                }
+                            }
+                        }
                     },
                     routeContent = { query ->
                         listOf(WalkMode.ROUTE, WalkMode.FLOWERS).forEach { kind ->

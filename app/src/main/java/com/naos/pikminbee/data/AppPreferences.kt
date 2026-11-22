@@ -82,6 +82,9 @@ object SavedRouteState {
     }
 }
 
+/** Shared lock for phone and paired Web edits to the same saved-place JSON blob. */
+private object SavedPlacesLock
+
 class AppPreferences(private val context: Context) {
     private val prefs = context.getSharedPreferences("pikminbee_preferences", Context.MODE_PRIVATE)
 
@@ -202,30 +205,46 @@ class AppPreferences(private val context: Context) {
         name: String, coordinate: Coordinate,
         countryCode: String? = null, countryName: String? = null,
         city: String? = null, timeZoneId: String? = null,
-    ) {
+    ) = synchronized(SavedPlacesLock) {
         val list = places()
-        val id = (System.currentTimeMillis()).let { now ->
-            if (list.any { it.id == now }) now + 1 else now
-        }
+        // Ensure IDs cannot collide when paired Web and phone save in the same millisecond.
+        var id = System.currentTimeMillis()
+        while (list.any { it.id == id }) id++
         val saved = SavedPlace(
             id, name.trim().take(60).ifBlank { "收藏地點" }, coordinate,
             countryCode?.takeIf { it.length == 2 }?.uppercase(java.util.Locale.ROOT),
-            countryName?.take(100), city?.take(100), timeZoneId?.take(100),
+            countryName?.take(100), city?.take(100),
+            timeZoneId?.takeIf { SavedPlaceTimePolicy.validatedZone(it) != null },
         )
         savePlaces(list + saved)
     }
 
-    fun removePlace(id: Long) { savePlaces(places().filterNot { it.id == id }) }
+    fun removePlace(id: Long) = synchronized(SavedPlacesLock) {
+        savePlaces(places().filterNot { it.id == id })
+    }
 
     /** Manual names are user-owned; renaming never invokes geocoding or alters metadata. */
-    fun renamePlace(id: Long, name: String): Boolean {
+    fun renamePlace(id: Long, name: String): Boolean = synchronized(SavedPlacesLock) {
         val trimmed = name.trim()
-        if (trimmed.isBlank() || trimmed.length > 80) return false
+        if (trimmed.isBlank() || trimmed.length > 80) return@synchronized false
         val items = places()
-        if (items.none { it.id == id }) return false
+        if (items.none { it.id == id }) return@synchronized false
         savePlaces(items.map { if (it.id == id) it.copy(name = trimmed) else it })
-        return true
+        true
     }
+
+    /** A late network reply may update only metadata for exactly the original saved ID/point.
+     *  It must not resurrect a deleted place or overwrite a renamed place. */
+    fun enrichSavedPlace(id: Long, expected: Coordinate, details: PlaceSuggestion): Boolean =
+        synchronized(SavedPlacesLock) {
+            val existing = places()
+            val matching = existing.firstOrNull { it.id == id && it.coordinate == expected }
+                ?: return@synchronized false
+            val enriched = SavedPlaceMetadataPolicy.enriched(matching, details)
+            if (enriched == matching) return@synchronized false
+            savePlaces(existing.map { if (it.id == id) enriched else it })
+            true
+        }
 
     /** Route and flower waypoint drafts are separate from saved places. */
     fun routeDraft(): List<Coordinate> = RouteDraftState.routeStops.value

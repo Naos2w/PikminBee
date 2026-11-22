@@ -11,6 +11,7 @@ import androidx.core.content.ContextCompat
 import android.Manifest
 import android.content.pm.PackageManager
 import com.naos.pikminbee.ui.BeePermissions
+import com.naos.pikminbee.ui.VerifiedPhysicalFixState
 import com.naos.pikminbee.data.PreparedRouteState
 import com.naos.pikminbee.domain.PreparedWalkingRoute
 import com.naos.pikminbee.domain.WalkingGeometry
@@ -19,6 +20,10 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import com.naos.pikminbee.data.AppPreferences
 import com.naos.pikminbee.data.PlaceLookup
+import com.naos.pikminbee.data.PlaceSuggestion
+import com.naos.pikminbee.data.PlaceSuggestionPolicy
+import com.naos.pikminbee.data.SavedPlaceMetadataPolicy
+import com.naos.pikminbee.data.VerifiedRealTimeZone
 import com.naos.pikminbee.flower.FlowerCatalogStore
 import com.naos.pikminbee.flower.FlowerEvidence
 import com.naos.pikminbee.flower.FlowerFinder
@@ -83,6 +88,14 @@ class LanController(private val context: Context) {
     private val starting = AtomicBoolean(false)
     private data class WebPreview(val id: String, val route: PreparedWalkingRoute)
     private val previews = ConcurrentHashMap<WalkMode, WebPreview>()
+    private data class PendingPlaceLookup(
+        val coordinate: Coordinate, val requestedAtMillis: Long,
+        @Volatile var suggestion: PlaceSuggestion? = null,
+        @Volatile var completed: Boolean = false,
+    )
+    private val placeLookups = ConcurrentHashMap<String, PendingPlaceLookup>()
+    private val placeEnrichmentBusy = AtomicBoolean(false)
+    @Volatile private var placeEnrichmentNote = ""
     @Volatile private var browserOrigin: Coordinate? = null
     @Volatile private var usedPreviewId: String? = null
     // Real phone location is only sampled after an explicitly approved browser action.
@@ -93,7 +106,9 @@ class LanController(private val context: Context) {
     @Volatile private var realFixTimestampMillis = 0L
     @Volatile private var realFixAccuracyMetres = -1f
     @Volatile private var realGpsState = "idle"
-    @Volatile private var realTimeZoneId: String? = null
+    @Volatile private var verifiedTimeZoneReference: VerifiedRealTimeZone? = null
+    private val realZoneLookupBusy = AtomicBoolean(false)
+    @Volatile private var lastRealZoneLookupAtMillis = 0L
     @Volatile private var lastObservedMock = false
     private fun origin(): Coordinate? = browserOrigin ?: LocationStatus.selected.value
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -140,9 +155,11 @@ class LanController(private val context: Context) {
     fun stop(reason: String = "Wi-Fi 控制已關閉") {
         realRequestGeneration.incrementAndGet()
         realFix = null
-        realTimeZoneId = null
+        verifiedTimeZoneReference = null
         realGpsState = "idle"
         previews.clear()
+        placeLookups.clear()
+        placeEnrichmentNote = ""
         browserOrigin = null
         usedPreviewId = null
         server?.stop()
@@ -366,6 +383,91 @@ class LanController(private val context: Context) {
                 invalidate(WalkMode.FLOWERS)
                 accepted("已設定路線起點；尚未移動 GPS")
             }
+            "/api/saved/place/lookup" -> {
+                // The browser must have explicitly selected a coordinate before requesting
+                // a third-party Photon/TimeAPI lookup. Nothing runs on GPS updates.
+                val point = coordinate(req.body) ?: return error(400, "收藏座標無效")
+                val now = System.currentTimeMillis()
+                placeLookups.entries.removeIf { now - it.value.requestedAtMillis > 120_000L }
+                if (placeLookups.size >= 8) return error(429, "收藏查詢過多，請稍後再試")
+                val requestId = UUID.randomUUID().toString()
+                val lookup = PendingPlaceLookup(point, now)
+                placeLookups[requestId] = lookup
+                scope.launch {
+                    try {
+                        lookup.suggestion = placeLookup.suggest(point)
+                    } catch (e: Exception) {
+                        lookup.suggestion = PlaceSuggestion(
+                            PlaceSuggestionPolicy.pointLabel(point))
+                    } finally {
+                        lookup.completed = true
+                    }
+                }
+                acceptedJson(JSONObject().put("lookupId", requestId).toString())
+            }
+            "/api/saved/place/lookup/status" -> {
+                val id = parse(req.body)?.optString("lookupId").orEmpty()
+                val lookup = placeLookups[id] ?: return error(404, "地名建議已過期，請再查詢")
+                if (System.currentTimeMillis() - lookup.requestedAtMillis !in 0..120_000L)
+                    return error(410, "地名建議已過期，請再查詢")
+                val suggestion = lookup.suggestion
+                if (!lookup.completed || suggestion == null) {
+                    ok(JSONObject().put("status", "pending").toString())
+                } else {
+                    ok(JSONObject().put("status", "ready")
+                        .put("name", suggestion.displayName)
+                        .put("countryCode", suggestion.countryCode ?: JSONObject.NULL)
+                        .put("countryName", suggestion.countryName ?: JSONObject.NULL)
+                        .put("city", suggestion.city ?: JSONObject.NULL)
+                        .put("timeZoneId", suggestion.timeZoneId ?: JSONObject.NULL).toString())
+                }
+            }
+            "/api/saved/place/add" -> {
+                val json = parse(req.body) ?: return error(400, "JSON 無效")
+                val point = coordinate(json) ?: return error(400, "收藏座標無效")
+                val name = json.optString("name").trim()
+                if (name.isBlank() || name.length > 80)
+                    return error(400, "收藏名稱必須介於 1 到 80 字")
+                if (prefs.places().size >= 300)
+                    return error(409, "收藏地點已達 300 筆，請先整理舊收藏")
+                val id = json.optString("lookupId")
+                val lookup = placeLookups.remove(id)?.takeIf {
+                    it.completed && it.coordinate == point &&
+                        System.currentTimeMillis() - it.requestedAtMillis in 0..120_000L
+                }
+                val metadata = lookup?.suggestion
+                prefs.addPlace(name, point, metadata?.countryCode, metadata?.countryName,
+                    metadata?.city, metadata?.timeZoneId)
+                accepted("已收藏「$name」，沒有瞬移或更動路線")
+            }
+            "/api/saved/place/enrich" -> {
+                if (!placeEnrichmentBusy.compareAndSet(false, true))
+                    return error(409, "收藏資訊補齊進行中")
+                placeEnrichmentNote = "正在補齊舊收藏的國家／城市／時區"
+                scope.launch {
+                    var updated = 0
+                    var scanned = 0
+                    try {
+                        // No network requests until the paired browser explicitly asks.
+                        val candidates = prefs.places()
+                            .filter(SavedPlaceMetadataPolicy::incomplete).take(5)
+                        for (place in candidates) {
+                            val suggestion = placeLookup.suggest(place.coordinate)
+                            if (prefs.enrichSavedPlace(place.id, place.coordinate, suggestion))
+                                updated++
+                            scanned++
+                            kotlinx.coroutines.delay(900L)
+                        }
+                        placeEnrichmentNote =
+                            "查詢 $scanned 筆，補齊 $updated 筆；未取得的資料保持原狀"
+                    } catch (e: Exception) {
+                        placeEnrichmentNote = "查詢中斷：${e.message ?: "網路不可用"}"
+                    } finally {
+                        placeEnrichmentBusy.set(false)
+                    }
+                }
+                accepted("已開始補齊缺少的國家、城市與時區，原地名不變")
+            }
             "/api/saved/place/rename" -> {
                 val json = parse(req.body) ?: return error(400, "JSON 無效")
                 val name = json.optString("name").trim()
@@ -502,7 +604,8 @@ class LanController(private val context: Context) {
                 if (action == "restore-real") {
                     realRequestGeneration.incrementAndGet()
                     realFix = null
-                    realTimeZoneId = null
+                    // Keep a previously verified physical zone for up to 30 minutes.
+                    // A virtual GPS coordinate can never replace that reference.
                     realGpsState = "idle"
                 }
                 context.startService(MockLocationService.command(context, serviceAction))
@@ -525,7 +628,7 @@ class LanController(private val context: Context) {
         if (providers.isEmpty()) return error(409, "手機定位服務未啟用")
         val generation = realRequestGeneration.incrementAndGet()
         realFix = null
-        realTimeZoneId = null
+        // A failed new fix request does not invalidate an earlier verified zone.
         realFixTimestampMillis = 0L
         realFixAccuracyMetres = -1f
         realRequestedAtMillis = System.currentTimeMillis()
@@ -571,8 +674,10 @@ class LanController(private val context: Context) {
         scope.launch {
             val resolved = placeLookup.zoneForVerifiedPhysical(point)
             if (generation == realRequestGeneration.get() &&
-                !LocationStatus.mockActive.value && LocationStatus.selected.value == null)
-                realTimeZoneId = resolved
+                !LocationStatus.mockActive.value && LocationStatus.selected.value == null &&
+                resolved != null) {
+                verifiedTimeZoneReference = VerifiedRealTimeZone(resolved, fix.time)
+            }
         }
     }
 
@@ -589,11 +694,39 @@ class LanController(private val context: Context) {
         PreparedRouteState.set(mode, null)
     }
 
+    private fun maybeResolveRealZoneFromPhone() {
+        // Only an explicitly non-mock, fresh fix captured by the Android App
+        // can establish the reference. A browser opening Favourites is an
+        // explicit user action, never a GPS tick or background location poll.
+        val verified = VerifiedPhysicalFixState.fresh() ?: return
+        if (verifiedTimeZoneReference?.let {
+                it.physicalFixAtMillis >= verified.timestampMillis && it.freshId() != null
+            } == true) return
+        val now = System.currentTimeMillis()
+        if (now - lastRealZoneLookupAtMillis in 0L..60_000L) return
+        if (!realZoneLookupBusy.compareAndSet(false, true)) return
+        lastRealZoneLookupAtMillis = now
+        scope.launch {
+            try {
+                val zone = placeLookup.zoneForVerifiedPhysical(verified.coordinate)
+                if (zone != null &&
+                    VerifiedPhysicalFixState.fresh()?.timestampMillis ==
+                        verified.timestampMillis) {
+                    verifiedTimeZoneReference = VerifiedRealTimeZone(
+                        zone, verified.timestampMillis)
+                }
+            } finally {
+                realZoneLookupBusy.set(false)
+            }
+        }
+    }
+
     private fun savedSnapshot(): String {
+        maybeResolveRealZoneFromPhone()
         fun encoded(point: Coordinate) = JSONObject()
             .put("lat", point.latitude).put("lon", point.longitude)
         val places = JSONArray().apply {
-            prefs.places().take(100).forEach { item ->
+            prefs.places().take(300).forEach { item ->
                 put(JSONObject().put("id", item.id).put("name", item.name)
                     .put("position", encoded(item.coordinate))
                     .put("countryCode", item.countryCode ?: JSONObject.NULL)
@@ -613,7 +746,9 @@ class LanController(private val context: Context) {
                     }))
             }
         }
-        return JSONObject().put("places", places).put("routes", routes).toString()
+        return JSONObject().put("places", places).put("routes", routes)
+            .put("enrichmentBusy", placeEnrichmentBusy.get())
+            .put("enrichmentNote", placeEnrichmentNote).toString()
     }
 
     private fun asset(path: String, mime: String): LanReply = runCatching {
@@ -655,7 +790,8 @@ class LanController(private val context: Context) {
         if (mocked && !lastObservedMock) {
             realRequestGeneration.incrementAndGet()
             realFix = null
-            realTimeZoneId = null
+            // Invalidate the real-coordinate response but NOT a fresh, previously
+            // verified physical time-zone reference. Never substitute mock GPS.
             realGpsState = "idle"
         }
         lastObservedMock = mocked
@@ -671,13 +807,17 @@ class LanController(private val context: Context) {
             realGpsState == "idle" -> "idle"
             else -> "unavailable"
         }
+        val realZone = verifiedTimeZoneReference
+            ?.takeIf { it.freshId(now) != null }
         return JSONObject()
             .put("status", LocationStatus.display.value)
             .put("note", LanStatus.display.value.note)
             .put("position", position?.let { JSONObject().put("lat", it.latitude).put("lon", it.longitude) })
             .put("mockActive", LocationStatus.mockActive.value)
-            .put("realTimeZoneId", if (realPosition != null)
-                realTimeZoneId ?: JSONObject.NULL else JSONObject.NULL)
+            .put("realTimeZoneId", realZone?.freshId(now) ?: JSONObject.NULL)
+            .put("realTimeZoneExpiresAtMillis", realZone
+                ?.let { it.physicalFixAtMillis + VerifiedRealTimeZone.MAX_AGE_MILLIS }
+                ?: JSONObject.NULL)
             .put("realGpsState", gpsState)
             .put("realPosition", realPosition?.let {
                 JSONObject().put("lat", it.latitude).put("lon", it.longitude)
