@@ -30,6 +30,7 @@ let state = {
   realGpsState:'mock',
   realPosition:null,
   realTimeZoneId:null,
+  realTimeZoneExpiresAtMillis:null,
   // Synthetic numbered draft for visual QA only; this never reaches a phone.
   routeStops: [
     {lat:25.0441,lon:121.4661},{lat:25.0478,lon:121.4702},
@@ -40,6 +41,15 @@ let state = {
   progress: {activeLeg:'起點 → 1',estimatedSteps:0,fraction:0,
     travelledMetres:0,totalMetres:0,waypointCount:0},
   speedPreset:'WALK',defaultSpeedPreset:'WALK'
+};
+let previewPlaces=[{
+  id:1,name:"東京車站（合成資料）",position:{lat:35.681236,lon:139.767125},
+  countryCode:"JP",countryName:"日本",city:"東京",
+  timeZoneId:"Asia/Tokyo",createdAtMillis:1795180000000
+}];
+const readBody=async req=>{
+  let body='';for await(const chunk of req)body+=chunk;
+  try{return JSON.parse(body||'{}');}catch(_){return {};}
 };
 const send=(res,body,status=200,type='application/json; charset=utf-8')=>{
   res.writeHead(status,{
@@ -66,14 +76,47 @@ createServer(async (req,res)=>{
     send(res,state);return;
   }
   if(req.method==='GET'&&url==='/api/saved'){
-    send(res,{places:[{
-      id:1,name:"東京車站（合成資料）",position:{lat:35.681236,lon:139.767125},
-      countryCode:"JP",countryName:"日本",city:"東京",
-      timeZoneId:"Asia/Tokyo",createdAtMillis:1795180000000
-    }],routes:[]});return;
+    send(res,{places:previewPlaces,routes:[],
+      enrichmentBusy:false,enrichmentNote:"本機合成資料測試完成"});return;
+  }
+  if(req.method==='POST'&&url==='/api/preview/add-many-favourites'){
+    previewPlaces=previewPlaces.slice(0,2);
+    for(let i=0;i<45;i++){
+      previewPlaces.push({id:1000+i,name:"測試收藏 "+(i+1),
+        position:{lat:35.681236+i*0.0001,lon:139.767125},
+        countryCode:"JP",countryName:"日本",city:"東京",
+        timeZoneId:"Asia/Tokyo",createdAtMillis:1795180000000+i});
+    }
+    send(res,{message:"合成收藏已生成，沒有修改手機資料"},202);return;
+  }
+  if(req.method==='POST'&&url==='/api/preview/expire-real-zone'){
+    state.realTimeZoneExpiresAtMillis=Date.now()-60_000;
+    send(res,{message:"合成實體時區已過期，沒有修改手機資料"},202);return;
+  }
+  if(req.method==='POST'&&url==='/api/saved/place/lookup'){
+    send(res,{lookupId:'synthetic-geocode-lookup'},202);return;
+  }
+  if(req.method==='POST'&&url==='/api/saved/place/lookup/status'){
+    send(res,{status:'ready',name:'合成地標（僅測試）',countryCode:'JP',
+      countryName:'日本',city:'東京',timeZoneId:'Asia/Tokyo'});return;
+  }
+  if(req.method==='POST'&&url==='/api/saved/place/add'){
+    const data=await readBody(req);
+    previewPlaces.push({id:Date.now(),name:String(data.name||'合成收藏'),
+      position:{lat:Number(data.lat),lon:Number(data.lon)},countryCode:'JP',
+      countryName:'日本',city:'東京',timeZoneId:'Asia/Tokyo',
+      createdAtMillis:Date.now()});
+    send(res,{message:'已新增本機合成收藏（沒有修改手機資料）'},202);return;
+  }
+  if(req.method==='POST'&&url==='/api/saved/place/enrich'){
+    send(res,{message:'本機合成收藏資訊已補齊'},202);return;
   }
   if(req.method==='POST'&&
      (url==='/api/saved/place/rename'||url==='/api/saved/place/delete')){
+    const data=await readBody(req);
+    if(url.endsWith('rename')) previewPlaces=previewPlaces.map(x=>x.id===data.id?
+      {...x,name:String(data.name)}:x);
+    else previewPlaces=previewPlaces.filter(x=>x.id!==data.id);
     send(res,{message:'本機收藏操作模擬（沒有修改手機資料）'},202);return;
   }
   if(req.method==='POST'&&url==='/api/flowers/nearby'){
@@ -104,7 +147,15 @@ createServer(async (req,res)=>{
     state.realPosition={lat:25.0408,lon:121.4634,accuracy:12};
     state.realGpsState='ready';
     state.realTimeZoneId='Asia/Taipei';
+    state.realTimeZoneExpiresAtMillis=Date.now()+30*60_000;
     send(res,{message:'本機預覽的合成真實 GPS（並非手機定位）'},202);return;
+  }
+  if(req.method==='POST'&&url==='/api/teleport'){
+    state.mockActive=true;state.realGpsState='mock';state.realPosition=null;
+    state.position={lat:25.0330,lon:121.5654};
+    // Previously verified physical time-zone reference is retained for only
+    // its original 30-minute window, even though real coordinates are hidden.
+    send(res,{message:'合成虛擬位置已啟用（未操控手機）'},202);return;
   }
   if(req.method==='POST'&&(url==='/api/points/reorder'||url==='/api/points/remove')){
     let body='';

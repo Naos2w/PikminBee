@@ -1,11 +1,27 @@
 # PikminBee TODO
 
+## P0 · User-approved GPS / RWD / navigation / favourites audit — 2026-11-22
+**Compared against UAT 0.16.1 staging and latest develop source.** Keep mineral/honey colours and performance-first matte (no blur), and preserve the 2×4 icon-only floating controls.
+- [x] GPS floating REAL/VIRTUAL buttons show only one confirmed mock-provider mode using the existing high-contrast accent/ring/dot; long-press/guide carries meaning and no permanent new GPS text. The 0.16.1 fix already passed CI; physical-device visual acceptance remains below.
+- [x] Android map dock and detail sheet use **瞬移／路徑／尋花／設定**, with Settings tap-only and swipe boundary limited to first three; map drag/pinch unaffected in source. Actual POCO gestures still need real-device validation.
+- [x] Web RWD remains an independent map-first desktop sidebar/tablet stack/mobile fixed dock. Three swipeable functional modes and tap-only Settings; no theme-colour change.
+- [x] Top-right Android/Web favourites, independently scrollable searchable lists, named places and routes, user-confirmed view/load without auto-teleport, name editing/deletion and details for coordinates/date.
+- [x] New Android favourite: explicit Photon reverse geocoding (POI/landmark/shop within 100m first, then street/district/city, then coordinate), editable proposed name. No automatic location updates or provider-dependent networking.
+- [x] **Fixed missing parity**: paired Web can now explicitly add favourites with suggested editable landmark name, using asynchronous phone-side Photon/TimeAPI lookup; no implicit teleport.
+- [x] **Fixed legacy gap**: Android/Web now offer explicitly triggered, bounded batches to backfill old favourites' missing country/city/IANA time zone, never overwriting original name, position, date or existing known metadata. Show data-source/privacy notes.
+- [x] **Fixed real-zone reference gap**: a verified non-mock physical fix establishes a memory-only 30-minute reference surviving switches to virtual GPS; expiry or missing reference yields 「時差待確認」. Web preserves this in private LAN state without sending true coordinates to the browser; Android expiry is rechecked as the sheet's local clocks update. Never assume Taiwan or derive real zone from mock GPS.
+- [x] **Fixed Web long-list clock refresh**: only clock text updates every minute; saved-list scroll position and expanded details survive refreshes.
+- [x] JVM policy tests for reference expiry, legacy metadata preservation and invalid values; Node JS syntax; synthetic browser test for Web save and real-zone comparison under virtual GPS. **Synthetic tests are not POCO validation.**
+- [ ] Full GitHub Android JVM/Lint CI for this audit-fix PR, then merge via normal checked `fix/* → develop` Squash PR.
+- [ ] **Real POCO + Edge UAT acceptance**: physical GPS provider changes, overlay bright/dark state, 3-mode horizontal swipe and tap-only Settings, old-place metadata queries, Web LAN pairing/revocation, timezone and DST, offline/no-permission behaviour, visual layout at different sizes. No ADB device was attached during source work.
+- [ ] Optional next signed UAT **after the audit-fix PR is verified and merged**, via `develop → staging` Merge Commit and manually triggered fixed-signed GitHub Actions. Production `main` remains untouched.
+
 ## P0 · UAT 0.15.1 floating GPS mode indicator follow-up (2026-11-22)
 - [x] Checked actual 0.15.1 source: the expanded overlay chooses REAL/VIRTUAL from `LocationStatus.mockActive` (confirmed mock-provider state). But selected button's border was the same colour as its fill, the unchecked button had no distinguishing low-priority treatment, and virtual restoration did not call `updateOverlay()` explicitly after success (it relied on the synchronous tick refresh).
 - [x] Use only existing mineral/honey semantic colours, without new words or animated effects: selected GPS icon has solid accent, visibly contrasting on-accent rim, 8dp corner dot, full opacity and accessible selected state/long-press explanation; inactive GPS icon uses the existing soft surface and lower opacity.
 - [x] Explicitly repaint after successful virtual GPS restore, while keeping the actual mock-provider state as the only source of truth; real GPS restoration retains its existing direct repaint.
 - [x] Added policy regression for exactly one highlighted GPS action; MSI full offline Android Kotlin/JVM `:app:testDebugUnitTest` passed.
-- [ ] GitHub CI `android / verify` (JVM + Lint) then squash merge DEV fix.
+- [x] GitHub CI `android / verify` (JVM + Lint) and squash merge DEV GPS-indicator fix (#93); later released as signed 0.16.1.
 - [ ] User's actual installed **0.15.1 cannot contain this follow-up fix**. Physical POCO light/dark, mock on/off and failed-restore visual acceptance requires a later signed UAT; do not claim it was seen on device. No auto-install or production main change.
 
 ## P0 · Approved UI/UX & favourites redesign — 2026-11-22
@@ -31,9 +47,9 @@
 
 ### Quality gates
 - [x] Local Kotlin/JVM tests for Android and latest LAN Web source (BUILD SUCCESSFUL), Node syntax, `git diff --check`, synthetic RWD/flower tests in Playwright; existing Android theme untouched.
-- [ ] Current Web/flower PR → `develop` only after GitHub Android CI (JVM + Lint).
-- [ ] **Real POCO/PC acceptance is a release blocker.** MSI ADB has no device; OpenChatX PC2 tunnel did not respond on 2026-11-22. Confirm GPS mode, native Edge options, favourites, 3-mode swipe, permission denial, local-time/DST, background LAN and route gates on a physical phone before declaring acceptance.
-- [ ] **UAT release is deferred until the above items are complete.** Only then bump version, checked `develop → staging` merge commit, manually dispatch fixed-signed GitHub Actions, verify package identity/certificate/download; never auto-install or modify production `main`.
+- [x] Web/flower source PR #90 passed CI and merged into `develop`; promoted to signed UAT 0.15.1 and retained in 0.16.1.
+- [ ] **Real POCO/PC acceptance remains an open UAT testing item, not a prerequisite for creating a UAT APK.** MSI ADB had no device and PC2 tunnel did not respond. Confirm GPS modes, native Edge options, favourites, 3-mode swipe, permission denial, local-time/DST, LAN and route safety using the signed test APK before declaring production readiness.
+- [x] **Signed UAT 0.16.1 already released** following verified `develop → staging` promotion; user clarified a UAT package is how physical testing can proceed. Follow future release process on request and never auto-install or modify production `main`.
 
 ## P0 · UAT 0.13.1 LAN Web feedback — true GPS, numbered route, dark Edge options (21 Nov 2026)
 - [x] Source diagnosis: `/api/state.position` is virtual GPS, `restore-real` only ends mock provider; the default Taipei map centre is **not** a phone GPS fix. Never report a mock or stale fix as real.

@@ -1,0 +1,40 @@
+package com.naos.pikminbee.data
+
+import com.naos.pikminbee.domain.Coordinate
+import org.junit.Assert.*
+import org.junit.Test
+
+class SavedPlaceMetadataPolicyTest {
+    private val coordinate = Coordinate(35.681236, 139.767125)
+
+    @Test fun preservesIdManuallyChosenNameAndGpsWhileEnrichingMissingFields() {
+        val stored = SavedPlace(1234L, "我自己的名稱", coordinate, createdAtMillis=1222L)
+        val result = SavedPlaceMetadataPolicy.enriched(stored,
+            PlaceSuggestion("東京車站", "jp", "日本", "東京", "Asia/Tokyo"))
+        assertEquals("我自己的名稱", result.name)
+        assertEquals(coordinate, result.coordinate)
+        assertEquals(1234L, result.id)
+        assertEquals(1222L, result.createdAtMillis)
+        assertEquals("JP", result.countryCode)
+        assertEquals("Asia/Tokyo", result.timeZoneId)
+        assertFalse(SavedPlaceMetadataPolicy.incomplete(result))
+    }
+
+    @Test fun neverOverwritesExistingNonblankMetadata() {
+        val old = SavedPlace(5, "手動名稱", coordinate, "TW", "臺灣", "臺北",
+            "Asia/Taipei", 5)
+        val new = SavedPlaceMetadataPolicy.enriched(old,
+            PlaceSuggestion("不相關商家", "JP", "日本", "東京", "Asia/Tokyo"))
+        assertEquals(old, new)
+        assertFalse(SavedPlaceMetadataPolicy.incomplete(new))
+    }
+
+    @Test fun invalidTimezoneAndCountryStayUnresolved() {
+        val stored = SavedPlace(1, "自訂", coordinate)
+        val new = SavedPlaceMetadataPolicy.enriched(stored,
+            PlaceSuggestion("Any", "INVALID", "國家", "城市", "Mars/Ocean"))
+        assertNull(new.countryCode)
+        assertNull(new.timeZoneId)
+        assertTrue(SavedPlaceMetadataPolicy.incomplete(new))
+    }
+}

@@ -190,6 +190,10 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
 .saved-card .row{margin:0}
 .saved-card small{color:var(--sub);font-size:12px}
 .saved-card button{min-height:42px}
+.saved-dialog .saved-editor{flex-shrink:0;max-height:35svh;overflow-y:auto}
+.saved-dialog .saved-editor label{font-size:12px}
+.saved-dialog #saved-enrich-status{font-size:12px;margin:0}
+.saved-clock{font-variant-numeric:tabular-nums}
 .saved-details{font-size:12px;color:var(--sub);padding:3px 0}
 .saved-details summary{cursor:pointer;padding:6px 0}
 .saved-details small{display:block;margin:2px 0}
@@ -331,10 +335,28 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
 </div>
 <dialog id="saved-dialog" class="saved-dialog" aria-labelledby="saved-heading">
  <div class="saved-header"><h2 id="saved-heading">收藏地點與路線</h2><button id="close-saved" type="button" aria-label="關閉收藏清單">✕</button></div>
+ <div class="row">
+  <button type="button" id="saved-add-button">收藏地圖所選位置</button>
+  <button type="button" id="saved-enrich-button">補齊舊收藏資訊</button>
+ </div>
+ <div id="saved-editor" class="saved-card hidden" aria-label="新增收藏">
+  <strong>新增收藏地點</strong>
+  <small id="saved-new-position">請先選擇地圖位置</small>
+  <label for="saved-new-name">建議地名（可自行修改）</label>
+  <input id="saved-new-name" maxlength="80" autocomplete="off">
+  <small id="saved-new-status" role="status" aria-live="polite"></small>
+  <small>只有點擊收藏才將選定座標送至 Photon／TimeAPI；不會移動手機 GPS。</small>
+  <div class="row"><button type="button" id="saved-save" class="primary">確認儲存</button>
+   <button type="button" id="saved-cancel">取消</button></div>
+ </div>
+ <p class="muted" id="saved-enrich-status" role="status" aria-live="polite"></p>
  <label for="saved-search">搜尋地點、國家、城市或路線</label>
  <input id="saved-search" autocomplete="off" placeholder="輸入收藏名稱">
  <div id="saved-list" class="saved-scroll" aria-live="polite">正在讀取收藏…</div>
- <p class="muted">地點只會選取並顯示在地圖，不會直接瞬移；路線載入後仍需預覽道路。</p>
+ <p class="muted">點收藏僅選取地圖，不會瞬移。時差以近期真實 GPS 時區為基準，無資料則待確認。</p>
+ <details class="help-details"><summary>收藏資料與位置隱私說明</summary>
+ <p>按新增／補齊才會將選取的收藏座標傳給 Photon／TimeAPI 查詢地標、國家與時區；不會覆寫自訂名稱。開啟收藏時，若手機已有最近 30 分鐘內驗證的非模擬 GPS 定位，可能向 TimeAPI 解析該真實位置的時區。Web 不會取得作為時區參考的精確真實座標，失效時不會以虛擬 GPS 或固定臺灣時區替代。</p>
+ </details>
 </dialog>
 </main>
 <script type="module" src="/controller.js"></script>

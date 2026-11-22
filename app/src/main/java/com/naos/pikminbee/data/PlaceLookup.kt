@@ -26,7 +26,13 @@ class PlaceLookup(context: Context) {
 
     suspend fun suggest(point: Coordinate): PlaceSuggestion = withContext(Dispatchers.IO) {
         val key = cacheKey(point)
-        cache.getString("suggest:$key", null)?.let { readCache(it) }?.let { return@withContext it }
+        cache.getString("suggest:$key", null)?.let { readCache(it) }?.let { cached ->
+            // A successful POI lookup may have failed to resolve the time zone.
+            // Retry zone resolution on the next explicit save rather than hiding
+            // destination time for the full 30-day Photon name-cache lifetime.
+            if (cached.timeZoneId != null) return@withContext cached
+            return@withContext cached.copy(timeZoneId = resolveZoneCached(point))
+        }
         val raw = fetchJson(
             "https://photon.komoot.io/reverse?lat=" + "%.6f".format(Locale.US, point.latitude) +
                 "&lon=" + "%.6f".format(Locale.US, point.longitude) +
