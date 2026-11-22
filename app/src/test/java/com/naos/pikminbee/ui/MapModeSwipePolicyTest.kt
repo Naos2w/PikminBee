@@ -8,7 +8,8 @@ class MapModeSwipePolicyTest {
     @Test fun leftSwipeShowsNextModeAndRightSwipeShowsPreviousMode() {
         assertEquals(1, MapModeSwipePolicy.target(0, -90f, 72f))
         assertEquals(2, MapModeSwipePolicy.target(1, -85f, 72f))
-        assertEquals(2, MapModeSwipePolicy.target(3, 80f, 72f))
+        assertNull(MapModeSwipePolicy.target(2, -85f, 72f))
+        assertNull(MapModeSwipePolicy.target(3, 80f, 72f))
     }
 
     @Test fun shortOrVerticalGestureKeepsCurrentMode() {
@@ -19,6 +20,7 @@ class MapModeSwipePolicyTest {
 
     @Test fun pageEdgesDoNotWrapToAnotherMode() {
         assertNull(MapModeSwipePolicy.target(0, 100f, 72f))
+        assertNull(MapModeSwipePolicy.target(2, -100f, 72f))
         assertNull(MapModeSwipePolicy.target(3, -100f, 72f))
         assertNull(MapModeSwipePolicy.target(-1, -100f, 72f))
         assertNull(MapModeSwipePolicy.target(4, 100f, 72f))

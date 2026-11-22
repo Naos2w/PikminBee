@@ -1,5 +1,32 @@
 # PikminBee TODO
 
+## P0 · Approved UI/UX & favourites redesign — 2026-11-22
+**Settled scope:** Keep existing low-saturation mineral blue/honey theme and lightweight opaque matte components. Android and Web are deliberately platform-specific, not identical layouts. No automated UAT or main promotion in feature PRs.
+
+### Android interaction
+- [x] Replace both shared 4-button map docks (main bottom and expanded sheet) with **瞬移 / 路徑 / 尋花 / 設定**. First 3 may swipe inside dock/details; Settings **tap only**, opens existing BeePage.SETTINGS and returns to previous mode. Never steal map pan/pinch; preserve current route and ongoing movement.
+- [x] Put a **收藏 bookmark action in the map top-right**. Tap opens a lightweight independently scrollable favourites sheet; group places and saved routes, with search/filter and clear select/load/view actions; selecting a place only previews the map, **never teleports without separate confirmation**. Ensure this still works on small POCO displays.
+- [x] In floating overlay, keep existing **2 × 4 icons** and no permanent GPS text. Highlight exactly one of REAL_GPS / VIRTUAL_GPS according to **confirmed Android mock-provider state**, not last button tapped; use existing accent/border, no new theme colour. Do not signal real fix availability merely because mock is off. Document icon meaning in existing overlay guide and preserve TalkBack/long-press.
+- [x] Audit text-only actions (initial priority: teleport, restore real GPS and save place now show native vector icons; secondary text actions intentionally remain); add vector icons to high-priority functional buttons without crowding Confirm/Cancel or shrinking touch targets.
+- [x] Fix horizontal mode swipe in code (3-mode policy boundary and actual gesture ownership unchanged; physical POCO swipe acceptance still pending) on actual detail content; Settings remains tap-only. Add tests for 3-mode boundary.
+
+### Favourites data / local time / suggested names
+- [x] **Geocoding is user-triggered** (on saving/editing a selected place), never called on GPS ticks. Landmark/business/POI first **only if close enough**, then street, district/city, finally raw coordinates. Allow editing and preserve explicit user names. Implement bounded cache/failure fallback and document service/privacy/rate limits.
+- [x] Add backward-compatible `countryCode`, display city/area, `timeZoneId`, explicit `createdAtMillis` to saved places; maintain all old favourites on migration. Saved routes retain existing creation timestamp and should get suitable origin metadata without guessing.
+- [x] Destination local time is computed using IANA zone (DST aware) and compared with **the phone's last verified real physical GPS time zone**, **never mock GPS nor permanent Taiwan default**. On missing/expired physical fix or unresolved zone display "時差待確認", never a fabricated comparison. Cache verified real reference conservatively; no indefinite last-known zone.
+- [x] Favourites list **source** is compact on Android and Web: place name, country/flag, city, destination local clock and verified real-zone difference, with expandable creation date/coordinates and confirmed rename/delete. Clocks update at most once/minute, no GPS-tick repaints. Real POCO and Edge acceptance remains open.
+- [x] Web map-first RWD **source/UI smoke**: desktop wide map + independent right controls, tablet stacked, mobile map with viewport-fixed navigation; top-right favourites dialog with search and destination clock/verified-real-zone comparison; tap-only Web settings. 390/834/1440px Playwright map loaded with no horizontal overflow, 0 console errors and no backdrop blur. Real Edge/POCO acceptance remains open.
+
+### Flower detection (separate phase, do not falsely claim fully automatic GPS)
+- [x] **Manual bridge source**: existing consented still-image bloom detector → user-provided 3+ pixel/GPS anchors → in-anchor conservative error gate (held-out RMSE ≤60m, worst ≤120m) → explicit "save as UNVERIFIED candidate" into existing local flower catalogue. User may later personally confirm that candidate and add it through the existing ≤14-stop Valhalla route preview. No auto GPS stop injection, no screenshot retention, no automatic walking, no claim of game accuracy.
+- [ ] **Real-device validation**: user-authorised actual Pikmin Bloom captures, multiple map scales/orientations and image sets; measure false positives and positional errors before considering automatic mapping or route creation. This still blocks declaring true automatic flower detection complete.
+
+### Quality gates
+- [x] Local Kotlin/JVM tests for Android and latest LAN Web source (BUILD SUCCESSFUL), Node syntax, `git diff --check`, synthetic RWD/flower tests in Playwright; existing Android theme untouched.
+- [ ] Current Web/flower PR → `develop` only after GitHub Android CI (JVM + Lint).
+- [ ] **Real POCO/PC acceptance is a release blocker.** MSI ADB has no device; OpenChatX PC2 tunnel did not respond on 2026-11-22. Confirm GPS mode, native Edge options, favourites, 3-mode swipe, permission denial, local-time/DST, background LAN and route gates on a physical phone before declaring acceptance.
+- [ ] **UAT release is deferred until the above items are complete.** Only then bump version, checked `develop → staging` merge commit, manually dispatch fixed-signed GitHub Actions, verify package identity/certificate/download; never auto-install or modify production `main`.
+
 ## P0 · UAT 0.13.1 LAN Web feedback — true GPS, numbered route, dark Edge options (21 Nov 2026)
 - [x] Source diagnosis: `/api/state.position` is virtual GPS, `restore-real` only ends mock provider; the default Taipei map centre is **not** a phone GPS fix. Never report a mock or stale fix as real.
 - [x] Add paired, explicit on-demand real-phone GPS query only with fine-location permission and no active mock provider; reject Android mock fixes, expire old fixes, show separate real/virtual map markers and a status/readiness message. The browser must never move the phone by merely viewing or selecting coordinates.
@@ -14,8 +41,8 @@
 ## P1 · 尋花 feature scope (manual confirmed flower locations first)
 - [x] Existing source supports manually selected confirmed flower stops, up to 14, min-distance/duplicate guards, loop and walking-road preview via Valhalla with explicit second Start. This **does not** discover live Pikmin Bloom large flowers automatically.
 - [x] Android phone already has a local flower catalogue (confirmed vs unverified import), JSON candidate import/GeoJSON export, and nearby lookup at 500 m / 2 km / 5 km with optional verified-only filter; nearest results are sorted by straight-line distance, NOT optimised walking distance.
-- [ ] Phase 1 Web parity: expose the **existing Android flower catalogue** through an authenticated, bounded LAN read endpoint and let the user select only explicitly chosen flowers; label provenance as checked vs unverified and never silently turn OSM POIs into game flowers.
-- [ ] Phase 2: optional route ordering/optimisation by pedestrian road distance from confirmed flower stops, retaining manual override, ordered list, loop and route preview; do not confuse straight-line nearby sorting with route optimisation.
+- [x] Phase 1 Web parity **source**: authenticated, 100-result bounded nearby lookup on existing Android flower catalogue (500m/2km/5km, checked-only or explicit unverified candidates). Explicit add by catalogue ID; unverified candidates require acknowledgement; preserves ≤14 flower guards and invalidates prior preview. Synthetic Web smoke passed. Real LAN acceptance remains open.
+- [x] Phase 2 **source**: optional Valhalla `optimized_route` pedestrian ordering keeps origin and end fixed, validates returned original-index permutation and never changes coordinates; explicit click, no silent GPS movement, failure retains old order, successful reordering invalidates preview and still requires Valhalla walking-road preview and separate Start. Source JVM tests and one synthetic live Valhalla protocol check passed; real POCO performance/provider availability remain open.
 - [ ] Phase 3: review optional user-authorised image/manual-calibration flow with real POCO precision/recall evidence. No claim of automatic accurate real-world flower detection from unverified candidates.
 
 ## P0 · UAT 0.13.1 performance-first matte surfaces (21 Nov 2026)

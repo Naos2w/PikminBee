@@ -50,6 +50,19 @@ class FlowerCatalogStore(context: Context) {
         }
     }
 
+    /** Store manually reviewed pixel-calibrated candidates as UNVERIFIED.
+     *  Never silently upgrade an existing unverified or confirmed flower. */
+    fun addUnverifiedCandidate(name: String, point: Coordinate): Boolean =
+        synchronized(FlowerCatalogState) {
+            val current = all()
+            if (current.size >= 1_000 || current.any {
+                    WalkingGeometry.distanceMeters(it.coordinate, point) <= 25.0
+                }) return@synchronized false
+            val spot = FlowerSpot.imported(name, point)
+            persist(current + spot)
+            true
+        }
+
     fun importCandidates(imported: FlowerImport): FlowerMerge = synchronized(FlowerCatalogState) {
         val result = FlowerFinder.combine(all(), imported.spots)
         persist(result.flowers)

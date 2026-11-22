@@ -40,6 +40,7 @@ fun FlowerCalibrationPanel(
     documentRevision: Long,
     foreground: Color,
     muted: Color,
+    onSaveCandidate: (Coordinate) -> Unit,
 ) {
     var expanded by remember(documentRevision) { mutableStateOf(false) }
     var pixelX by remember(documentRevision) { mutableStateOf("") }
@@ -207,10 +208,18 @@ fun FlowerCalibrationPanel(
                             else "（外插，勿作為路點）",
                         color = muted, fontSize = 11.sp,
                     )
+                    OutlinedButton(
+                        enabled = FlowerCandidateSavePolicy.canStore(
+                            preview.insideAnchorHull,
+                            fit.heldOutRmseMetres, fit.worstHeldOutErrorMetres),
+                        onClick = { onSaveCandidate(preview.coordinate) },
+                    ) { Text("存為待確認花點 " + (index + 1), fontSize = 12.sp) }
                 }
             }
             Text(
-                "所有座標都只供畫面預覽，不會自動啟動行走、瞬移或新增尋花路線。",
+                "僅在參考地標範圍內、誤差符合保守門檻的候選可手動存為「未驗證」花點。" +
+                    " 儲存不代表遊戲大花已驗證，之後仍須本人確認，才適合加入尋花路線；" +
+                    " 不會自動啟動行走、瞬移或新增路點。",
                 color = muted, fontSize = 11.sp,
             )
         }

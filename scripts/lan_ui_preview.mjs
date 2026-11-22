@@ -29,6 +29,7 @@ let state = {
   mockActive: true,
   realGpsState:'mock',
   realPosition:null,
+  realTimeZoneId:null,
   // Synthetic numbered draft for visual QA only; this never reaches a phone.
   routeStops: [
     {lat:25.0441,lon:121.4661},{lat:25.0478,lon:121.4702},
@@ -65,7 +66,28 @@ createServer(async (req,res)=>{
     send(res,state);return;
   }
   if(req.method==='GET'&&url==='/api/saved'){
-    send(res,{places:[],routes:[]});return;
+    send(res,{places:[{
+      id:1,name:"東京車站（合成資料）",position:{lat:35.681236,lon:139.767125},
+      countryCode:"JP",countryName:"日本",city:"東京",
+      timeZoneId:"Asia/Tokyo",createdAtMillis:1795180000000
+    }],routes:[]});return;
+  }
+  if(req.method==='POST'&&
+     (url==='/api/saved/place/rename'||url==='/api/saved/place/delete')){
+    send(res,{message:'本機收藏操作模擬（沒有修改手機資料）'},202);return;
+  }
+  if(req.method==='POST'&&url==='/api/flowers/nearby'){
+    send(res,{flowers:[{id:"test-flower-1",name:"測試花點（非遊戲資料）",
+      lat:25.045,lon:121.466,distancemetres:120,distanceMetres:120,
+      evidence:"PERSONALLY_CHECKED"}],source:"USER_CATALOGUE_NOT_GAME_API"});return;
+  }
+  if(req.method==='POST'&&url==='/api/flowers/optimise'){
+    send(res,{message:'本機僅供 UI 預覽：道路順序未實際最佳化'},202);return;
+  }
+  if(req.method==='POST'&&url==='/api/flowers/add'){
+    state.flowerStops=[{lat:25.045,lon:121.466}];
+    state.previews={};
+    send(res,{message:"合成花點已加入（沒有操控手機）"},202);return;
   }
   if(req.method==='POST'&&url==='/api/control'){
     const request=JSON.parse((await (async()=>{let body='';for await(const chunk of req)body+=chunk;return body})())||'{}');
@@ -81,6 +103,7 @@ createServer(async (req,res)=>{
     if(state.mockActive){send(res,{error:'請先恢復真實 GPS'},409);return;}
     state.realPosition={lat:25.0408,lon:121.4634,accuracy:12};
     state.realGpsState='ready';
+    state.realTimeZoneId='Asia/Taipei';
     send(res,{message:'本機預覽的合成真實 GPS（並非手機定位）'},202);return;
   }
   if(req.method==='POST'&&(url==='/api/points/reorder'||url==='/api/points/remove')){
