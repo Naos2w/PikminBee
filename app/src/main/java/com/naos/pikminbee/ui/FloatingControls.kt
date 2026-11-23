@@ -19,7 +19,10 @@ import android.view.WindowManager
 import android.view.ViewGroup
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.view.animation.AccelerateDecelerateInterpolator
+import com.naos.pikminbee.health.HealthConnectRealSteps
+import com.naos.pikminbee.health.PhysicalStepLedger
 import com.naos.pikminbee.health.PhysicalStepsStatus
 import android.widget.LinearLayout
 import android.widget.FrameLayout
@@ -36,7 +39,17 @@ import com.naos.pikminbee.data.MapAppearance
 import android.content.res.Configuration
 import com.naos.pikminbee.domain.WalkMode
 import com.naos.pikminbee.domain.WalkPhase
+import com.naos.pikminbee.domain.RouteSurfaceStatusPolicy
 import com.naos.pikminbee.domain.WalkSpeedPreset
+import com.naos.pikminbee.domain.WalkSpeedProfile
+import com.naos.pikminbee.domain.WalkSpeedMode
+import com.naos.pikminbee.data.WalkSpeedState
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -75,29 +88,75 @@ class FloatingControls(
 
     private val windows = context.getSystemService(WindowManager::class.java)
     private val stepsHandler = Handler(Looper.getMainLooper())
+    private val dailyReadScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var dailyReadJob: Job? = null
+    private val dailyStepsCache = FloatingDailyStepsCache()
+
     private val stepRefresh = object : Runnable {
         override fun run() {
             updateStepSummary()
+            requestDailySteps()
             refreshQuick()
             if (root != null) stepsHandler.postDelayed(this, 5_000L)
         }
     }
+
+    private fun refreshDailyPeriod(): FloatingDayKey {
+        val period = FloatingDayKey.now()
+        // Do not reuse a Health Connect aggregate across a midnight or a time-zone
+        // change on the same date; drop the old async query before it finishes.
+        if (dailyStepsCache.ensurePeriod(period)) {
+            dailyReadJob?.cancel()
+            dailyReadJob = null
+        }
+        return period
+    }
+
+    /** Never query Health Connect on each 5-second overlay refresh. */
+    private fun requestDailySteps(force: Boolean = false) {
+        if (root == null || !expanded) return
+        val period = refreshDailyPeriod()
+        if (dailyReadJob?.isActive == true) {
+            if (!force) return
+            dailyReadJob?.cancel()
+            dailyReadJob = null
+        }
+        val token = dailyStepsCache.begin(
+            period, SystemClock.elapsedRealtime(), force,
+        ) ?: return
+        // A newly opened overlay first hides its potentially stale aggregate.
+        // The sensor fallback stays available while Health Connect is being read.
+        updateStepSummary()
+        dailyReadJob = dailyReadScope.launch {
+            // hasReadPermission() and aggregate() remain on Dispatchers.IO. A
+            // null read means denied/revoked/unavailable, never a total of zero.
+            val aggregate = HealthConnectRealSteps.todayAggregate(context)
+            dailyStepsCache.complete(
+                token, period, FloatingDayKey.now(),
+                SystemClock.elapsedRealtime(), aggregate,
+            )
+            updateStepSummary()
+        }
+    }
+
     private fun updateStepSummary() {
-        val virtualTotal = EstimatedWalkStatus.state.value.estimatedSteps
-        val currentWalk = com.naos.pikminbee.location.LocationStatus.walkEstimatedSteps.value
+        val period = refreshDailyPeriod()
+        val today = period.date
         val physical = PhysicalStepsStatus.state.value
+        // A legacy sensor records only the period when local tracking was active.
+        val currentLocal = if (physical.date == today &&
+            (physical.tracking || physical.todaySteps > 0L)) physical.todaySteps
+            else PhysicalStepLedger(context).todaysCount().takeIf { it > 0L }
         val hasWalk = lastMode != null && lastPhase in
             listOf(WalkPhase.MOVING, WalkPhase.PAUSED, WalkPhase.PARKED)
-        quickSteps?.text = if (hasWalk) {
-            "本次估算 $currentWalk 步 · 累計 $virtualTotal 步" +
-                if (physical.tracking || physical.todaySteps > 0)
-                    "\n實際手機 ${physical.todaySteps} 步" else ""
-        } else {
-            "虛擬估算累計 $virtualTotal 步" +
-                if (physical.tracking || physical.todaySteps > 0)
-                    " · 實際 ${physical.todaySteps} 步" else ""
-        }
-        quickSteps?.contentDescription = quickSteps?.text
+        val currentWalk = com.naos.pikminbee.location.LocationStatus.walkEstimatedSteps.value
+        val display = FloatingDailyStepsPolicy.render(
+            dailyStepsCache.currentValue(period, SystemClock.elapsedRealtime()),
+            currentLocal,
+            currentWalk.takeIf { hasWalk },
+        )
+        quickSteps?.text = display
+        quickSteps?.contentDescription = display
     }
     private var root: LinearLayout? = null
     private var panel: ScrollView? = null
@@ -410,7 +469,8 @@ class FloatingControls(
             lastPhase == WalkPhase.MOVING -> if (lastMode == WalkMode.FLOWERS)
                 "尋花行走中" else "路徑行走中"
             lastPhase == WalkPhase.PAUSED -> "已暫停"
-            lastPhase == WalkPhase.PARKED -> "已停止 · 原地停留"
+            lastPhase == WalkPhase.PARKED ->
+                RouteSurfaceStatusPolicy.parkedOverlaySummary(lastStatus, lastMode)
             lastStatus.contains("失敗") || lastStatus.contains("無法") ||
                 lastStatus.contains("請先") || lastStatus.contains("請在") ||
                 lastStatus.contains("找不到") || lastStatus.contains("中斷") ||
@@ -425,7 +485,14 @@ class FloatingControls(
             " · ${progress.activeLegLabel}（共 ${progress.waypointCount} 點）" +
                 " · ${(progress.fraction * 100).toInt()}%"
         } else ""
-        quickSummary?.text = "$label · ${currentSpeed.kilometresPerHour} km/h$journey"
+        val selectedProfile = WalkSpeedState.profile.value
+        val applied = com.naos.pikminbee.location.LocationStatus.appliedSpeedKmh.value
+        val speedLabel = if (applied > 0.0 &&
+            lastPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)) {
+            val prefix = if (selectedProfile.mode == WalkSpeedMode.RANGE) "區間 · " else ""
+            prefix + WalkSpeedProfile.number(applied) + " km/h"
+        } else selectedProfile.display
+        quickSummary?.text = "$label · $speedLabel$journey"
         val primaryLabel = when (primary) {
             OverlayPrimaryState.START -> "開始行走"
             OverlayPrimaryState.PAUSE -> "暫停行走"
@@ -564,11 +631,11 @@ class FloatingControls(
         quickSummary = summary
         actions.addView(summary)
         val stepsLine = TextView(context).apply {
-            text = "虛擬 —    實際 —"
+            text = "今日步數 —（尚未取得）"
             textSize = 11f
             setTextColor(colors().muted.toArgb())
             setPadding(dp(9), dp(1), dp(9), dp(7))
-            maxLines = 1
+            maxLines = 2
         }
         quickSteps = stepsLine
         actions.addView(stepsLine)
@@ -586,7 +653,7 @@ class FloatingControls(
                 OverlayQuickAction.FLOWER_VISION ->
                     Triple(which, OverlayGlyph.FLOWER, "畫面偵測花")
                 OverlayQuickAction.SPEED ->
-                    Triple(which, OverlayGlyph.SPEED, "切換走路速度")
+                    Triple(which, OverlayGlyph.SPEED, "切換三種速度預設；自訂與區間速度請在主畫面設定")
                 OverlayQuickAction.MAP ->
                     Triple(which, OverlayGlyph.MAP, "打開地圖")
                 OverlayQuickAction.CLOSE ->
@@ -723,11 +790,23 @@ class FloatingControls(
         panel?.visibility = if (expanded) View.VISIBLE else View.GONE
         beeButton?.visibility = if (expanded) View.GONE else View.VISIBLE
         if (expanded) {
+            // Opening the panel always revalidates HC permission and today's
+            // aggregate, rather than briefly presenting an old private value.
+            dailyReadJob?.cancel()
+            dailyReadJob = null
+            dailyStepsCache.invalidate()
+            updateStepSummary()
             panel?.alpha = 0f
             panel?.translationY = dp(10).toFloat()
             panel?.animate()?.alpha(1f)?.translationY(0f)
                 ?.setDuration(NaosDesignSystem.FAST_MS.toLong())?.start()
             refreshQuick()
+            requestDailySteps(force = true)
+        } else {
+            // A collapsed overlay need not retain a cached health total.
+            dailyReadJob?.cancel()
+            dailyReadJob = null
+            dailyStepsCache.invalidate()
         }
         params?.let { placement ->
             placement.width = if (expanded)
@@ -766,6 +845,9 @@ class FloatingControls(
 
     fun dismiss() {
         stepsHandler.removeCallbacks(stepRefresh)
+        dailyReadJob?.cancel()
+        dailyStepsCache.invalidate()
+        dailyReadScope.cancel()
         logoAnimator?.cancel()
         logoAnimator = null
         logoRenderKey = ""

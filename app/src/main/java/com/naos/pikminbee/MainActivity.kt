@@ -91,6 +91,8 @@ import com.naos.pikminbee.data.RouteDraftState
 import com.naos.pikminbee.data.PreparedRouteState
 import com.naos.pikminbee.data.WalkSpeedState
 import com.naos.pikminbee.domain.WalkSpeedPreset
+import com.naos.pikminbee.domain.WalkSpeedProfile
+import com.naos.pikminbee.domain.MockGpsJitterLevel
 import com.naos.pikminbee.data.SavedRouteState
 import com.naos.pikminbee.data.SavedRoute
 import com.naos.pikminbee.gpx.GpxCodec
@@ -263,7 +265,10 @@ private fun PikminBeeScreen() {
     val savedRoutes by SavedRouteState.routes.collectAsState()
     var planning by remember { mutableStateOf(false) }
     val speedPreset by WalkSpeedState.selected.collectAsState()
+    val speedProfile by WalkSpeedState.profile.collectAsState()
     val defaultSpeedPreset by WalkSpeedState.preferred.collectAsState()
+    var mockGpsJitterLevel by remember { mutableStateOf(prefs.mockGpsJitterLevel()) }
+    var virtualStrideMetres by remember { mutableStateOf(prefs.virtualStrideMetres()) }
     var flowerLoop by remember { mutableStateOf(true) }
     val work = rememberCoroutineScope()
     LaunchedEffect(showFavourites) {
@@ -495,8 +500,8 @@ private fun PikminBeeScreen() {
             else if (routePreviewReady) routeRoadPreview else emptyList()
         else -> emptyList()
     }
-    fun chooseWalkSpeed(next: WalkSpeedPreset) {
-        prefs.setWalkSpeedPreset(next)
+    fun chooseSpeedProfile(next: WalkSpeedProfile) {
+        prefs.setWalkSpeedProfile(next)
         val moving = mockPosition != null &&
             walkPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)
         if (moving) {
@@ -513,6 +518,13 @@ private fun PikminBeeScreen() {
     fun setDefaultWalkSpeed(next: WalkSpeedPreset) {
         prefs.setDefaultWalkSpeedPreset(next)
         message = "已將 ${next.display} 設為下次開啟 App 的預設速度"
+    }
+    fun setMockGpsJitter(next: MockGpsJitterLevel) {
+        prefs.setMockGpsJitterLevel(next)
+        mockGpsJitterLevel = next
+        message = if (next == MockGpsJitterLevel.OFF)
+            "模擬定位微幅漂移已關閉"
+        else "模擬定位微幅漂移設定為 ${next.metres} 公尺（僅影響回報座標）"
     }
     fun moveMapCamera(target: MapCameraGeometry.ViewTarget) {
         if (!target.hasAny) return
@@ -607,7 +619,7 @@ private fun PikminBeeScreen() {
             else -> runCatching {
                 ContextCompat.startForegroundService(context,
                     MockLocationService.routeIntent(context, ready.geometry,
-                        WalkSpeedState.selected.value.metresPerSecond, mode, loop))
+                        WalkSpeedState.profile.value.nominalMps, mode, loop))
             }.onSuccess {
                 message = "已使用預覽道路開始${if (mode == WalkMode.FLOWERS) "尋花" else "路徑"}行走"
             }.onFailure {
@@ -901,6 +913,8 @@ private fun PikminBeeScreen() {
                 freeMapStyle = freeMapStyle,
                 appearance = appearance,
                 defaultSpeed = defaultSpeedPreset,
+                virtualStrideMetres = virtualStrideMetres,
+                mockGpsJitterLevel = mockGpsJitterLevel,
                 overlayVisible = overlayVisible,
                 mockActive = mockPosition != null,
                 showWifiPanel = showWifiPanel,
@@ -922,6 +936,12 @@ private fun PikminBeeScreen() {
                     }.onFailure { message = "已切換主題，浮窗更新失敗：${it.message}" }
                 },
                 onDefaultSpeed = ::setDefaultWalkSpeed,
+                onVirtualStrideMetres = {
+                    prefs.setVirtualStrideMetres(it)
+                    virtualStrideMetres = it
+                    message = "虛擬步幅已設定為 ${String.format(java.util.Locale.US, "%.1f", it * 100).removeSuffix(".0")} 公分，下一次行走生效"
+                },
+                onMockGpsJitterLevel = ::setMockGpsJitter,
                 onPermissions = { activePage = BeePage.PERMISSIONS },
                 overlayGuideEnabled = guideEnabled,
                 overlayHoldHints = holdHints,
@@ -1295,7 +1315,8 @@ private fun PikminBeeScreen() {
                                     phase = walkPhase,
                                     walkEstimatedSteps = walkEstimatedSteps,
                                     speedPreset = speedPreset,
-                                    onSpeedSelected = ::chooseWalkSpeed,
+                                    speedProfile = speedProfile,
+                                    onSpeedSelected = ::chooseSpeedProfile,
                                     foreground = foreground, muted = muted,
                                     onUndo = {
                                         if (roadStops.isNotEmpty()) {
@@ -1429,7 +1450,8 @@ private fun PikminBeeScreen() {
                                     phase = walkPhase,
                                     walkEstimatedSteps = walkEstimatedSteps,
                                     speedPreset = speedPreset,
-                                    onSpeedSelected = ::chooseWalkSpeed,
+                                    speedProfile = speedProfile,
+                                    onSpeedSelected = ::chooseSpeedProfile,
                                     foreground = foreground, muted = muted,
                                     onUndo = { prefs.saveFlowerDraft(flowerStops.dropLast(1)) },
                                     onClear = { prefs.saveFlowerDraft(emptyList()) },

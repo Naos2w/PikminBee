@@ -16,7 +16,7 @@ data class EstimatedStepSession(
 ) {
     init {
         require(id.isNotBlank() && id.length <= 100)
-        require(startMillis > 0L && endMillis >= startMillis)
+        require(startMillis > 0L && endMillis > startMillis)
         require(steps in 1L..10_000_000L)
     }
 }
@@ -34,8 +34,10 @@ object EstimatedStepSessionCodec {
         val array = JSONArray(json)
         require(array.length() <= 500)
         (0 until array.length()).mapNotNull { index ->
-            val entry = array.getJSONObject(index)
+            // One malformed historical record must not erase the other 499
+            // queued estimates. Decode each entry inside its own failure guard.
             runCatching {
+                val entry = array.getJSONObject(index)
                 EstimatedStepSession(
                     entry.getString("id"),
                     entry.getLong("start"),

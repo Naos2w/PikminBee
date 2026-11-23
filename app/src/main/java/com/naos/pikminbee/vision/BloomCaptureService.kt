@@ -59,7 +59,10 @@ class BloomCaptureService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val working = AtomicBoolean(false)
-    private var started = false
+    @Volatile private var started = false
+    @Volatile private var capturedContentVisible: Boolean? = null
+    private var analysedFrames = 0L
+    private var pendingResize: Pair<Int, Int>? = null
     private var lastFrameAt = 0L
     private var projection: MediaProjection? = null
     private var display: VirtualDisplay? = null
@@ -78,7 +81,25 @@ class BloomCaptureService : Service() {
 
         override fun onCapturedContentResize(width: Int, height: Int) {
             if (width <= 0 || height <= 0) return
-            handler.post { resizeCapture(width, height) }
+            handler.post {
+                // Android can report its initial app-sharing size before the
+                // first VirtualDisplay finishes starting. Do not lose that size.
+                if (!started || display == null) pendingResize = width to height
+                else resizeCapture(width, height)
+            }
+        }
+
+        override fun onCapturedContentVisibilityChanged(isVisible: Boolean) {
+            capturedContentVisible = isVisible
+            val current = BloomVisionState.state.value
+            if (current.phase == BloomVisionState.Phase.CAPTURING) {
+                BloomVisionState.state.value = current.copy(
+                    capturedContentVisible = isVisible,
+                    result = if (isVisible) current.result else null,
+                    message = if (isVisible) "分享區域已可見，等待下一張影格"
+                        else "Android 回報分享區域目前不可見；未判定為受保護畫面",
+                )
+            }
         }
     }
 
@@ -102,6 +123,9 @@ class BloomCaptureService : Service() {
             }
             ACTION_START -> {
                 if (started || projection != null) return START_NOT_STICKY
+                capturedContentVisible = null
+                analysedFrames = 0L
+                pendingResize = null
                 val code = intent.getIntExtra(EXTRA_RESULT_CODE, Int.MIN_VALUE)
                 val data = if (Build.VERSION.SDK_INT >= 33) {
                     intent.getParcelableExtra(EXTRA_CONSENT_DATA, Intent::class.java)
@@ -143,9 +167,15 @@ class BloomCaptureService : Service() {
                     started = true
                     BloomVisionState.state.value = BloomVisionState.Snapshot(
                         phase = BloomVisionState.Phase.CAPTURING,
-                        message = "只讀取使用者已授權的畫面，每約 3 秒分析一次；不儲存圖片",
+                        message = "等待已授權畫面影格；不儲存圖片",
                         origin = "系統授權的螢幕分享",
+                        capturedContentVisible = capturedContentVisible,
                     )
+                    handler.post {
+                        val pending = pendingResize
+                        pendingResize = null
+                        if (pending != null) resizeCapture(pending.first, pending.second)
+                    }
                 } catch (e: Exception) {
                     BloomVisionState.state.value = BloomVisionState.Snapshot(
                         message = "無法開始畫面辨識：" + (e.message ?: "系統拒絕擷取"))
@@ -201,12 +231,15 @@ class BloomCaptureService : Service() {
                 try {
                     val result = BloomDetector.analyse(frame)
                     if (started) {
+                        val visible = capturedContentVisible
+                        analysedFrames++
                         BloomVisionState.state.value = BloomVisionState.Snapshot(
                             phase = BloomVisionState.Phase.CAPTURING,
-                            message = if (result.mostlyBlank) result.note else
-                                "本次找到 ${result.hits.size} 個畫面候選；尚未驗證真實準確率與世界座標",
-                            result = result,
+                            message = BloomCaptureDiagnosticPolicy.frameMessage(result, visible),
+                            result = if (visible == false) null else result,
                             origin = "系統授權的螢幕分享",
+                            analysedFrames = analysedFrames,
+                            capturedContentVisible = visible,
                         )
                     }
                 } catch (e: Exception) {
@@ -276,6 +309,8 @@ class BloomCaptureService : Service() {
 
     private fun stopCapture() {
         started = false
+        capturedContentVisible = null
+        pendingResize = null
         // Do not retain raw image buffers, a valid MediaProjection token, or any service after stop.
         reader?.setOnImageAvailableListener(null, null)
         display?.release()
@@ -289,6 +324,7 @@ class BloomCaptureService : Service() {
         val snapshot = BloomVisionState.state.value
         BloomVisionState.state.value = snapshot.copy(
             phase = BloomVisionState.Phase.IDLE,
+            capturedContentVisible = null,
             message = if (snapshot.message.contains("系統或使用者結束")) snapshot.message
                 else "畫面擷取已停止；分析結果僅保留在本次 App 記憶體中",
         )
@@ -298,6 +334,8 @@ class BloomCaptureService : Service() {
 
     override fun onDestroy() {
         started = false
+        capturedContentVisible = null
+        pendingResize = null
         display?.release()
         reader?.close()
         projection?.unregisterCallback(projectionCallback)

@@ -14,6 +14,10 @@ object BloomVisionState {
         val message: String = "尚未分析畫面",
         val result: BloomDetector.Result? = null,
         val origin: String? = null,
+        /** Only a session-local count; neither pixels nor capture tokens are retained. */
+        val analysedFrames: Long = 0L,
+        /** Android 14+ reports whether the selected sharing region is currently visible. */
+        val capturedContentVisible: Boolean? = null,
         // New selection must invalidate anchors even if detection results are structurally equal.
         val documentRevision: Long = 0L,
     )

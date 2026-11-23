@@ -26,6 +26,8 @@ import com.naos.pikminbee.domain.RouteEstimate
 import com.naos.pikminbee.domain.WalkMode
 import com.naos.pikminbee.domain.WalkPhase
 import com.naos.pikminbee.domain.WalkSpeedPreset
+import com.naos.pikminbee.domain.WalkSpeedProfile
+import com.naos.pikminbee.domain.WalkSpeedMode
 import com.naos.pikminbee.domain.WalkingGeometry
 
 /**
@@ -43,7 +45,8 @@ fun JourneyControls(
     phase: WalkPhase,
     walkEstimatedSteps: Long,
     speedPreset: WalkSpeedPreset,
-    onSpeedSelected: (WalkSpeedPreset) -> Unit,
+    speedProfile: WalkSpeedProfile,
+    onSpeedSelected: (WalkSpeedProfile) -> Unit,
     foreground: Color,
     muted: Color,
     onUndo: () -> Unit,
@@ -95,8 +98,9 @@ fun JourneyControls(
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             WalkSpeedPreset.entries.forEach { option ->
                 FilterChip(
-                    selected = speedPreset == option,
-                    onClick = { onSpeedSelected(option) },
+                    selected = speedProfile.mode == WalkSpeedMode.PRESET &&
+                        speedPreset == option,
+                    onClick = { onSpeedSelected(WalkSpeedProfile.preset(option)) },
                     modifier = Modifier.weight(1f),
                     label = {
                         Text("${option.label}\n${option.kilometresPerHour} km/h",
@@ -105,6 +109,13 @@ fun JourneyControls(
                 )
             }
         }
+        WalkSpeedAdvancedControls(
+            profile = speedProfile,
+            onSelected = onSpeedSelected,
+            onMessage = onMessage,
+            foreground = foreground,
+            muted = muted,
+        )
 
         when {
             controlling -> Text(if (phase == WalkPhase.PAUSED) "已暫停" else "行走中",
@@ -114,9 +125,10 @@ fun JourneyControls(
             routePlanning -> Text("正在查詢可步行道路…",
                 color = muted, fontSize = 12.sp)
             hasPreview -> {
-                val estimate = RouteEstimate.fromDistance(
-                    WalkingGeometry.lengthMeters(preparedRoad), speedPreset)
-                Text("預覽完成 · ${estimate.distanceLabel} · 約 ${estimate.durationLabel}",
+                val estimate = RouteEstimate.fromDistanceAtMps(
+                    WalkingGeometry.lengthMeters(preparedRoad), speedProfile.nominalMps)
+                Text("預覽完成 · ${estimate.distanceLabel} · 約 ${estimate.durationLabel}" +
+                    if (speedProfile.mode == WalkSpeedMode.RANGE) "（區間均速估計）" else "",
                     color = foreground, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 if (snapMetres > 40.0) {
                     Text("注意：路點最多偏離可步行道路約 ${snapMetres.toInt()} 公尺，開始前須確認",

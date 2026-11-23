@@ -53,4 +53,6 @@
 - Android 前景服務類型 `mediaProjection`：
   https://developer.android.com/develop/background-work/services/fgs/service-types
 
-**目前狀態：Android 原始碼＋本機單元測試；POCO UAT 尚未執行，不能宣稱實機畫面可辨識。**
+**目前狀態（2026-11-23）：POCO Android 16 / HyperOS 3.0 已以唯讀 ADB 確認 UAT 0.19.1 的使用者授權、MediaProjection 前景服務和 1280×2772 虛擬顯示器啟動，但 PikminBee 對遊戲和普通 Android「設定」畫面都回報「畫面幾乎全黑」。這不等於取得了有效影像，亦不能證明遊戲施加擷取保護；未擷取或保存任何真實畫面。**
+
+**來源層診斷：** 原本將超過 93% 像素 RGB 均小於 30 判定為近乎全黑，會錯誤排除有少量白色文字的深色 UI。後續 F3 原始碼修補採較保守的暗畫面判斷，補充 Android `onCapturedContentVisibilityChanged`、匿名影格數統計與初次 resize 回呼處理。以上**仍需安裝經核准的整合 UAT 後**，以未受保護的 Settings 畫面確認「影格數確實增加、分享區域可見、空白判斷正確」，再測試停止與旋轉。程式測試／CI 不能代替實機驗收，Issue #17 保持開啟。

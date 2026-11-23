@@ -7,6 +7,7 @@ const initialCenter = {lat: 25.033, lon: 121.5654};
 let chosen = null; // A map centre is not a user-selected teleport destination.
 let current = null;
 let latest = null;
+let speedEditing = false;
 let connected = false;
 let refreshing = false;
 let map = null, maplibre = null;
@@ -368,11 +369,52 @@ $("clear").addEventListener("click", async () => {
   if (confirm("要清除全部路點嗎？此操作不會移動 GPS。"))
     await act("/api/points/clear",{mode});
 });
-$("speed").addEventListener("change", () => {
-  act("/api/speed",{speedPreset:$("speed").value});
+function showSpeedFields() {
+  const choice = $("speed").value;
+  $("speed-extra").classList.toggle("hidden", !["FIXED","RANGE"].includes(choice));
+  $("speed-fixed-wrap").classList.toggle("hidden", choice !== "FIXED");
+  $("speed-range-wrap").classList.toggle("hidden", choice !== "RANGE");
+  $("make-speed-default").disabled = ["FIXED","RANGE"].includes(choice);
+}
+function speedPayload() {
+  const selected = $("speed").value;
+  if (["SLOW","WALK","FAST"].includes(selected))
+    return {speedMode:"PRESET",speedPreset:selected};
+  const finite = text => {
+    const raw = text.trim();
+    const value = Number(raw);
+    if (!raw || !Number.isFinite(value) || value < 0.8 || value > 20)
+      throw Error("速度必須介於 0.8–20 km/h");
+    return value;
+  };
+  if (selected === "FIXED")
+    return {speedMode:"FIXED",speedKmh:finite($("speed-fixed").value)};
+  if (selected === "RANGE") {
+    const min = finite($("speed-min").value), max = finite($("speed-max").value);
+    if (min >= max) throw Error("區間最低速度必須小於最高速度");
+    return {speedMode:"RANGE",speedMinKmh:min,speedMaxKmh:max};
+  }
+  throw Error("請選擇有效速度");
+}
+$("speed").addEventListener("change", async () => {
+  showSpeedFields();
+  if (!["SLOW","WALK","FAST"].includes($("speed").value)) {
+    speedEditing = true; return;
+  }
+  speedEditing = false;
+  await act("/api/speed",speedPayload());
+});
+for (const id of ["speed-fixed","speed-min","speed-max"])
+  $(id).addEventListener("input", () => {speedEditing = true;});
+$("apply-speed").addEventListener("click", async () => {
+  try {
+    const payload = speedPayload();
+    if (await act("/api/speed", payload)) speedEditing = false;
+  } catch (error) { setMessage(error.message); }
 });
 $("make-speed-default").addEventListener("click", () => {
-  act("/api/speed/default",{speedPreset:$("speed").value});
+  if (["SLOW","WALK","FAST"].includes($("speed").value))
+    act("/api/speed/default",{speedPreset:$("speed").value});
 });
 $("plan").addEventListener("click", async () => {
   $("confirm-snap").checked = false;
@@ -391,12 +433,15 @@ $("start").addEventListener("click", async () => {
     setMessage("請先確認道路吸附位置"); return;
   }
   if (!confirm("已確認路線預覽。現在開始從手機模擬行走？")) return;
+  let selectedSpeed;
+  try { selectedSpeed = speedPayload(); }
+  catch (error) { setMessage(error.message); return; }
   $("start").disabled = true;
   const accepted = await act("/api/route/start",{
-    mode, previewId: prepared.id, speedPreset:$("speed").value,
+    mode, previewId: prepared.id, ...selectedSpeed,
     loop:$("loop").value === "true", confirmSnap:$("confirm-snap").checked
   });
-  if (accepted) setMessage("已將開始行走指令送給手機；請查看最新狀態");
+  if (accepted) { speedEditing = false; setMessage("已將開始行走指令送給手機；請查看最新狀態"); }
   updateRouteControls();
 });
 for (const [id,action] of [["pause","pause"],["resume","resume"],["stop","stop"]]) {
@@ -875,12 +920,24 @@ async function refresh() {
   try {
     latest = await call("/api/state");
     current = latest.position;
-    if (["SLOW","WALK","FAST"].includes(latest.speedPreset))
-      $("speed").value = latest.speedPreset;
+    if (!speedEditing) {
+      const profile = latest.speedMode || "PRESET";
+      $("speed").value = profile === "FIXED" || profile === "RANGE"
+        ? profile : (["SLOW","WALK","FAST"].includes(latest.speedPreset) ? latest.speedPreset : "WALK");
+      if (Number.isFinite(latest.speedKmh)) $("speed-fixed").value = latest.speedKmh.toFixed(1);
+      if (Number.isFinite(latest.speedMinKmh)) $("speed-min").value = latest.speedMinKmh.toFixed(1);
+      if (Number.isFinite(latest.speedMaxKmh)) $("speed-max").value = latest.speedMaxKmh.toFixed(1);
+    }
+    showSpeedFields();
     const labels = {SLOW:"慢走 0.8",WALK:"走路 1.4",FAST:"快走 10.8"};
     $("default-speed").textContent = "預設：" +
       (labels[latest.defaultSpeedPreset] || labels.WALK) + " km/h";
-    $("make-speed-default").disabled = latest.speedPreset === latest.defaultSpeedPreset;
+    $("make-speed-default").disabled =
+      $("speed").value === "FIXED" || $("speed").value === "RANGE" ||
+      (latest.speedMode === "PRESET" && latest.speedPreset === latest.defaultSpeedPreset);
+    $("speed-applied").textContent = (latest?.phase === "MOVING" || latest?.phase === "PAUSED") &&
+        Number.isFinite(latest.speedAppliedKmh) && latest.speedAppliedKmh > 0
+        ? "手機目前套用 " + latest.speedAppliedKmh.toFixed(1) + " km/h" : "";
     updateStatus();
     updateRouteControls();
     renderMap();
