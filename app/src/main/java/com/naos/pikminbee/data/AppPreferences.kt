@@ -7,6 +7,7 @@ import com.naos.pikminbee.ui.NaosThemeFamily
 import com.naos.pikminbee.ui.NaosGlassMaterial
 import com.naos.pikminbee.domain.WalkMode
 import com.naos.pikminbee.domain.WalkSpeedPreset
+import com.naos.pikminbee.domain.MockGpsJitterLevel
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -106,6 +107,14 @@ class AppPreferences(private val context: Context) {
 
     fun walkSpeedPreset(): WalkSpeedPreset = WalkSpeedState.selected.value
     fun defaultWalkSpeedPreset(): WalkSpeedPreset = WalkSpeedState.preferred.value
+
+    /** Nonphysical mock-GPS drift is opt-in; old installs remain exact by default. */
+    fun mockGpsJitterLevel(): MockGpsJitterLevel =
+        MockGpsJitterLevel.fromSaved(prefs.getString("mock_gps_jitter_level", null))
+
+    fun setMockGpsJitterLevel(level: MockGpsJitterLevel) {
+        prefs.edit().putString("mock_gps_jitter_level", level.name).apply()
+    }
 
     /** Changes this session's speed; does not change the user's saved startup default. */
     fun setWalkSpeedPreset(next: WalkSpeedPreset) {

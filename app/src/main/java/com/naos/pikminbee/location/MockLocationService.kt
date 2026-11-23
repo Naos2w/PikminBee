@@ -41,6 +41,7 @@ import com.naos.pikminbee.domain.Coordinate
 import com.naos.pikminbee.domain.WalkMode
 import com.naos.pikminbee.domain.WalkPhase
 import com.naos.pikminbee.domain.WalkingGeometry
+import com.naos.pikminbee.domain.MockGpsJitter
 import com.naos.pikminbee.domain.RoutePlaybackProgress
 import com.naos.pikminbee.domain.RouteCompletionAlertPolicy
 import com.naos.pikminbee.domain.WalkingProgressSnapshot
@@ -132,6 +133,7 @@ class MockLocationService : Service() {
 
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var manager: LocationManager
+    private lateinit var appPreferences: AppPreferences
     private var providerActive = false
     private var target: Coordinate? = null
     private var track = emptyList<Coordinate>()
@@ -139,6 +141,7 @@ class MockLocationService : Service() {
     private var walkingDistanceMeters = 0.0
     private var stopThresholds = emptyList<Double>()
     private val estimatedSteps = EstimatedStepCounter()
+    private val mockGpsJitter = MockGpsJitter()
     private var estimatedStepPersistTicker = 0
     private var sessionStartMillis = 0L
     private var sessionStartSteps = 0L
@@ -162,11 +165,13 @@ class MockLocationService : Service() {
             val now = SystemClock.elapsedRealtime()
             val deltaSeconds = ((now - previousTickMillis) / 1000.0).coerceIn(0.0, 2.0)
             previousTickMillis = now
+            var advancedMetres = 0.0
             if (phase == WalkPhase.MOVING && track.size > 1) {
                 val travelMetres = speedMetersPerSecond * deltaSeconds
                 val acceptedMetres = if (loopRoute) travelMetres else
                     travelMetres.coerceAtMost((trackLengthMeters - walkingDistanceMeters).coerceAtLeast(0.0))
                 if (acceptedMetres > 0) {
+                    advancedMetres = acceptedMetres
                     val snapshot = estimatedSteps.addTravel(acceptedMetres)
                     EstimatedWalkStatus.state.value = snapshot
                     LocationStatus.walkEstimatedSteps.value =
@@ -200,7 +205,16 @@ class MockLocationService : Service() {
                 }
             }
             target?.let { point ->
-                pushFix(point)
+                // Only the Android test provider receives the small reported drift.
+                // Journal, app/Web state, route progress and step count keep the
+                // original, exact planned location so no phantom distance accrues.
+                val reported = mockGpsJitter.report(
+                    planned = point,
+                    level = appPreferences.mockGpsJitterLevel(),
+                    routeActive = mode != null && track.size > 1,
+                    advanced = advancedMetres > 0.0,
+                )
+                pushFix(reported)
                 if (providerActive) {
                     journal.record(point)
                     LocationStatus.selected.value = point
@@ -223,7 +237,7 @@ class MockLocationService : Service() {
         manager = getSystemService(LocationManager::class.java)
         // Also initialise saved route drafts when Android restores the service
         // before the app Activity has ever been opened in this process.
-        AppPreferences(this)
+        appPreferences = AppPreferences(this)
         val previousEstimated = getSharedPreferences("pikminbee_estimated_steps", MODE_PRIVATE)
             .getFloat("total_metres", 0f).toDouble()
         estimatedSteps.restore(previousEstimated.coerceAtLeast(0.0))
@@ -733,6 +747,7 @@ class MockLocationService : Service() {
         journal.record(planned.first(), force = true)
         speedMetersPerSecond = speed.coerceIn(0.2, 3.0)
         walkingDistanceMeters = 0.0
+        mockGpsJitter.reset()
         loopRoute = loop
         routeArrivalNotified = false
         LocationStatus.progress.value = RoutePlaybackProgress.snapshot(
@@ -911,6 +926,7 @@ class MockLocationService : Service() {
         clearCheckpoint: Boolean = true,
         keepOverlay: Boolean = false,
     ) {
+        mockGpsJitter.reset()
         finishEstimatedSession()
         saveEstimatedSteps()
         cancelFlowerPlanning()
