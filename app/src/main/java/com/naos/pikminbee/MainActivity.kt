@@ -162,6 +162,7 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         if (intent.getBooleanExtra(EXTRA_OPEN_SETTINGS, false))
             settingsRequests.value++
+        // Legacy requests may still arrive from an older overlay; do not reopen Seeking Flowers.
         if (intent.getBooleanExtra(EXTRA_OPEN_FLOWER_VISION, false))
             flowerVisionRequests.value++
         val selectedMode = intent.getIntExtra(EXTRA_OPEN_MODE, -1)
@@ -240,10 +241,11 @@ private fun PikminBeeScreen() {
             ?.getIntExtra(MainActivity.EXTRA_OPEN_MODE, -1) ?: -1
         mutableStateOf(
             when {
-                requestedMode in 0..2 -> ToolTab.entries[requestedMode]
+                requestedMode in 0..1 -> ToolTab.entries[requestedMode]
+                requestedMode == 2 -> ToolTab.ROUTE
                 (context as? MainActivity)?.intent
                     ?.getBooleanExtra(MainActivity.EXTRA_OPEN_FLOWER_VISION, false) == true ->
-                    ToolTab.FLOWERS
+                    ToolTab.ROUTE
                 else -> ToolTab.TELEPORT
             },
         )
@@ -368,9 +370,10 @@ private fun PikminBeeScreen() {
 
     fun acceptImportedGpx(imported: GpxImport) {
         runCatching {
-            val route = prefs.addSavedRoute(imported.name, imported.mode, imported.stops)
+            // Legacy flower-tagged GPX remains usable as an ordinary route.
+            val route = prefs.addSavedRoute(imported.name, WalkMode.ROUTE, imported.stops)
             prefs.loadSavedRouteIntoDraft(route)
-            tab = if (route.mode == WalkMode.FLOWERS) ToolTab.FLOWERS else ToolTab.ROUTE
+            tab = ToolTab.ROUTE
             message = "已匯入並收藏「" + route.name + "」，共 " + route.stops.size + " 個路點"
         }.onFailure {
             message = "GPX 匯入失敗：" + (it.message ?: "無法儲存收藏")
@@ -468,8 +471,15 @@ private fun PikminBeeScreen() {
         }.onFailure { message = "無法改名：" + (it.message ?: "儲存錯誤") }.isSuccess
 
     fun loadRoute(route: SavedRoute) {
+        if (route.mode == WalkMode.FLOWERS) {
+            // Migrate only the *draft*, never mutate/delete the user's saved legacy route.
+            prefs.saveRouteDraft(route.stops)
+            tab = ToolTab.ROUTE
+            message = "舊尋花收藏已載入一般路徑草稿；原收藏保留，請重新預覽道路"
+            return
+        }
         prefs.loadSavedRouteIntoDraft(route)
-        tab = if (route.mode == WalkMode.FLOWERS) ToolTab.FLOWERS else ToolTab.ROUTE
+        tab = ToolTab.ROUTE
         message = "已載入「" + route.name + "」的路點，沒有啟動行走"
     }
 
@@ -574,10 +584,7 @@ private fun PikminBeeScreen() {
     val modeRequest by MainActivity.mapModeRequests.collectAsState()
     var showOverlayGuide by remember { mutableStateOf(false) }
     var showOverlayAfterGuide by remember { mutableStateOf(false) }
-    var openDetailsRequest by remember { mutableIntStateOf(
-        if ((context as? MainActivity)?.intent
-                ?.getBooleanExtra(MainActivity.EXTRA_OPEN_FLOWER_VISION, false) == true) 1 else 0
-    ) }
+    var openDetailsRequest by remember { mutableIntStateOf(0) }
     var closeDetailsRequest by remember { mutableIntStateOf(0) }
     var guideEnabled by remember { mutableStateOf(prefs.overlayFirstUseGuideEnabled()) }
     var holdHints by remember { mutableStateOf(prefs.overlayLongPressTips()) }
@@ -710,10 +717,10 @@ private fun PikminBeeScreen() {
     }
     LaunchedEffect(visionRequest) {
         if (visionRequest > 0L) {
-            tab = ToolTab.FLOWERS
+            // Backward-compatible action from an older overlay never starts capture.
+            tab = ToolTab.ROUTE
             activePage = BeePage.MAP
-            openDetailsRequest++
-            message = "請在花朵辨識面板取得 Android 畫面擷取同意"
+            message = "尋花與畫面辨識已停用；請使用一般路徑"
         }
     }
     LaunchedEffect(modeRequest) {
@@ -721,7 +728,7 @@ private fun PikminBeeScreen() {
             activePage = BeePage.SETTINGS
             MainActivity.mapModeRequests.value = -1
         } else if (modeRequest in 0..2) {
-            tab = ToolTab.entries[modeRequest]
+            tab = if (modeRequest == 2) ToolTab.ROUTE else ToolTab.entries[modeRequest]
             activePage = BeePage.MAP
             routeEditingStopIndex = null
             routeStopActionIndex = null
@@ -994,7 +1001,7 @@ private fun PikminBeeScreen() {
                 closeDetailsRequest = closeDetailsRequest,
                 onMode = { index ->
                     coordinateInputDismissToken++
-                    if (index !in 0..2) activePage = BeePage.SETTINGS
+                    if (index !in 0..1) activePage = BeePage.SETTINGS
                     else tab = ToolTab.entries[index]
                     routeEditingStopIndex = null
                     routeStopActionIndex = null

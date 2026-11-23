@@ -1,8 +1,8 @@
 # PikminBee
 
-PikminBee is a free, ad-free Android GPS testing app: a bee exploring the world, visiting flowers and collecting nectar. Built with Kotlin and Jetpack Compose.
+PikminBee is a free, ad-free Android location and route testing app built with Kotlin and Jetpack Compose.
 
-**Project status:** v0.4 source development branch. All new LAN/browser controls are unverified on POCO; not a production-ready release.
+**Project status:** v0.4 source development branch; not a production-ready release. As of 2026-11-24 the user-facing `尋花` mode and flower-vision shortcut are being retired on a separate MSI development branch. Older saved data and import formats remain preserved; the change is not yet in any signed UAT APK.
 
 - Maps: OpenFreeMap Liberty/Dark via MapLibre; optional official Google Maps SDK (requires your own API key).
 - Interface: iOS-27-inspired frosted controls with accessible contrasts and a clear light/dark theme.

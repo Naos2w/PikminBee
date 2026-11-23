@@ -335,15 +335,9 @@ class FloatingControls(
                 val prefs = AppPreferences(context)
                 val routeReady = PreparedRouteState.route.value?.stops ==
                     prefs.routeDraft() && prefs.routeDraft().isNotEmpty()
-                val flowerReady = PreparedRouteState.flowers.value?.stops ==
-                    prefs.flowerDraft() && prefs.flowerDraft().isNotEmpty()
-                val requested = when {
-                    lastMode == WalkMode.ROUTE && routeReady -> WalkMode.ROUTE
-                    lastMode == WalkMode.FLOWERS && flowerReady -> WalkMode.FLOWERS
-                    routeReady && !flowerReady -> WalkMode.ROUTE
-                    flowerReady && !routeReady -> WalkMode.FLOWERS
-                    else -> null
-                }
+                // The overlay no longer starts new flower routes. Keep legacy
+                // running walks controllable with Pause / Resume / Stop only.
+                val requested = if (routeReady) WalkMode.ROUTE else null
                 val preview = requested?.let { PreparedRouteState.get(it) }
                 when {
                     requested == null -> {

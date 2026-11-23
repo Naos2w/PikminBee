@@ -7,7 +7,7 @@ import org.junit.Test
 class MapModeSwipePolicyTest {
     @Test fun leftSwipeShowsNextModeAndRightSwipeShowsPreviousMode() {
         assertEquals(1, MapModeSwipePolicy.target(0, -90f, 72f))
-        assertEquals(2, MapModeSwipePolicy.target(1, -85f, 72f))
+        assertNull(MapModeSwipePolicy.target(1, -85f, 72f))
         assertNull(MapModeSwipePolicy.target(2, -85f, 72f))
         assertNull(MapModeSwipePolicy.target(3, 80f, 72f))
     }

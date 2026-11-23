@@ -59,13 +59,13 @@ internal fun MapModeTabs(
     modifier: Modifier = Modifier,
     height: Dp = 55.dp,
 ) {
-    val labels = listOf("瞬移", "路徑", "尋花", "設定")
+    val labels = listOf("瞬移", "路徑", "設定")
     Row(
         modifier.fillMaxWidth().swipeModes(active, onMode),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         labels.forEachIndexed { index, label ->
-            val isSettings = index == 3
+            val isSettings = index == 2
             val isCurrent = !isSettings && index == active
             val background by animateColorAsState(
                 if (isCurrent) palette.accent else Color.Transparent,

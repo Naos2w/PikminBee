@@ -114,10 +114,10 @@ fun MapFirstShell(
     }
     val p = NaosDesignSystem.palette(LocalNaosVisualState.current.family, dark)
     val heightDp = LocalConfiguration.current.screenHeightDp
-    val active = modeIndex.coerceIn(0, 2)
+    val active = modeIndex.coerceIn(0, 1)
     // Ongoing walking must remain controllable even after changing map tabs.
     val showQuick = (modeIndex == 1 && routeStopsCount > 0) ||
-        (modeIndex == 2 && flowerStopsCount > 0) || routeActive || flowerActive
+        routeActive || flowerActive
 
     Box(Modifier.fillMaxSize().background(p.bg)) {
         mapContent()
@@ -170,7 +170,6 @@ fun MapFirstShell(
             val modeStopsCount = when {
                 flowerActive -> flowerStopsCount
                 routeActive -> routeStopsCount
-                modeIndex == 2 -> flowerStopsCount
                 else -> routeStopsCount
             }
             MapGlass(

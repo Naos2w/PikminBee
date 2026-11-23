@@ -196,7 +196,7 @@ function applyResponsiveLayout() {
   requestAnimationFrame(() => map?.resize());
 }
 function selectMode(next, userAction = true) {
-  if (!["TELEPORT","ROUTE","FLOWERS"].includes(next)) return;
+  if (!["TELEPORT","ROUTE"].includes(next)) return;
   const wasCurrent = !settingsOpen && mode === next;
   mode = next;
   settingsOpen = false;
@@ -249,9 +249,9 @@ $("sheet-handle").addEventListener("click", () => {
 window.addEventListener("resize", applyResponsiveLayout, {passive:true});
 selectMode("TELEPORT", false);
 applyResponsiveLayout();
-// Horizontal swipe switches only the three functional modes, never Settings or the map.
+// Horizontal swipe switches only Teleport and Route, never Settings or the map.
 const swipeArea = $("mode-content");
-const modeOrder = ["TELEPORT", "ROUTE", "FLOWERS"];
+const modeOrder = ["TELEPORT", "ROUTE"];
 let swipeStart = null;
 swipeArea.addEventListener("touchstart", event => {
   swipeStart = null;
@@ -1109,9 +1109,13 @@ function renderSaved() {
     const button=document.createElement("button");
     button.textContent="載入草稿（仍須預覽）";
     button.addEventListener("click",async()=>{
+      if(route.mode==="FLOWERS"){
+        setMessage("舊尋花路線已保留；請在手機 App 的收藏轉為一般路徑，不會直接啟動");
+        return;
+      }
       if(await act("/api/saved/load",{id:route.id})){
         $("saved-dialog").close();
-        selectMode(route.mode==="FLOWERS"?"FLOWERS":"ROUTE");
+        selectMode("ROUTE");
         setMessage("收藏路線已載入，請先預覽步行道路");
       }
     });
