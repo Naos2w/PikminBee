@@ -18,6 +18,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
+import android.util.Log
 import com.naos.pikminbee.MainActivity
 import com.naos.pikminbee.ui.FloatingControls
 import com.naos.pikminbee.domain.FloatingRouteDraft
@@ -41,6 +42,7 @@ import com.naos.pikminbee.domain.WalkMode
 import com.naos.pikminbee.domain.WalkPhase
 import com.naos.pikminbee.domain.WalkingGeometry
 import com.naos.pikminbee.domain.RoutePlaybackProgress
+import com.naos.pikminbee.domain.RouteCompletionAlertPolicy
 import com.naos.pikminbee.domain.WalkingProgressSnapshot
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -95,7 +97,9 @@ class MockLocationService : Service() {
         const val EXTRA_MODE = "walk_mode"
         const val EXTRA_LOOP = "route_loop"
         private const val CHANNEL = "pikminbee_active"
+        private const val ARRIVAL_CHANNEL = "pikminbee_route_arrival"
         private const val NOTIFICATION_ID = 301
+        private const val ARRIVAL_NOTIFICATION_ID = 302
 
         fun teleportIntent(context: android.content.Context, point: Coordinate): Intent =
             Intent(context, MockLocationService::class.java).setAction(ACTION_TELEPORT)
@@ -141,6 +145,7 @@ class MockLocationService : Service() {
     private var walkOriginSteps = 0L
     private var speedMetersPerSecond = WalkSpeedPreset.DEFAULT.metresPerSecond
     private var loopRoute = false
+    private var routeArrivalNotified = false
     private var previousTickMillis = 0L
     private var phase = WalkPhase.IDLE
     private var mode: WalkMode? = null
@@ -181,11 +186,17 @@ class MockLocationService : Service() {
                 }
                 target = WalkingGeometry.sampleAt(track, walkingDistanceMeters)
                 if (!loopRoute && walkingDistanceMeters >= trackLengthMeters - 0.1) {
+                    val previousPhase = phase
                     phase = WalkPhase.PARKED
                     LocationStatus.phase.value = phase
                     LocationStatus.display.value = "已抵達終點 · 原地停留"
                     finishEstimatedSession()
                     refreshNotification()
+                    if (RouteCompletionAlertPolicy.shouldAlert(
+                            previousPhase, phase, loopRoute, routeArrivalNotified)) {
+                        routeArrivalNotified = true
+                        showRouteArrivalNotification()
+                    }
                 }
             }
             target?.let { point ->
@@ -220,9 +231,13 @@ class MockLocationService : Service() {
         speedMetersPerSecond = WalkSpeedState.selected.value.metresPerSecond
         journal = SessionJournal(this)
         journal.read()
-        getSystemService(NotificationManager::class.java).createNotificationChannel(
-            NotificationChannel(CHANNEL, "PikminBee 模擬位置", NotificationManager.IMPORTANCE_LOW)
-        )
+        getSystemService(NotificationManager::class.java).apply {
+            createNotificationChannel(NotificationChannel(
+                CHANNEL, "PikminBee 模擬位置", NotificationManager.IMPORTANCE_LOW))
+            // Android notification settings provide per-channel sound/vibration control.
+            createNotificationChannel(NotificationChannel(
+                ARRIVAL_CHANNEL, "PikminBee 路線完成提醒", NotificationManager.IMPORTANCE_DEFAULT))
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -719,6 +734,7 @@ class MockLocationService : Service() {
         speedMetersPerSecond = speed.coerceIn(0.2, 3.0)
         walkingDistanceMeters = 0.0
         loopRoute = loop
+        routeArrivalNotified = false
         LocationStatus.progress.value = RoutePlaybackProgress.snapshot(
             0.0, length, speedMetersPerSecond, stopThresholds, loop,
         )
@@ -805,6 +821,33 @@ class MockLocationService : Service() {
             releaseMock(clearCheckpoint = false)
             stopSelf()
         }
+    }
+
+    /** One separate system notification on arrival; the ongoing GPS channel stays quiet. */
+    private fun showRouteArrivalNotification() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
+                PackageManager.PERMISSION_GRANTED) return
+
+        val view = PendingIntent.getActivity(
+            this, ARRIVAL_NOTIFICATION_ID, Intent(this, MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val completedMode = if (mode == WalkMode.FLOWERS) "尋花" else "路徑"
+        val alert = Notification.Builder(this, ARRIVAL_CHANNEL)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle("PikminBee · $completedMode 已完成")
+            .setContentText("已抵達終點，模擬位置原地停留")
+            .setContentIntent(view)
+            .setCategory(Notification.CATEGORY_STATUS)
+            .setAutoCancel(true)
+            .setOnlyAlertOnce(true)
+            .build()
+        runCatching {
+            getSystemService(NotificationManager::class.java)
+                .notify(ARRIVAL_NOTIFICATION_ID, alert)
+        }.onFailure { Log.w("PikminBee", "Unable to post route arrival notification", it) }
     }
 
     private fun notification(): Notification {

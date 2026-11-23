@@ -19,7 +19,10 @@ import android.view.WindowManager
 import android.view.ViewGroup
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.view.animation.AccelerateDecelerateInterpolator
+import com.naos.pikminbee.health.HealthConnectRealSteps
+import com.naos.pikminbee.health.PhysicalStepLedger
 import com.naos.pikminbee.health.PhysicalStepsStatus
 import android.widget.LinearLayout
 import android.widget.FrameLayout
@@ -37,6 +40,13 @@ import android.content.res.Configuration
 import com.naos.pikminbee.domain.WalkMode
 import com.naos.pikminbee.domain.WalkPhase
 import com.naos.pikminbee.domain.WalkSpeedPreset
+import java.time.LocalDate
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -75,29 +85,59 @@ class FloatingControls(
 
     private val windows = context.getSystemService(WindowManager::class.java)
     private val stepsHandler = Handler(Looper.getMainLooper())
+    private val dailyReadScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var dailyReadJob: Job? = null
+    private var hcTodaySteps: Long? = null
+    private var dailyDay: String = LocalDate.now().toString()
+    private var lastDailyReadAt: Long = 0L
+
     private val stepRefresh = object : Runnable {
         override fun run() {
             updateStepSummary()
+            requestDailySteps()
             refreshQuick()
             if (root != null) stepsHandler.postDelayed(this, 5_000L)
         }
     }
+
+    /** Never query Health Connect on every 5-second floating UI tick. */
+    private fun requestDailySteps(force: Boolean = false) {
+        if (root == null || !expanded || dailyReadJob?.isActive == true) return
+        val now = SystemClock.elapsedRealtime()
+        if (!force && lastDailyReadAt > 0L && now - lastDailyReadAt < 60_000L) return
+        val requestedDay = LocalDate.now().toString()
+        lastDailyReadAt = now
+        dailyReadJob = dailyReadScope.launch {
+            // The existing Health Connect source includes permission checks and IO dispatch.
+            val aggregate = HealthConnectRealSteps.todayAggregate(context)
+            // A midnight/timezone change while querying must never repopulate yesterday's value.
+            if (dailyDay == requestedDay && LocalDate.now().toString() == requestedDay) {
+                hcTodaySteps = aggregate
+            }
+            updateStepSummary()
+        }
+    }
+
     private fun updateStepSummary() {
-        val virtualTotal = EstimatedWalkStatus.state.value.estimatedSteps
-        val currentWalk = com.naos.pikminbee.location.LocationStatus.walkEstimatedSteps.value
+        val today = LocalDate.now().toString()
+        if (dailyDay != today) {
+            dailyDay = today
+            hcTodaySteps = null
+            lastDailyReadAt = 0L
+        }
         val physical = PhysicalStepsStatus.state.value
+        // A legacy sensor only measures the period in which tracking was active.
+        val currentLocal = if (physical.date == today &&
+            (physical.tracking || physical.todaySteps > 0L)) physical.todaySteps
+            else PhysicalStepLedger(context).todaysCount().takeIf { it > 0L }
         val hasWalk = lastMode != null && lastPhase in
             listOf(WalkPhase.MOVING, WalkPhase.PAUSED, WalkPhase.PARKED)
-        quickSteps?.text = if (hasWalk) {
-            "本次估算 $currentWalk 步 · 累計 $virtualTotal 步" +
-                if (physical.tracking || physical.todaySteps > 0)
-                    "\n實際手機 ${physical.todaySteps} 步" else ""
-        } else {
-            "虛擬估算累計 $virtualTotal 步" +
-                if (physical.tracking || physical.todaySteps > 0)
-                    " · 實際 ${physical.todaySteps} 步" else ""
-        }
-        quickSteps?.contentDescription = quickSteps?.text
+        val currentWalk = com.naos.pikminbee.location.LocationStatus.walkEstimatedSteps.value
+        val display = FloatingDailyStepsPolicy.render(
+            hcTodaySteps, currentLocal, currentWalk.takeIf { hasWalk },
+        )
+        quickSteps?.text = display
+        quickSteps?.contentDescription = display
     }
     private var root: LinearLayout? = null
     private var panel: ScrollView? = null
@@ -564,11 +604,11 @@ class FloatingControls(
         quickSummary = summary
         actions.addView(summary)
         val stepsLine = TextView(context).apply {
-            text = "虛擬 —    實際 —"
+            text = "今日步數 —（尚未取得）"
             textSize = 11f
             setTextColor(colors().muted.toArgb())
             setPadding(dp(9), dp(1), dp(9), dp(7))
-            maxLines = 1
+            maxLines = 2
         }
         quickSteps = stepsLine
         actions.addView(stepsLine)
@@ -728,6 +768,7 @@ class FloatingControls(
             panel?.animate()?.alpha(1f)?.translationY(0f)
                 ?.setDuration(NaosDesignSystem.FAST_MS.toLong())?.start()
             refreshQuick()
+            requestDailySteps(force = true)
         }
         params?.let { placement ->
             placement.width = if (expanded)
@@ -766,6 +807,8 @@ class FloatingControls(
 
     fun dismiss() {
         stepsHandler.removeCallbacks(stepRefresh)
+        dailyReadJob?.cancel()
+        dailyReadScope.cancel()
         logoAnimator?.cancel()
         logoAnimator = null
         logoRenderKey = ""
