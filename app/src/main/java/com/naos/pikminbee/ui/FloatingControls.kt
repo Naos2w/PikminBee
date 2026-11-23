@@ -43,7 +43,6 @@ import com.naos.pikminbee.domain.WalkSpeedPreset
 import com.naos.pikminbee.domain.WalkSpeedProfile
 import com.naos.pikminbee.domain.WalkSpeedMode
 import com.naos.pikminbee.data.WalkSpeedState
-import java.time.LocalDate
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -90,9 +89,7 @@ class FloatingControls(
     private val stepsHandler = Handler(Looper.getMainLooper())
     private val dailyReadScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var dailyReadJob: Job? = null
-    private var hcTodaySteps: Long? = null
-    private var dailyDay: String = LocalDate.now().toString()
-    private var lastDailyReadAt: Long = 0L
+    private val dailyStepsCache = FloatingDailyStepsCache()
 
     private val stepRefresh = object : Runnable {
         override fun run() {
@@ -103,33 +100,49 @@ class FloatingControls(
         }
     }
 
-    /** Never query Health Connect on every 5-second floating UI tick. */
+    private fun refreshDailyPeriod(): FloatingDayKey {
+        val period = FloatingDayKey.now()
+        // Do not reuse a Health Connect aggregate across a midnight or a time-zone
+        // change on the same date; drop the old async query before it finishes.
+        if (dailyStepsCache.ensurePeriod(period)) {
+            dailyReadJob?.cancel()
+            dailyReadJob = null
+        }
+        return period
+    }
+
+    /** Never query Health Connect on each 5-second overlay refresh. */
     private fun requestDailySteps(force: Boolean = false) {
-        if (root == null || !expanded || dailyReadJob?.isActive == true) return
-        val now = SystemClock.elapsedRealtime()
-        if (!force && lastDailyReadAt > 0L && now - lastDailyReadAt < 60_000L) return
-        val requestedDay = LocalDate.now().toString()
-        lastDailyReadAt = now
+        if (root == null || !expanded) return
+        val period = refreshDailyPeriod()
+        if (dailyReadJob?.isActive == true) {
+            if (!force) return
+            dailyReadJob?.cancel()
+            dailyReadJob = null
+        }
+        val token = dailyStepsCache.begin(
+            period, SystemClock.elapsedRealtime(), force,
+        ) ?: return
+        // A newly opened overlay first hides its potentially stale aggregate.
+        // The sensor fallback stays available while Health Connect is being read.
+        updateStepSummary()
         dailyReadJob = dailyReadScope.launch {
-            // The existing Health Connect source includes permission checks and IO dispatch.
+            // hasReadPermission() and aggregate() remain on Dispatchers.IO. A
+            // null read means denied/revoked/unavailable, never a total of zero.
             val aggregate = HealthConnectRealSteps.todayAggregate(context)
-            // A midnight/timezone change while querying must never repopulate yesterday's value.
-            if (dailyDay == requestedDay && LocalDate.now().toString() == requestedDay) {
-                hcTodaySteps = aggregate
-            }
+            dailyStepsCache.complete(
+                token, period, FloatingDayKey.now(),
+                SystemClock.elapsedRealtime(), aggregate,
+            )
             updateStepSummary()
         }
     }
 
     private fun updateStepSummary() {
-        val today = LocalDate.now().toString()
-        if (dailyDay != today) {
-            dailyDay = today
-            hcTodaySteps = null
-            lastDailyReadAt = 0L
-        }
+        val period = refreshDailyPeriod()
+        val today = period.date
         val physical = PhysicalStepsStatus.state.value
-        // A legacy sensor only measures the period in which tracking was active.
+        // A legacy sensor records only the period when local tracking was active.
         val currentLocal = if (physical.date == today &&
             (physical.tracking || physical.todaySteps > 0L)) physical.todaySteps
             else PhysicalStepLedger(context).todaysCount().takeIf { it > 0L }
@@ -137,7 +150,9 @@ class FloatingControls(
             listOf(WalkPhase.MOVING, WalkPhase.PAUSED, WalkPhase.PARKED)
         val currentWalk = com.naos.pikminbee.location.LocationStatus.walkEstimatedSteps.value
         val display = FloatingDailyStepsPolicy.render(
-            hcTodaySteps, currentLocal, currentWalk.takeIf { hasWalk },
+            dailyStepsCache.currentValue(period, SystemClock.elapsedRealtime()),
+            currentLocal,
+            currentWalk.takeIf { hasWalk },
         )
         quickSteps?.text = display
         quickSteps?.contentDescription = display
@@ -773,12 +788,23 @@ class FloatingControls(
         panel?.visibility = if (expanded) View.VISIBLE else View.GONE
         beeButton?.visibility = if (expanded) View.GONE else View.VISIBLE
         if (expanded) {
+            // Opening the panel always revalidates HC permission and today's
+            // aggregate, rather than briefly presenting an old private value.
+            dailyReadJob?.cancel()
+            dailyReadJob = null
+            dailyStepsCache.invalidate()
+            updateStepSummary()
             panel?.alpha = 0f
             panel?.translationY = dp(10).toFloat()
             panel?.animate()?.alpha(1f)?.translationY(0f)
                 ?.setDuration(NaosDesignSystem.FAST_MS.toLong())?.start()
             refreshQuick()
             requestDailySteps(force = true)
+        } else {
+            // A collapsed overlay need not retain a cached health total.
+            dailyReadJob?.cancel()
+            dailyReadJob = null
+            dailyStepsCache.invalidate()
         }
         params?.let { placement ->
             placement.width = if (expanded)
@@ -818,6 +844,7 @@ class FloatingControls(
     fun dismiss() {
         stepsHandler.removeCallbacks(stepRefresh)
         dailyReadJob?.cancel()
+        dailyStepsCache.invalidate()
         dailyReadScope.cancel()
         logoAnimator?.cancel()
         logoAnimator = null
