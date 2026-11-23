@@ -28,6 +28,7 @@ import com.naos.pikminbee.data.MapAppearance
 import com.naos.pikminbee.data.MapBasemapPolicy
 import com.naos.pikminbee.data.MapProvider
 import com.naos.pikminbee.domain.WalkSpeedPreset
+import com.naos.pikminbee.domain.MockGpsJitterLevel
 import com.naos.pikminbee.location.LocationCheckpoint
 
 /** Common preferences live here, never repeated on each mode's map sheet. */
@@ -38,6 +39,7 @@ fun BeeSettingsScreen(
     freeMapStyle: FreeMapStyle,
     appearance: MapAppearance,
     defaultSpeed: WalkSpeedPreset,
+    mockGpsJitterLevel: MockGpsJitterLevel,
     overlayVisible: Boolean,
     mockActive: Boolean,
     showWifiPanel: Boolean,
@@ -46,6 +48,7 @@ fun BeeSettingsScreen(
     onFreeMapStyle: (FreeMapStyle) -> Unit,
     onAppearance: (MapAppearance) -> Unit,
     onDefaultSpeed: (WalkSpeedPreset) -> Unit,
+    onMockGpsJitterLevel: (MockGpsJitterLevel) -> Unit,
     onPermissions: () -> Unit,
     overlayGuideEnabled: Boolean,
     overlayHoldHints: Boolean,
@@ -148,6 +151,28 @@ fun BeeSettingsScreen(
                             selected = defaultSpeed == option,
                             onClick = { onDefaultSpeed(option) },
                             label = { Text(option.display) },
+                        )
+                    }
+                }
+                Text("模擬定位微幅漂移 · 測試用",
+                    fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = foreground)
+                Text("只讓模擬 GPS 回報座標有小幅波動，不改路線、步數或真實 GPS；預設關閉。",
+                    fontSize = 12.sp, color = muted)
+                androidx.compose.foundation.layout.FlowRow(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                ) {
+                    MockGpsJitterLevel.entries.forEach { option ->
+                        val label = when (option) {
+                            MockGpsJitterLevel.OFF -> "關閉"
+                            MockGpsJitterLevel.LOW -> "0.5 公尺"
+                            MockGpsJitterLevel.MEDIUM -> "1.0 公尺"
+                            MockGpsJitterLevel.HIGH -> "1.5 公尺"
+                        }
+                        FilterChip(
+                            selected = mockGpsJitterLevel == option,
+                            onClick = { onMockGpsJitterLevel(option) },
+                            label = { Text(label, fontSize = 12.sp) },
                         )
                     }
                 }
