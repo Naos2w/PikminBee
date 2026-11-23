@@ -42,6 +42,7 @@ import com.naos.pikminbee.vision.BloomCaptureService
 import com.naos.pikminbee.vision.BloomDetector
 import com.naos.pikminbee.vision.BloomImageLoader
 import com.naos.pikminbee.vision.BloomVisionState
+import com.naos.pikminbee.vision.BloomCaptureDiagnosticPolicy
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -172,6 +173,14 @@ fun FlowerVisionPanel(
             }
         }
         Text(vision.message, color = muted, fontSize = 12.sp)
+        if (vision.phase == BloomVisionState.Phase.CAPTURING) {
+            Text(
+                BloomCaptureDiagnosticPolicy.label(
+                    vision.analysedFrames, vision.capturedContentVisible,
+                ) + " · 不儲存影像",
+                color = muted, fontSize = 11.sp,
+            )
+        }
         if (vision.result != null) {
             val result = vision.result!!
             Text("來源：" + (vision.origin ?: "未知") +

@@ -62,6 +62,28 @@ class BloomDetectorTest {
         assertTrue(result.hits.isEmpty())
     }
 
+    @Test fun darkThemeScreenWithSparseReadableTextIsNotAnEmptyCapture() {
+        val frame = solid(color = 0xFF101010.toInt())
+        // Roughly 1% bright content is enough to distinguish a genuine dark
+        // Settings page from a near-uniform black MediaProjection output.
+        for (row in listOf(100, 180, 260)) {
+            for (y in row until row + 3) {
+                for (x in 32 until 168) {
+                    frame.argb[y * frame.width + x] = 0xFFE0E0E0.toInt()
+                }
+            }
+        }
+        val result = BloomDetector.analyse(frame)
+        assertFalse("A dark Android UI with text is not a blank capture", result.mostlyBlank)
+        assertTrue(result.hits.isEmpty())
+    }
+
+    @Test fun nearUniformBlackWithOnlyIsolatedPixelNoiseStaysBlank() {
+        val frame = solid(color = 0xFF060609.toInt())
+        for (i in 0 until 3) frame.argb[(80 + i) * frame.width + 50] = 0xFFFFFFFF.toInt()
+        assertTrue(BloomDetector.analyse(frame).mostlyBlank)
+    }
+
     @Test fun blackFrameReportsPossibleSecureOrNotReadyImage() {
         val result = BloomDetector.analyse(solid(color=0xFF060609.toInt()))
         assertTrue(result.mostlyBlank)
