@@ -4,6 +4,7 @@ package com.naos.pikminbee.domain
 enum class RouteLifecycleChange {
     START, ARRIVE, PAUSE, RESUME, MANUAL_STOP, CLEAR, TELEPORT,
     RESTORE_REAL_GPS, RESTORE_VIRTUAL_GPS, SHOW_OVERLAY, HIDE_OVERLAY,
+    PROVIDER_FAILURE, SYSTEM_SERVICE_STOP,
 }
 
 /**
@@ -62,6 +63,8 @@ object RouteSurfaceStatusPolicy {
         RouteLifecycleChange.PAUSE,
         RouteLifecycleChange.RESUME,
         RouteLifecycleChange.SHOW_OVERLAY,
-        RouteLifecycleChange.HIDE_OVERLAY -> false
+        RouteLifecycleChange.HIDE_OVERLAY,
+        RouteLifecycleChange.PROVIDER_FAILURE,
+        RouteLifecycleChange.SYSTEM_SERVICE_STOP -> false
     }
 }

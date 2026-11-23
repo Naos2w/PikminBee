@@ -152,4 +152,13 @@ class RouteSurfaceStatusPolicyTest {
         assertFalse(RouteSurfaceStatusPolicy.clearsPreviousArrival(
             RouteLifecycleChange.ARRIVE))
     }
+
+    @Test fun systemReclaimOrRejectedProviderCannotDiscardUnseenCompletionNotice() {
+        assertFalse(RouteSurfaceStatusPolicy.clearsPreviousArrival(
+            RouteLifecycleChange.SYSTEM_SERVICE_STOP))
+        assertFalse(RouteSurfaceStatusPolicy.clearsPreviousArrival(
+            RouteLifecycleChange.PROVIDER_FAILURE))
+        assertTrue(RouteSurfaceStatusPolicy.clearsPreviousArrival(
+            RouteLifecycleChange.RESTORE_REAL_GPS))
+    }
 }

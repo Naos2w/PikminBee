@@ -889,7 +889,8 @@ class MockLocationService : Service() {
             // A failed attempt to return to virtual GPS should NOT dismiss
             // the expanded controller while the user is trying to switch.
             val preserveOverlay = floatingControls != null
-            releaseMock(clearCheckpoint = false, keepOverlay = preserveOverlay)
+            releaseMock(clearCheckpoint = false, keepOverlay = preserveOverlay,
+                arrivalChange = RouteLifecycleChange.PROVIDER_FAILURE)
             // releaseMock resets display to REAL mode; preserve the failure hint.
             LocationStatus.display.value = explanation
             updateOverlay()
@@ -925,7 +926,8 @@ class MockLocationService : Service() {
             })
         } catch (e: Exception) {
             LocationStatus.display.value = "模擬定位中斷，已停止"
-            releaseMock(clearCheckpoint = false)
+            releaseMock(clearCheckpoint = false,
+                arrivalChange = RouteLifecycleChange.PROVIDER_FAILURE)
             stopSelf()
         }
     }
@@ -1027,8 +1029,9 @@ class MockLocationService : Service() {
     private fun releaseMock(
         clearCheckpoint: Boolean = true,
         keepOverlay: Boolean = false,
+        arrivalChange: RouteLifecycleChange = RouteLifecycleChange.RESTORE_REAL_GPS,
     ) {
-        clearOldArrivalNotification(RouteLifecycleChange.RESTORE_REAL_GPS)
+        clearOldArrivalNotification(arrivalChange)
         mockGpsJitter.reset()
         finishEstimatedSession()
         saveEstimatedSteps()
@@ -1086,9 +1089,11 @@ class MockLocationService : Service() {
     }
 
     override fun onDestroy() {
-        // This can be a system shutdown of the service; only explicit ACTION_STOP
-        // is allowed to delete a useful checkpoint.
-        releaseMock(clearCheckpoint = false)
+        // System reclaim must not dismiss a valid route-complete alert that
+        // the user has not seen yet; explicit restore/stop already dismissed it.
+        // Only explicit ACTION_STOP may delete a useful position checkpoint.
+        releaseMock(clearCheckpoint = false,
+            arrivalChange = RouteLifecycleChange.SYSTEM_SERVICE_STOP)
         serviceScope.cancel()
         super.onDestroy()
     }
