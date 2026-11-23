@@ -33,6 +33,9 @@ import com.naos.pikminbee.data.PreparedRouteState
 import com.naos.pikminbee.data.RouteDraftState
 import com.naos.pikminbee.data.WalkSpeedState
 import com.naos.pikminbee.domain.WalkSpeedPreset
+import com.naos.pikminbee.domain.WalkSpeedProfile
+import com.naos.pikminbee.domain.WalkSpeedMode
+import com.naos.pikminbee.domain.WalkSpeedLegController
 import com.naos.pikminbee.route.ValhallaPlanner
 import com.naos.pikminbee.lan.LanController
 import com.naos.pikminbee.lan.LanStatus
@@ -67,6 +70,8 @@ object LocationStatus {
     val progress = MutableStateFlow(WalkingProgressSnapshot())
     /** Steps estimated for the current/most recently stopped virtual walk only. */
     val walkEstimatedSteps = MutableStateFlow(0L)
+    /** Actual virtual route speed, not a sensor-measured walking pace. */
+    val appliedSpeedKmh = MutableStateFlow(0.0)
 }
 
 class MockLocationService : Service() {
@@ -95,6 +100,10 @@ class MockLocationService : Service() {
         const val EXTRA_GEOMETRY = "route_geometry"
         const val EXTRA_SPEED = "speed_mps"
         const val EXTRA_SPEED_PRESET = "walk_speed_preset"
+        const val EXTRA_SPEED_MODE = "walk_speed_mode"
+        const val EXTRA_SPEED_KMH = "walk_speed_kmh"
+        const val EXTRA_SPEED_MIN_KMH = "walk_speed_min_kmh"
+        const val EXTRA_SPEED_MAX_KMH = "walk_speed_max_kmh"
         const val EXTRA_MODE = "walk_mode"
         const val EXTRA_LOOP = "route_loop"
         private const val CHANNEL = "pikminbee_active"
@@ -113,8 +122,15 @@ class MockLocationService : Service() {
             Intent(context, MockLocationService::class.java).setAction(action)
 
         fun speedIntent(context: android.content.Context, preset: WalkSpeedPreset): Intent =
+            speedIntent(context, WalkSpeedProfile.preset(preset))
+
+        fun speedIntent(context: android.content.Context, profile: WalkSpeedProfile): Intent =
             Intent(context, MockLocationService::class.java).setAction(ACTION_SET_SPEED)
-                .putExtra(EXTRA_SPEED_PRESET, preset.name)
+                .putExtra(EXTRA_SPEED_PRESET, profile.preset.name)
+                .putExtra(EXTRA_SPEED_MODE, profile.mode.name)
+                .putExtra(EXTRA_SPEED_KMH, profile.fixedKmh)
+                .putExtra(EXTRA_SPEED_MIN_KMH, profile.minKmh)
+                .putExtra(EXTRA_SPEED_MAX_KMH, profile.maxKmh)
 
         fun routeIntent(context: android.content.Context, track: List<Coordinate>, speed: Double,
                         mode: WalkMode = WalkMode.ROUTE, loop: Boolean = false): Intent {
@@ -125,7 +141,9 @@ class MockLocationService : Service() {
             }
             return Intent(context, MockLocationService::class.java).setAction(ACTION_START_ROUTE)
                 .putExtra(EXTRA_GEOMETRY, packed)
-                .putExtra(EXTRA_SPEED, speed.coerceIn(0.2, 3.0))
+                .putExtra(EXTRA_SPEED, (speed.takeIf { it.isFinite() }
+                    ?: WalkSpeedPreset.DEFAULT.metresPerSecond).coerceIn(
+                        WalkSpeedProfile.MIN_KMH / 3.6, WalkSpeedProfile.MAX_KMH / 3.6))
                 .putExtra(EXTRA_MODE, mode.name)
                 .putExtra(EXTRA_LOOP, loop)
         }
@@ -141,6 +159,7 @@ class MockLocationService : Service() {
     private var walkingDistanceMeters = 0.0
     private var stopThresholds = emptyList<Double>()
     private val estimatedSteps = EstimatedStepCounter()
+    private val speedLegs = WalkSpeedLegController()
     private val mockGpsJitter = MockGpsJitter()
     private var estimatedStepPersistTicker = 0
     private var sessionStartMillis = 0L
@@ -190,6 +209,13 @@ class MockLocationService : Service() {
                     walkingDistanceMeters %= trackLengthMeters
                 }
                 target = WalkingGeometry.sampleAt(track, walkingDistanceMeters)
+                // Only segment boundaries change a random-range speed; changes
+                // take effect on the next tick without altering road distance.
+                val updatedKmh = speedLegs.advance(walkingDistanceMeters, stopThresholds)
+                if (updatedKmh != LocationStatus.appliedSpeedKmh.value) {
+                    speedMetersPerSecond = updatedKmh / 3.6
+                    LocationStatus.appliedSpeedKmh.value = updatedKmh
+                }
                 if (!loopRoute && walkingDistanceMeters >= trackLengthMeters - 0.1) {
                     val previousPhase = phase
                     phase = WalkPhase.PARKED
@@ -238,11 +264,19 @@ class MockLocationService : Service() {
         // Also initialise saved route drafts when Android restores the service
         // before the app Activity has ever been opened in this process.
         appPreferences = AppPreferences(this)
-        val previousEstimated = getSharedPreferences("pikminbee_estimated_steps", MODE_PRIVATE)
-            .getFloat("total_metres", 0f).toDouble()
-        estimatedSteps.restore(previousEstimated.coerceAtLeast(0.0))
+        val savedSteps = getSharedPreferences("pikminbee_estimated_steps", MODE_PRIVATE)
+        val previousEstimated = savedSteps.getFloat("total_metres", 0f).toDouble()
+        estimatedSteps.restore(
+            previousEstimated.coerceAtLeast(0.0),
+            savedSteps.getLong("estimated_steps_total", 0L)
+                .takeIf { savedSteps.contains("estimated_steps_total") },
+            savedSteps.getFloat("step_remainder_metres", 0f).toDouble()
+                .takeIf { savedSteps.contains("step_remainder_metres") },
+            savedSteps.getFloat("step_stride_metres", 0.72f).toDouble()
+                .takeIf { savedSteps.contains("step_stride_metres") },
+        )
         EstimatedWalkStatus.state.value = estimatedSteps.snapshot()
-        speedMetersPerSecond = WalkSpeedState.selected.value.metresPerSecond
+        speedMetersPerSecond = WalkSpeedState.profile.value.nominalMps
         journal = SessionJournal(this)
         journal.read()
         getSystemService(NotificationManager::class.java).apply {
@@ -388,20 +422,35 @@ class MockLocationService : Service() {
                 val requested = intent.getStringExtra(EXTRA_SPEED_PRESET)
                 val preset = WalkSpeedPreset.entries.firstOrNull { it.name == requested }
                     ?: return START_NOT_STICKY
-                // The user may preselect walking speed from the floating bee
-                // even before a mock location session has begun.
-                AppPreferences(this).setWalkSpeedPreset(preset)
-                speedMetersPerSecond = preset.metresPerSecond
+                val profile = runCatching {
+                    when (intent.getStringExtra(EXTRA_SPEED_MODE) ?: "PRESET") {
+                        "PRESET" -> WalkSpeedProfile.preset(preset)
+                        "FIXED" -> WalkSpeedProfile.fixed(
+                            intent.getDoubleExtra(EXTRA_SPEED_KMH, Double.NaN), preset)
+                        "RANGE" -> WalkSpeedProfile.range(
+                            intent.getDoubleExtra(EXTRA_SPEED_MIN_KMH, Double.NaN),
+                            intent.getDoubleExtra(EXTRA_SPEED_MAX_KMH, Double.NaN), preset)
+                        else -> return START_NOT_STICKY
+                    }
+                }.getOrNull() ?: return START_NOT_STICKY
+                // A speed change is independent of the user's preferred startup speed.
+                appPreferences.setWalkSpeedProfile(profile)
+                speedLegs.change(profile)
                 if (phase == WalkPhase.MOVING || phase == WalkPhase.PAUSED) {
+                    speedMetersPerSecond = speedLegs.currentKmh / 3.6
+                    LocationStatus.appliedSpeedKmh.value = speedLegs.currentKmh
+                    LocationStatus.progress.value = RoutePlaybackProgress.snapshot(
+                        walkingDistanceMeters, trackLengthMeters, speedMetersPerSecond,
+                        stopThresholds, loopRoute)
                     val activity = if (mode == WalkMode.FLOWERS) "尋花" else "道路"
                     LocationStatus.display.value =
-                        "$activity${if (phase == WalkPhase.PAUSED) "暫停" else "步行"} · ${preset.display}"
+                        "$activity${if (phase == WalkPhase.PAUSED) "暫停" else "步行"} · ${profile.display}"
                     refreshNotification()
                 }
                 if (!providerActive) {
-                    LocationStatus.display.value = "已選擇 ${preset.display} · 下次行走時使用"
-                    updateOverlay()
+                    LocationStatus.display.value = "已選擇 ${profile.display} · 下次行走時使用"
                 }
+                updateOverlay()
                 return if (providerActive) START_STICKY else START_NOT_STICKY
             }
             ACTION_START_FLOWERS, ACTION_START_DRAFT_ROUTE -> {
@@ -589,7 +638,7 @@ class MockLocationService : Service() {
                 return if (activateRoute(
                         planned,
                         intent.getDoubleExtra(
-                            EXTRA_SPEED, WalkSpeedState.selected.value.metresPerSecond,
+                            EXTRA_SPEED, WalkSpeedState.profile.value.nominalMps,
                         ),
                         routeMode,
                         intent.getBooleanExtra(EXTRA_LOOP, false),
@@ -645,8 +694,12 @@ class MockLocationService : Service() {
     }
 
     private fun saveEstimatedSteps() {
+        val snapshot = estimatedSteps.snapshot()
         getSharedPreferences("pikminbee_estimated_steps", MODE_PRIVATE).edit()
-            .putFloat("total_metres", estimatedSteps.snapshot().totalMetres.toFloat())
+            .putFloat("total_metres", snapshot.totalMetres.toFloat())
+            .putLong("estimated_steps_total", snapshot.estimatedSteps)
+            .putFloat("step_remainder_metres", estimatedSteps.storedRemainder().toFloat())
+            .putFloat("step_stride_metres", estimatedSteps.storedStride().toFloat())
             .apply()
     }
 
@@ -691,7 +744,7 @@ class MockLocationService : Service() {
                 LocationStatus.display.value = "道路吸附距離較大，請在主畫面確認後開始"
             else -> {
                 val started = activateRoute(
-                    ready.geometry, WalkSpeedState.selected.value.metresPerSecond,
+                    ready.geometry, WalkSpeedState.profile.value.nominalMps,
                     walkMode, loop = ready.loop,
                 )
                 if (started) return START_STICKY
@@ -734,6 +787,9 @@ class MockLocationService : Service() {
         }
         if (!ensureProvider()) return false
         finishEstimatedSession()
+        // A newly configured stride affects only this new walk, never historical totals.
+        estimatedSteps.setStrideForNextTravel(appPreferences.virtualStrideMetres())
+        saveEstimatedSteps()
         sessionStartMillis = System.currentTimeMillis()
         sessionStartSteps = estimatedSteps.snapshot().estimatedSteps
         walkOriginSteps = sessionStartSteps
@@ -745,7 +801,13 @@ class MockLocationService : Service() {
         stopThresholds = RoutePlaybackProgress.thresholds(planned, draftStops)
         target = planned.first()
         journal.record(planned.first(), force = true)
-        speedMetersPerSecond = speed.coerceIn(0.2, 3.0)
+        val profile = appPreferences.walkSpeedProfile()
+        speedLegs.begin(profile, distanceMetres = 0.0, thresholds = stopThresholds)
+        speedMetersPerSecond = if (profile.mode == WalkSpeedMode.PRESET)
+            (speed.takeIf { it.isFinite() } ?: profile.nominalMps).coerceIn(
+                WalkSpeedProfile.MIN_KMH / 3.6, WalkSpeedProfile.MAX_KMH / 3.6)
+        else speedLegs.currentKmh / 3.6
+        LocationStatus.appliedSpeedKmh.value = speedMetersPerSecond * 3.6
         walkingDistanceMeters = 0.0
         mockGpsJitter.reset()
         loopRoute = loop
@@ -955,6 +1017,7 @@ class MockLocationService : Service() {
         stopThresholds = emptyList()
         LocationStatus.progress.value = WalkingProgressSnapshot()
         LocationStatus.walkEstimatedSteps.value = 0L
+        LocationStatus.appliedSpeedKmh.value = 0.0
         mode = null
         loopRoute = false
         phase = WalkPhase.IDLE
