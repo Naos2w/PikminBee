@@ -314,7 +314,7 @@ fun HealthConnectSettings(dark: Boolean, onMessage: (String) -> Unit) {
                     Text("查看與管理", color = palette.accent)
                 }
             } else {
-                Text("兩個數字來自不同統計方式，不可直接相加。",
+                Text("兩個數字來自不同統計方式，不可直接相加。跨午夜的手動估算紀錄按時間比例分配，並非逐步實測值。",
                     color = palette.muted, fontSize = 11.sp)
                 HorizontalDivider(color = palette.stroke)
 
