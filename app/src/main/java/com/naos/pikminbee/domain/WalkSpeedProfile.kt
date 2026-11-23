@@ -77,9 +77,15 @@ class WalkSpeedPlayback(
     var appliedKmh: Double = initial.sampleKmh(random)
         private set
 
-    fun apply(next: WalkSpeedProfile) {
+    /** A new route samples a fresh initial speed even if the mode is unchanged. */
+    fun restart(next: WalkSpeedProfile) {
         profile = next
         appliedKmh = next.sampleKmh(random)
+    }
+
+    /** Re-selecting an identical profile must not silently re-roll its speed. */
+    fun apply(next: WalkSpeedProfile) {
+        if (profile != next) restart(next)
     }
 
     fun advance(
@@ -101,7 +107,15 @@ class WalkSpeedPlayback(
         var iterations = 0
         while (remaining > 1e-8 && iterations++ < 10_000) {
             val take = min(remaining, lengthMetres - position)
-            if (take <= 1e-8) break
+            if (take <= 1e-8) {
+                if (looping && position >= lengthMetres - 1e-8) {
+                    // Rounding can leave the cursor just before the lap end.
+                    position = 0.0
+                    appliedKmh = profile.sampleKmh(random)
+                    continue
+                }
+                break
+            }
             val end = position + take
             for (boundary in boundaries) {
                 if (boundary > position + 1e-6 && boundary <= end + 1e-6)
@@ -114,48 +128,5 @@ class WalkSpeedPlayback(
                 appliedKmh = profile.sampleKmh(random)
             } else break
         }
-    }
-}
-
-/**
- * Compatibility owner for existing route playback: the service supplies
- * cumulative progress, including wraparound on looping walks. Sample a new
- * speed at an explicitly selected route stop or the start of a new lap.
- */
-class WalkSpeedLegController(private val random: Random = Random.Default) {
-    private var profile = WalkSpeedProfile.preset(WalkSpeedPreset.DEFAULT)
-    private var previousDistance = 0.0
-
-    var currentKmh: Double = profile.sampleKmh(random)
-        private set
-
-    fun begin(profile: WalkSpeedProfile, distanceMetres: Double, thresholds: List<Double>) {
-        this.profile = profile
-        previousDistance = distanceMetres.coerceAtLeast(0.0)
-        currentKmh = profile.sampleKmh(random)
-    }
-
-    fun change(profile: WalkSpeedProfile) {
-        this.profile = profile
-        currentKmh = profile.sampleKmh(random)
-    }
-
-    fun advance(distanceMetres: Double, thresholds: List<Double>): Double {
-        if (!distanceMetres.isFinite() || distanceMetres < 0.0) return currentKmh
-        if (profile.mode == WalkSpeedMode.RANGE) {
-            if (distanceMetres + 1e-6 < previousDistance) {
-                // The looping route wrapped at the end of a lap.
-                currentKmh = profile.sampleKmh(random)
-                previousDistance = 0.0
-            }
-            thresholds.distinct().sorted().forEach { stop ->
-                if (stop > 0.1 && stop > previousDistance + 1e-6 &&
-                    stop <= distanceMetres + 1e-6) {
-                    currentKmh = profile.sampleKmh(random)
-                }
-            }
-        }
-        previousDistance = distanceMetres
-        return currentKmh
     }
 }

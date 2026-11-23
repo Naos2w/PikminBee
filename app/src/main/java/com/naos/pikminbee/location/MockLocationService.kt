@@ -35,7 +35,8 @@ import com.naos.pikminbee.data.WalkSpeedState
 import com.naos.pikminbee.domain.WalkSpeedPreset
 import com.naos.pikminbee.domain.WalkSpeedProfile
 import com.naos.pikminbee.domain.WalkSpeedMode
-import com.naos.pikminbee.domain.WalkSpeedLegController
+import com.naos.pikminbee.domain.WalkSpeedPlayback
+import com.naos.pikminbee.domain.RouteTickProgression
 import com.naos.pikminbee.route.ValhallaPlanner
 import com.naos.pikminbee.lan.LanController
 import com.naos.pikminbee.lan.LanStatus
@@ -159,7 +160,7 @@ class MockLocationService : Service() {
     private var walkingDistanceMeters = 0.0
     private var stopThresholds = emptyList<Double>()
     private val estimatedSteps = EstimatedStepCounter()
-    private val speedLegs = WalkSpeedLegController()
+    private val speedPlayback = WalkSpeedPlayback(WalkSpeedProfile.preset(WalkSpeedPreset.DEFAULT))
     private val mockGpsJitter = MockGpsJitter()
     private var estimatedStepPersistTicker = 0
     private var sessionStartMillis = 0L
@@ -186,12 +187,13 @@ class MockLocationService : Service() {
             previousTickMillis = now
             var advancedMetres = 0.0
             if (phase == WalkPhase.MOVING && track.size > 1) {
-                val travelMetres = speedMetersPerSecond * deltaSeconds
-                val acceptedMetres = if (loopRoute) travelMetres else
-                    travelMetres.coerceAtMost((trackLengthMeters - walkingDistanceMeters).coerceAtLeast(0.0))
-                if (acceptedMetres > 0) {
-                    advancedMetres = acceptedMetres
-                    val snapshot = estimatedSteps.addTravel(acceptedMetres)
+                val movement = RouteTickProgression.advance(
+                    walkingDistanceMeters, trackLengthMeters,
+                    speedMetersPerSecond, deltaSeconds, loopRoute,
+                )
+                if (movement.acceptedMetres > 0.0) {
+                    advancedMetres = movement.acceptedMetres
+                    val snapshot = estimatedSteps.addTravel(movement.acceptedMetres)
                     EstimatedWalkStatus.state.value = snapshot
                     LocationStatus.walkEstimatedSteps.value =
                         estimatedSteps.estimatedSince(walkOriginSteps)
@@ -204,19 +206,20 @@ class MockLocationService : Service() {
                     // bounded, explicitly opted-in estimate chunk per minute.
                     checkpointEstimatedSession()
                 }
-                walkingDistanceMeters += travelMetres
-                if (loopRoute && trackLengthMeters > 0.1 && walkingDistanceMeters >= trackLengthMeters) {
-                    walkingDistanceMeters %= trackLengthMeters
-                }
+                // Loop progress wraps, but ALL completed laps still accrue exact
+                // route distance and trigger any crossed speed segment boundary.
+                walkingDistanceMeters = movement.toMetres
                 target = WalkingGeometry.sampleAt(track, walkingDistanceMeters)
-                // Only segment boundaries change a random-range speed; changes
-                // take effect on the next tick without altering road distance.
-                val updatedKmh = speedLegs.advance(walkingDistanceMeters, stopThresholds)
+                speedPlayback.advance(
+                    movement.fromMetres, movement.acceptedMetres,
+                    trackLengthMeters, stopThresholds, loopRoute,
+                )
+                val updatedKmh = speedPlayback.appliedKmh
                 if (updatedKmh != LocationStatus.appliedSpeedKmh.value) {
                     speedMetersPerSecond = updatedKmh / 3.6
                     LocationStatus.appliedSpeedKmh.value = updatedKmh
                 }
-                if (!loopRoute && walkingDistanceMeters >= trackLengthMeters - 0.1) {
+                if (movement.arrived) {
                     val previousPhase = phase
                     phase = WalkPhase.PARKED
                     LocationStatus.phase.value = phase
@@ -435,10 +438,10 @@ class MockLocationService : Service() {
                 }.getOrNull() ?: return START_NOT_STICKY
                 // A speed change is independent of the user's preferred startup speed.
                 appPreferences.setWalkSpeedProfile(profile)
-                speedLegs.change(profile)
+                speedPlayback.apply(profile)
                 if (phase == WalkPhase.MOVING || phase == WalkPhase.PAUSED) {
-                    speedMetersPerSecond = speedLegs.currentKmh / 3.6
-                    LocationStatus.appliedSpeedKmh.value = speedLegs.currentKmh
+                    speedMetersPerSecond = speedPlayback.appliedKmh / 3.6
+                    LocationStatus.appliedSpeedKmh.value = speedPlayback.appliedKmh
                     LocationStatus.progress.value = RoutePlaybackProgress.snapshot(
                         walkingDistanceMeters, trackLengthMeters, speedMetersPerSecond,
                         stopThresholds, loopRoute)
@@ -802,11 +805,11 @@ class MockLocationService : Service() {
         target = planned.first()
         journal.record(planned.first(), force = true)
         val profile = appPreferences.walkSpeedProfile()
-        speedLegs.begin(profile, distanceMetres = 0.0, thresholds = stopThresholds)
+        speedPlayback.restart(profile)
         speedMetersPerSecond = if (profile.mode == WalkSpeedMode.PRESET)
             (speed.takeIf { it.isFinite() } ?: profile.nominalMps).coerceIn(
                 WalkSpeedProfile.MIN_KMH / 3.6, WalkSpeedProfile.MAX_KMH / 3.6)
-        else speedLegs.currentKmh / 3.6
+        else speedPlayback.appliedKmh / 3.6
         LocationStatus.appliedSpeedKmh.value = speedMetersPerSecond * 3.6
         walkingDistanceMeters = 0.0
         mockGpsJitter.reset()
