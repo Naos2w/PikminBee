@@ -39,6 +39,7 @@ import com.naos.pikminbee.data.MapAppearance
 import android.content.res.Configuration
 import com.naos.pikminbee.domain.WalkMode
 import com.naos.pikminbee.domain.WalkPhase
+import com.naos.pikminbee.domain.RouteSurfaceStatusPolicy
 import com.naos.pikminbee.domain.WalkSpeedPreset
 import com.naos.pikminbee.domain.WalkSpeedProfile
 import com.naos.pikminbee.domain.WalkSpeedMode
@@ -468,7 +469,8 @@ class FloatingControls(
             lastPhase == WalkPhase.MOVING -> if (lastMode == WalkMode.FLOWERS)
                 "尋花行走中" else "路徑行走中"
             lastPhase == WalkPhase.PAUSED -> "已暫停"
-            lastPhase == WalkPhase.PARKED -> "已停止 · 原地停留"
+            lastPhase == WalkPhase.PARKED ->
+                RouteSurfaceStatusPolicy.parkedOverlaySummary(lastStatus, lastMode)
             lastStatus.contains("失敗") || lastStatus.contains("無法") ||
                 lastStatus.contains("請先") || lastStatus.contains("請在") ||
                 lastStatus.contains("找不到") || lastStatus.contains("中斷") ||

@@ -48,6 +48,8 @@ import com.naos.pikminbee.domain.WalkingGeometry
 import com.naos.pikminbee.domain.MockGpsJitter
 import com.naos.pikminbee.domain.RoutePlaybackProgress
 import com.naos.pikminbee.domain.RouteCompletionAlertPolicy
+import com.naos.pikminbee.domain.RouteLifecycleChange
+import com.naos.pikminbee.domain.RouteSurfaceStatusPolicy
 import com.naos.pikminbee.domain.WalkingProgressSnapshot
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -224,6 +226,9 @@ class MockLocationService : Service() {
                     phase = WalkPhase.PARKED
                     LocationStatus.phase.value = phase
                     LocationStatus.display.value = "已抵達終點 · 原地停留"
+                    LocationStatus.appliedSpeedKmh.value =
+                        RouteSurfaceStatusPolicy.visibleRouteSpeedKmh(
+                            phase, speedMetersPerSecond * 3.6)
                     finishEstimatedSession()
                     refreshNotification()
                     if (RouteCompletionAlertPolicy.shouldAlert(
@@ -251,7 +256,8 @@ class MockLocationService : Service() {
             }
             if (track.size >= 2) {
                 LocationStatus.progress.value = RoutePlaybackProgress.snapshot(
-                    walkingDistanceMeters, trackLengthMeters, speedMetersPerSecond,
+                    walkingDistanceMeters, trackLengthMeters,
+                    LocationStatus.appliedSpeedKmh.value / 3.6,
                     stopThresholds, loopRoute,
                 )
             }
@@ -309,6 +315,7 @@ class MockLocationService : Service() {
                 stopThresholds = emptyList()
                 LocationStatus.progress.value = WalkingProgressSnapshot()
                 LocationStatus.walkEstimatedSteps.value = 0L
+                LocationStatus.appliedSpeedKmh.value = 0.0
                 loopRoute = false
                 mode = null
                 phase = WalkPhase.PARKED
@@ -410,8 +417,11 @@ class MockLocationService : Service() {
                     floatingControls?.show()
                     updateOverlay()
                     LocationStatus.overlayVisible.value = true
-                    LocationStatus.display.value = if (providerActive)
-                        "懸浮蜜蜂已開啟 · 可操作路徑" else "懸浮蜜蜂已開啟 · 定位測試尚未啟動"
+                    // Overlay visibility must never overwrite the shared arrival,
+                    // walking or paused route status read by the App and Wi-Fi Web.
+                    LocationStatus.display.value = RouteSurfaceStatusPolicy.afterOverlayChange(
+                        LocationStatus.display.value, phase, mode, providerActive, visible = true,
+                    )
                     updateOverlay()
                 }.onFailure {
                     LocationStatus.overlayVisible.value = false
@@ -465,7 +475,9 @@ class MockLocationService : Service() {
                 floatingControls?.dismiss()
                 floatingControls = null
                 LocationStatus.overlayVisible.value = false
-                LocationStatus.display.value = if (providerActive) "懸浮控制已關閉 · 模擬定位保持" else "懸浮控制已關閉"
+                LocationStatus.display.value = RouteSurfaceStatusPolicy.afterOverlayChange(
+                    LocationStatus.display.value, phase, mode, providerActive, visible = false,
+                )
                 if (!providerActive) stopSelf()
                 return if (providerActive) START_STICKY else START_NOT_STICKY
             }
@@ -504,6 +516,7 @@ class MockLocationService : Service() {
                     updateOverlay()
                     return START_NOT_STICKY
                 }
+                clearOldArrivalNotification(RouteLifecycleChange.RESTORE_VIRTUAL_GPS)
                 finishEstimatedSession()
                 cancelFlowerPlanning()
                 phase = WalkPhase.PARKED
@@ -514,6 +527,7 @@ class MockLocationService : Service() {
                 walkingDistanceMeters = 0.0
                 LocationStatus.progress.value = WalkingProgressSnapshot()
                 LocationStatus.walkEstimatedSteps.value = 0L
+                LocationStatus.appliedSpeedKmh.value = 0.0
                 target = remembered
                 journal.record(remembered, force = true)
                 LocationStatus.phase.value = phase
@@ -556,7 +570,7 @@ class MockLocationService : Service() {
                     }
                     phase = WalkPhase.MOVING
                     LocationStatus.phase.value = phase
-                    LocationStatus.display.value = "沿道路步行中"
+                    LocationStatus.display.value = RouteSurfaceStatusPolicy.movingStatus(mode)
                     refreshNotification()
                     updateOverlay()
                 }
@@ -571,9 +585,17 @@ class MockLocationService : Service() {
                     return START_STICKY
                 }
                 if (phase == WalkPhase.MOVING || phase == WalkPhase.PAUSED) {
+                    clearOldArrivalNotification(RouteLifecycleChange.MANUAL_STOP)
                     phase = WalkPhase.PARKED
                     LocationStatus.phase.value = phase
                     LocationStatus.display.value = "步行已停止 · 保留目前位置"
+                    LocationStatus.appliedSpeedKmh.value =
+                        RouteSurfaceStatusPolicy.visibleRouteSpeedKmh(
+                            phase, speedMetersPerSecond * 3.6)
+                    LocationStatus.progress.value = RoutePlaybackProgress.snapshot(
+                        walkingDistanceMeters, trackLengthMeters, 0.0,
+                        stopThresholds, loopRoute,
+                    )
                     target?.let { journal.record(it, force = true) }
                     finishEstimatedSession()
                     saveEstimatedSteps()
@@ -583,6 +605,7 @@ class MockLocationService : Service() {
                 return START_STICKY
             }
             ACTION_CLEAR_ROUTE -> {
+                clearOldArrivalNotification(RouteLifecycleChange.CLEAR)
                 finishEstimatedSession()
                 cancelFlowerPlanning()
                 track = emptyList()
@@ -591,6 +614,7 @@ class MockLocationService : Service() {
                 walkingDistanceMeters = 0.0
                 LocationStatus.progress.value = WalkingProgressSnapshot()
                 LocationStatus.walkEstimatedSteps.value = 0L
+                LocationStatus.appliedSpeedKmh.value = 0.0
                 loopRoute = false
                 mode = null
                 phase = WalkPhase.IDLE
@@ -601,6 +625,7 @@ class MockLocationService : Service() {
                     if (providerActive) "模擬位置停留中" else "真實定位"
                 if (providerActive) target?.let { journal.record(it, force = true) }
                 refreshNotification()
+                updateOverlay()
                 return START_STICKY
             }
             ACTION_TELEPORT -> {
@@ -611,6 +636,7 @@ class MockLocationService : Service() {
                 }.getOrNull() ?: return START_NOT_STICKY
                 cancelFlowerPlanning()
                 if (!ensureProvider()) return START_NOT_STICKY
+                clearOldArrivalNotification(RouteLifecycleChange.TELEPORT)
                 phase = WalkPhase.IDLE
                 mode = null
                 track = emptyList()
@@ -618,6 +644,7 @@ class MockLocationService : Service() {
                 stopThresholds = emptyList()
                 LocationStatus.progress.value = WalkingProgressSnapshot()
                 LocationStatus.walkEstimatedSteps.value = 0L
+                LocationStatus.appliedSpeedKmh.value = 0.0
                 LocationStatus.phase.value = phase
                 LocationStatus.mode.value = null
                 LocationStatus.geometry.value = emptyList()
@@ -789,6 +816,7 @@ class MockLocationService : Service() {
             return false
         }
         if (!ensureProvider()) return false
+        clearOldArrivalNotification(RouteLifecycleChange.START)
         finishEstimatedSession()
         // A newly configured stride affects only this new walk, never historical totals.
         estimatedSteps.setStrideForNextTravel(appPreferences.virtualStrideMetres())
@@ -823,8 +851,7 @@ class MockLocationService : Service() {
         LocationStatus.phase.value = phase
         LocationStatus.mode.value = mode
         LocationStatus.geometry.value = track
-        LocationStatus.display.value = if (mode == WalkMode.FLOWERS)
-            "尋花步行中" else "沿道路步行中"
+        LocationStatus.display.value = RouteSurfaceStatusPolicy.movingStatus(mode)
         scheduleTicks()
         refreshNotification()
         updateOverlay()
@@ -862,7 +889,8 @@ class MockLocationService : Service() {
             // A failed attempt to return to virtual GPS should NOT dismiss
             // the expanded controller while the user is trying to switch.
             val preserveOverlay = floatingControls != null
-            releaseMock(clearCheckpoint = false, keepOverlay = preserveOverlay)
+            releaseMock(clearCheckpoint = false, keepOverlay = preserveOverlay,
+                arrivalChange = RouteLifecycleChange.PROVIDER_FAILURE)
             // releaseMock resets display to REAL mode; preserve the failure hint.
             LocationStatus.display.value = explanation
             updateOverlay()
@@ -898,7 +926,8 @@ class MockLocationService : Service() {
             })
         } catch (e: Exception) {
             LocationStatus.display.value = "模擬定位中斷，已停止"
-            releaseMock(clearCheckpoint = false)
+            releaseMock(clearCheckpoint = false,
+                arrivalChange = RouteLifecycleChange.PROVIDER_FAILURE)
             stopSelf()
         }
     }
@@ -928,6 +957,16 @@ class MockLocationService : Service() {
             getSystemService(NotificationManager::class.java)
                 .notify(ARRIVAL_NOTIFICATION_ID, alert)
         }.onFailure { Log.w("PikminBee", "Unable to post route arrival notification", it) }
+    }
+
+    /** A previous route-complete alert must not contradict a newer user action.
+     *  Expanding/hiding the floating controller or pausing must NOT clear it. */
+    private fun clearOldArrivalNotification(change: RouteLifecycleChange) {
+        if (!RouteSurfaceStatusPolicy.clearsPreviousArrival(change)) return
+        runCatching {
+            getSystemService(NotificationManager::class.java)
+                .cancel(ARRIVAL_NOTIFICATION_ID)
+        }.onFailure { Log.w("PikminBee", "Unable to clear stale arrival notification", it) }
     }
 
     private fun notification(): Notification {
@@ -990,7 +1029,9 @@ class MockLocationService : Service() {
     private fun releaseMock(
         clearCheckpoint: Boolean = true,
         keepOverlay: Boolean = false,
+        arrivalChange: RouteLifecycleChange = RouteLifecycleChange.RESTORE_REAL_GPS,
     ) {
+        clearOldArrivalNotification(arrivalChange)
         mockGpsJitter.reset()
         finishEstimatedSession()
         saveEstimatedSteps()
@@ -1048,9 +1089,11 @@ class MockLocationService : Service() {
     }
 
     override fun onDestroy() {
-        // This can be a system shutdown of the service; only explicit ACTION_STOP
-        // is allowed to delete a useful checkpoint.
-        releaseMock(clearCheckpoint = false)
+        // System reclaim must not dismiss a valid route-complete alert that
+        // the user has not seen yet; explicit restore/stop already dismissed it.
+        // Only explicit ACTION_STOP may delete a useful position checkpoint.
+        releaseMock(clearCheckpoint = false,
+            arrivalChange = RouteLifecycleChange.SYSTEM_SERVICE_STOP)
         serviceScope.cancel()
         super.onDestroy()
     }
