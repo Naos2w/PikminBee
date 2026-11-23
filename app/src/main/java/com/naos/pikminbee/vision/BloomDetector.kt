@@ -56,21 +56,34 @@ object BloomDetector {
         val h = frame.height
         val count = w * h
         val kind = ByteArray(count)
-        var dark = 0
+        var darkContent = 0
+        var brightContent = 0
+        var contentPixels = 0
         for (y in 0 until h) {
+            // Ignore status/navigation strips for both bloom search and
+            // capture-quality checks. Those strips may remain visible even
+            // when protected app content is blank.
+            val inContent = y >= h * 0.09 && y <= h * 0.86
             for (x in 0 until w) {
                 val at = y * w + x
                 val pixel = frame.argb[at]
                 val r = (pixel shr 16) and 255
                 val g = (pixel shr 8) and 255
                 val b = pixel and 255
-                if (max(r, max(g, b)) < 30) dark++
-                // Exclude UI/status/navigation areas to avoid obvious false positives.
-                if (y < h * 0.09 || y > h * 0.86) continue
+                if (!inContent) continue
+                contentPixels++
+                val peak = max(r, max(g, b))
+                if (peak < 30) darkContent++
+                if (peak >= 80) brightContent++
                 kind[at] = classify(r, g, b).ordinal.toByte()
             }
         }
-        val mostlyBlank = dark >= count * 0.93
+        // Dark-themed Settings pages can have >93% near-black background
+        // while still showing readable text. Treat a frame as blank only if
+        // the *content* region is both predominantly dark and has almost no
+        // visible highlights. This never bypasses protected screen content.
+        val mostlyBlank = darkContent >= contentPixels * 0.93 &&
+            brightContent <= max(4, contentPixels / 10_000)
         if (mostlyBlank) return Result(w, h, emptyList(), true,
             "畫面幾乎全黑：可能是空白、擷取尚未準備好或畫面受保護；不嘗試繞過")
         // Two independent masks: saturated coloured blooms and pale petals with warm core.
