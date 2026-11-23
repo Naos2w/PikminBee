@@ -56,4 +56,37 @@ class WalkSpeedProfileTest {
         playback.advance(3.0, 20.0, 100.0, listOf(5.0, 10.0, 15.0), false)
         assertTrue(playback.appliedKmh in 2.0..3.0)
     }
+
+    @Test fun selectingTheSameRangeDoesNotResampleUntilARealLegChange() {
+        val range = WalkSpeedProfile.range(12.0, 15.0)
+        val expected = Random(23)
+        val first = range.sampleKmh(expected)
+        val second = range.sampleKmh(expected)
+        val playback = WalkSpeedPlayback(range, Random(23))
+        assertEquals(first, playback.appliedKmh, 0.0)
+        playback.apply(range)
+        playback.apply(WalkSpeedProfile.range(12.0, 15.0))
+        assertEquals(first, playback.appliedKmh, 0.0)
+        playback.advance(1.0, 0.0, 100.0, listOf(20.0), true)
+        assertEquals(first, playback.appliedKmh, 0.0)
+        playback.advance(15.0, 10.0, 100.0, listOf(20.0), false)
+        assertEquals(second, playback.appliedKmh, 0.0)
+    }
+
+    @Test fun restartingTheSameRangeSamplesANewInitialSpeed() {
+        val range = WalkSpeedProfile.range(12.0, 15.0)
+        val expected = Random(87)
+        range.sampleKmh(expected)
+        val next = range.sampleKmh(expected)
+        val playback = WalkSpeedPlayback(range, Random(87))
+        playback.restart(range)
+        assertEquals(next, playback.appliedKmh, 0.0)
+    }
+
+    @Test fun fixedSpeedDoesNotResampleAcrossRepeatedRouteLaps() {
+        val fixed = WalkSpeedProfile.fixed(10.8)
+        val playback = WalkSpeedPlayback(fixed, Random(45))
+        playback.advance(0.0, 23.0, 0.5, listOf(0.25), true)
+        assertEquals(10.8, playback.appliedKmh, 0.0)
+    }
 }
