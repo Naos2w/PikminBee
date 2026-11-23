@@ -1,5 +1,40 @@
 # PikminBee TODO
 
+## P1 · 2026-11-23 approved development backlog — GPS jitter / virtual steps / flower-planting speed / end notification / flower vision
+**State:** User requested that all items below become development work. The source observations are verified, but **none of the new behaviours below is implemented or POCO-accepted** by recording this section. Reuse existing DEV/staging/POCO UAT gates; no production `main` promotion or device installation is implied.
+
+### A. Optional simulated-GPS jitter (new development)
+**Current evidence:** `MockLocationService.tick` uses deterministic `WalkingGeometry.sampleAt(track, walkingDistanceMeters)` and `setTestProviderLocation`. The injected `accuracy = 5f` is metadata; it does **not** apply a 5-metre random offset. There is no user-adjustable positional jitter in this playback path.
+- [ ] Design a **default-off, clearly labelled mock-location test option** for bounded, temporally smooth horizontal position variation; offer an off/on and conservative amplitude control only if useful. Never represent simulated accuracy as verified physical GPS.
+- [ ] Keep the original, unperturbed road geometry as ground truth for progress, ETA, speed and arrival. Stationary/paused/parked states must not become phantom walking or produce extra estimated steps, and jitter must not push location unexpectedly beyond reasonable road bounds.
+- [ ] Add Kotlin boundary/continuity/reproducibility tests, Android mock provider tests, and physical POCO validation for route, teleport, pause/resume, real-GPS restoration, speed display and app/Web/overlay consistency. Do not claim the option improves third-party game acceptance.
+
+### B. Virtual step estimate and selected speed (new development)
+**Current evidence:** `EstimatedStepCounter` computes `floor(accumulatedTravelMetres / 0.72)`; `MockLocationService` adds travel from `speedMetersPerSecond * deltaSeconds`. Thus the **same elapsed time** at higher speed generates more estimated steps, while the **same distance** generates approximately the same steps regardless of speed. This is explicitly virtual, not sensor-measured activity.
+- [ ] Review the realism of the current fixed 0.72-metre virtual stride, especially at 10.8 km/h (~250 estimated steps/minute). Assess a documented, testable pace/stride model (or explicitly explain why fixed distance-to-step conversion is retained), preserving transparent *estimated* labels.
+- [ ] Ensure selected-speed changes take effect without resetting routes, introducing discontinuities or counting paused/parked/jitter-only movement; cover 0.8, 1.4 and 10.8 km/h plus any future speed presets, loops and elapsed-time changes.
+- [ ] Keep hardware/Health Connect actual steps separate from virtual estimates; preserve explicit consent, manual-entry labelling and duplicate protection for optional virtual-statistic synchronisation. Test stop/restart/recovery/permission denial on POCO.
+
+### C. Flower-planting speed strategy and optional new presets (new development)
+**Current evidence:** `WalkSpeedPreset` currently offers 0.8 / 1.4 / 10.8 km/h; `activateRoute` clamps speed to 0.2–3.0 m/s (max 10.8 km/h). Official Pikmin Bloom support warns that moving too quickly, standing still, or repeating the same area can prevent planting **while petals continue to be consumed**; it does **not** publish a guaranteed optimal speed. Community reports suggest a variable effective limit around 16–20 km/h, with a conservative 12–15 km/h evaluation range and some 15–18 km/h results; this is **not an official guarantee**.
+References: https://niantic.helpshift.com/hc/zh-hant/23-pikmin-bloom/faq/2855-planting-flowers/ ; https://niantic.helpshift.com/hc/en/23-pikmin-bloom/faq/2877-i-can-t-plant-flowers-1636017814/ ; https://forum.gamer.com.tw/C.php?bsn=72889&snA=595
+- [ ] Evaluate optional flower-planting speed choices around 12 and 15 km/h, with higher-speed research as a separate explicit choice **only after real results**; retain existing user-selected 0.8 / 1.4 / 10.8 km/h options and current personal default unless changed intentionally.
+- [ ] Review the 3.0 m/s playback clamp and all App / floating controller / paired Wi-Fi speed validation and display contracts before adding any faster preset. Keep route preview, start confirmation, actual speed (m/s vs km/h), ETA and virtual-step modelling consistent.
+- [ ] Define an honest real-device evaluation comparing distance, elapsed time, planted-flower outcome, petal usage, repeated-area cooldown and GPS uncertainty; do not claim guaranteed planting, game compatibility or evasion of speed restrictions.
+
+### D. End-of-route completion notification / sound (approved prior request, still development)
+**Current evidence:** Non-loop route arrival changes `MockLocationService` to `PARKED`, shows `已抵達終點 · 原地停留` and refreshes a low-importance ongoing notification. There is no independent one-shot audible completion notification.
+- [ ] Emit an exactly-once route-completed event on non-loop arrival, share the confirmed state across Android App, overlay and authorised Wi-Fi Web controls, and support a visible notification with optional audible/haptic feedback respecting OS permissions, Do Not Disturb and user preferences.
+- [ ] Define explicit behaviour for looping routes (no notification on every lap by default), manual stop, failed route, repeat/reconnect and Web browser audio gesture/permission limits. Do not resume walking automatically.
+- [ ] Add completion-event regression tests and POCO/PC LAN end-to-end acceptance before marking done.
+
+### E. Screen-based flower recognition (existing work, further development/acceptance)
+**Current evidence:** `BloomCaptureService` already processes an explicitly authorised screen capture about once every 3 seconds, using `BloomDetector`; static-image import and manual pixel-to-GPS anchor preview also exist. They have synthetic tests, **not verified real-game precision/recall or reliable world coordinates**.
+- [ ] Reuse the existing flower-vision TODO and [Issue #17](https://github.com/Naos2w/PikminBee/issues/17), not a second detector. Create a permitted, user-authorised non-protected test image set, evaluate false positives/negatives and independent location-error measurements; use NAOS-PC only if accessible and authorised.
+- [ ] Test Android MediaProjection consent/stop/rotation/protected black frames, performance and UI feedback on POCO. No capture bypass, game touch automation, or automatic GPS waypoint insertion from unverified candidates.
+
+**Order / acceptance:** First verify the already built **UAT 0.19.1** on actual POCO + trusted-LAN PC browser ([Issue #18](https://github.com/Naos2w/PikminBee/issues/18)); then implement the small route-completion alert, bounded GPS jitter and virtual-step model, evaluate optional planting speeds, and continue flower recognition accuracy. Each implemented item needs affected tests, source PR -> `develop` CI/Squash, independently approved UAT promotion, and actual device evidence. This TODO-only documentation change is not a new APK.
+
 ## P0 · Wi-Fi Web V2 FINAL implementation (user-approved 2026-11-22 23:55)
 **Source of truth:** `docs/WIFI_WEB_V2_FINAL_SPEC.md`. Scope is feature branch `feature/wifi-web-v2-final-20261122`, no automatic production changes.
 - [x] Re-read actual approved V2 final spec and current Android/LAN source; kept existing route preview→explicit Start, pairing PIN and phone approval, mineral/honey matte theme.
