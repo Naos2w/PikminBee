@@ -39,6 +39,7 @@ fun BeeSettingsScreen(
     freeMapStyle: FreeMapStyle,
     appearance: MapAppearance,
     defaultSpeed: WalkSpeedPreset,
+    virtualStrideMetres: Double,
     mockGpsJitterLevel: MockGpsJitterLevel,
     overlayVisible: Boolean,
     mockActive: Boolean,
@@ -48,6 +49,7 @@ fun BeeSettingsScreen(
     onFreeMapStyle: (FreeMapStyle) -> Unit,
     onAppearance: (MapAppearance) -> Unit,
     onDefaultSpeed: (WalkSpeedPreset) -> Unit,
+    onVirtualStrideMetres: (Double) -> Unit,
     onMockGpsJitterLevel: (MockGpsJitterLevel) -> Unit,
     onPermissions: () -> Unit,
     overlayGuideEnabled: Boolean,
@@ -154,6 +156,14 @@ fun BeeSettingsScreen(
                         )
                     }
                 }
+                Text("路線中可使用自訂速度或速度區間；首次開啟仍使用你儲存的預設速度。",
+                    color = muted, fontSize = 12.sp)
+                VirtualStrideEditor(
+                    strideMetres = virtualStrideMetres,
+                    onApply = onVirtualStrideMetres,
+                    onMessage = onMessage,
+                    muted = muted,
+                )
                 Text("模擬定位微幅漂移 · 測試用",
                     fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = foreground)
                 Text("只讓模擬 GPS 回報座標有小幅波動，不改路線、步數或真實 GPS；預設關閉。",

@@ -7,6 +7,9 @@ import com.naos.pikminbee.ui.NaosThemeFamily
 import com.naos.pikminbee.ui.NaosGlassMaterial
 import com.naos.pikminbee.domain.WalkMode
 import com.naos.pikminbee.domain.WalkSpeedPreset
+import com.naos.pikminbee.domain.WalkSpeedProfile
+import com.naos.pikminbee.domain.WalkSpeedMode
+import com.naos.pikminbee.health.VirtualStridePolicy
 import com.naos.pikminbee.domain.MockGpsJitterLevel
 import org.json.JSONArray
 import org.json.JSONObject
@@ -57,17 +60,23 @@ object RouteDraftState {
 object WalkSpeedState {
     val selected = MutableStateFlow(WalkSpeedPreset.DEFAULT)
     val preferred = MutableStateFlow(WalkSpeedPreset.DEFAULT)
+    val profile = MutableStateFlow(WalkSpeedProfile.preset(WalkSpeedPreset.DEFAULT))
     private var initialized = false
 
     @Synchronized fun initialize(savedDefault: WalkSpeedPreset) {
         if (!initialized) {
             selected.value = savedDefault
             preferred.value = savedDefault
+            profile.value = WalkSpeedProfile.preset(savedDefault)
             initialized = true
         }
     }
 
-    fun update(next: WalkSpeedPreset) { selected.value = next }
+    fun update(next: WalkSpeedPreset) { updateProfile(WalkSpeedProfile.preset(next)) }
+    fun updateProfile(next: WalkSpeedProfile) {
+        profile.value = next
+        if (next.mode == WalkSpeedMode.PRESET) selected.value = next.preset
+    }
     fun updatePreferred(next: WalkSpeedPreset) { preferred.value = next }
 }
 
@@ -107,6 +116,40 @@ class AppPreferences(private val context: Context) {
 
     fun walkSpeedPreset(): WalkSpeedPreset = WalkSpeedState.selected.value
     fun defaultWalkSpeedPreset(): WalkSpeedPreset = WalkSpeedState.preferred.value
+    fun walkSpeedProfile(): WalkSpeedProfile = WalkSpeedState.profile.value
+
+    /** Selected advanced speeds belong to this session; preferred startup preset is unchanged. */
+    fun setWalkSpeedProfile(next: WalkSpeedProfile) {
+        WalkSpeedState.updateProfile(next)
+        when (next.mode) {
+            WalkSpeedMode.FIXED -> prefs.edit()
+                .putFloat("speed_custom_kmh", next.fixedKmh.toFloat()).apply()
+            WalkSpeedMode.RANGE -> prefs.edit()
+                .putFloat("speed_min_kmh", next.minKmh.toFloat())
+                .putFloat("speed_max_kmh", next.maxKmh.toFloat()).apply()
+            WalkSpeedMode.PRESET -> Unit
+        }
+    }
+
+    fun lastCustomSpeedKmh(): Double = prefs.getFloat("speed_custom_kmh", 12f)
+        .toDouble().takeIf { it.isFinite() && it in WalkSpeedProfile.MIN_KMH..WalkSpeedProfile.MAX_KMH }
+        ?: 12.0
+    fun lastRangeMinKmh(): Double = prefs.getFloat("speed_min_kmh", 10.8f).toDouble()
+    fun lastRangeMaxKmh(): Double = prefs.getFloat("speed_max_kmh", 15f).toDouble()
+
+    /** Virtual distance/stride setting applies at the start of the next route. */
+    fun virtualStrideMetres(): Double {
+        val text = runCatching { prefs.getString("virtual_stride_metres", null) }
+            .getOrNull()?.toDoubleOrNull()
+        val legacyFloat = if (text == null)
+            runCatching { prefs.getFloat("virtual_stride_metres", Float.NaN).toDouble() }.getOrNull()
+        else null
+        return VirtualStridePolicy.fromSaved(text ?: legacyFloat)
+    }
+    fun setVirtualStrideMetres(value: Double) {
+        require(VirtualStridePolicy.valid(value))
+        prefs.edit().putString("virtual_stride_metres", value.toString()).apply()
+    }
 
     /** Nonphysical mock-GPS drift is opt-in; old installs remain exact by default. */
     fun mockGpsJitterLevel(): MockGpsJitterLevel =
@@ -118,7 +161,7 @@ class AppPreferences(private val context: Context) {
 
     /** Changes this session's speed; does not change the user's saved startup default. */
     fun setWalkSpeedPreset(next: WalkSpeedPreset) {
-        WalkSpeedState.update(next)
+        setWalkSpeedProfile(WalkSpeedProfile.preset(next))
     }
 
     /** Explicit user choice; only this changes the next App launch's default speed. */

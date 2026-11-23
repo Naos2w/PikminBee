@@ -29,6 +29,7 @@ import com.naos.pikminbee.flower.FlowerEvidence
 import com.naos.pikminbee.flower.FlowerFinder
 import com.naos.pikminbee.data.WalkSpeedState
 import com.naos.pikminbee.domain.WalkSpeedPreset
+import com.naos.pikminbee.domain.WalkSpeedProfile
 import com.naos.pikminbee.domain.Coordinate
 import com.naos.pikminbee.domain.WalkMode
 import com.naos.pikminbee.location.LocationStatus
@@ -409,14 +410,14 @@ class LanController(private val context: Context) {
             }
             "/api/speed" -> {
                 val json = parse(req.body) ?: return error(400, "JSON 無效")
-                val preset = WalkSpeedPreset.entries.firstOrNull {
-                    it.name == json.optString("speedPreset")
-                } ?: return error(400, "不支援的速度預設")
-                prefs.setWalkSpeedPreset(preset)
+                val profile = speedProfile(json) ?: return error(400, "速度設定無效，請確認 0.8–20 km/h")
                 if (walking()) {
-                    context.startService(MockLocationService.speedIntent(context, preset))
-                }
-                accepted("本次速度已設定：${preset.display}")
+                    val result = runCatching {
+                        context.startService(MockLocationService.speedIntent(context, profile))
+                    }
+                    if (result.isFailure) return error(409, "手機無法套用速度，請檢查背景權限")
+                } else prefs.setWalkSpeedProfile(profile)
+                accepted("已要求設定本次速度：" + profile.display)
             }
             "/api/speed/default" -> {
                 val json = parse(req.body) ?: return error(400, "JSON 無效")
@@ -613,17 +614,15 @@ class LanController(private val context: Context) {
                         return error(409, "此路線已啟動過；請重新預覽")
                     LanWebPreviewPolicy.StartCheck.READY -> Unit
                 }
-                val preset = WalkSpeedPreset.entries.firstOrNull {
-                    it.name == json.optString("speedPreset")
-                } ?: return error(400, "請選擇有效速度")
+                val profile = speedProfile(json) ?: return error(400, "請選擇有效速度（0.8–20 km/h）")
                 if (!starting.compareAndSet(false, true))
                     return error(409, "行走正在啟動，請勿重複點擊")
                 try {
-                    prefs.setWalkSpeedPreset(preset)
+                    prefs.setWalkSpeedProfile(profile)
                     ContextCompat.startForegroundService(context,
                         MockLocationService.routeIntent(
                             context, available!!.route.geometry,
-                            preset.metresPerSecond, walkMode, loop))
+                            profile.nominalMps, walkMode, loop))
                     usedPreviewId = available.id
                     accepted("已要求手機沿預覽路線開始行走")
                 } catch (e: Exception) {
@@ -929,12 +928,35 @@ class LanController(private val context: Context) {
                 .put("estimatedSteps", LocationStatus.walkEstimatedSteps.value))
             .put("previews", routeStates)
             .put("speedPreset", WalkSpeedState.selected.value.name)
+            .put("speedMode", WalkSpeedState.profile.value.mode.name)
+            .put("speedKmh", WalkSpeedState.profile.value.fixedKmh)
+            .put("speedMinKmh", WalkSpeedState.profile.value.minKmh)
+            .put("speedMaxKmh", WalkSpeedState.profile.value.maxKmh)
+            .put("speedAppliedKmh", LocationStatus.appliedSpeedKmh.value)
             .put("defaultSpeedPreset", WalkSpeedState.preferred.value.name)
             .put("routeStops", coordinates(prefs.routeDraft()))
             .put("flowerStops", coordinates(prefs.flowerDraft()))
             .put("geometry", coordinates(path))
             .toString()
     }
+
+    /** A single validation boundary for all paired-Web speed operations. */
+    private fun speedProfile(json: JSONObject): WalkSpeedProfile? = runCatching {
+        val mode = json.optString("speedMode", "PRESET")
+        val preset = WalkSpeedPreset.entries.firstOrNull {
+            it.name == json.optString("speedPreset")
+        }
+        when (mode) {
+            "PRESET" -> WalkSpeedProfile.preset(preset
+                ?: throw IllegalArgumentException("未知速度預設"))
+            "FIXED" -> WalkSpeedProfile.fixed(
+                json.getDouble("speedKmh"), WalkSpeedState.selected.value)
+            "RANGE" -> WalkSpeedProfile.range(
+                json.getDouble("speedMinKmh"), json.getDouble("speedMaxKmh"),
+                WalkSpeedState.selected.value)
+            else -> throw IllegalArgumentException("未知速度模式")
+        }
+    }.getOrNull()
 
     private fun mode(value: String?): WalkMode? = when (value) {
         "ROUTE" -> WalkMode.ROUTE

@@ -462,10 +462,27 @@ body.remote-active #control-panel .row>*{min-width:0}
    <div><label for="speed">目前速度</label><select id="speed">
     <option value="SLOW">慢走 · 0.8 km/h</option>
     <option value="WALK" selected>走路 · 1.4 km/h</option>
-    <option value="FAST">快走 · 10.8 km/h</option></select></div>
+    <option value="FAST">快走 · 10.8 km/h</option>
+    <option value="FIXED">自訂固定速度</option>
+    <option value="RANGE">路段速度區間</option></select></div>
    <div><label for="loop">循環路線</label><select id="loop">
     <option value="false">不循環</option><option value="true">循環</option></select></div>
   </div>
+  <div id="speed-extra" class="hidden">
+   <div id="speed-fixed-wrap">
+    <label for="speed-fixed">自訂速度（0.8–20 km/h）</label>
+    <input type="number" id="speed-fixed" min="0.8" max="20" step="0.1" value="12" inputmode="decimal">
+   </div>
+   <div id="speed-range-wrap" class="hidden inline">
+    <div><label for="speed-min">最低速度 km/h</label>
+     <input type="number" id="speed-min" min="0.8" max="20" step="0.1" value="10.8" inputmode="decimal"></div>
+    <div><label for="speed-max">最高速度 km/h</label>
+     <input type="number" id="speed-max" min="0.8" max="20" step="0.1" value="15" inputmode="decimal"></div>
+   </div>
+   <div class="row"><button id="apply-speed" type="button">套用這次速度</button></div>
+   <small class="muted">只在路段交界重新抽選速度；行走中可套用，不更動你原本的開機預設速度。</small>
+  </div>
+  <div id="speed-applied" class="muted" role="status" aria-live="polite"></div>
   <details class="advanced-details"><summary>進階：設定預設速度</summary><div class="row"><span id="default-speed" class="muted">目前預設：走路</span><button id="make-speed-default">設為預設速度</button></div></details>
   <div id="pointcount" class="muted">0 個路點</div>
   <ol id="route-order" class="route-order" aria-label="路點順序" aria-live="polite"></ol>

@@ -30,11 +30,15 @@ data class RouteEstimate(val distanceMetres: Double, val minutes: Long) {
             return fromDistance(WalkingGeometry.lengthMeters(geometry), speed)
         }
 
-        fun fromDistance(distanceMetres: Double, speed: WalkSpeedPreset): RouteEstimate {
+        fun fromDistance(distanceMetres: Double, speed: WalkSpeedPreset): RouteEstimate =
+            fromDistanceAtMps(distanceMetres, speed.metresPerSecond)
+
+        fun fromDistanceAtMps(distanceMetres: Double, speedMps: Double): RouteEstimate {
             require(distanceMetres.isFinite() && distanceMetres >= 0.0)
+            require(speedMps.isFinite() && speedMps > 0.0)
             val minutes = if (distanceMetres == 0.0) 0L else
                 // Avoid floating-point noise turning exactly 60 minutes into 61.
-                ceil(distanceMetres / speed.metresPerSecond / 60.0 - 1e-9)
+                ceil(distanceMetres / speedMps / 60.0 - 1e-9)
                     .toLong().coerceAtLeast(1)
             return RouteEstimate(distanceMetres, minutes)
         }

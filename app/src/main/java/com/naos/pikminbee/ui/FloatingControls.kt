@@ -40,6 +40,9 @@ import android.content.res.Configuration
 import com.naos.pikminbee.domain.WalkMode
 import com.naos.pikminbee.domain.WalkPhase
 import com.naos.pikminbee.domain.WalkSpeedPreset
+import com.naos.pikminbee.domain.WalkSpeedProfile
+import com.naos.pikminbee.domain.WalkSpeedMode
+import com.naos.pikminbee.data.WalkSpeedState
 import java.time.LocalDate
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -465,7 +468,14 @@ class FloatingControls(
             " · ${progress.activeLegLabel}（共 ${progress.waypointCount} 點）" +
                 " · ${(progress.fraction * 100).toInt()}%"
         } else ""
-        quickSummary?.text = "$label · ${currentSpeed.kilometresPerHour} km/h$journey"
+        val selectedProfile = WalkSpeedState.profile.value
+        val applied = com.naos.pikminbee.location.LocationStatus.appliedSpeedKmh.value
+        val speedLabel = if (applied > 0.0 &&
+            lastPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)) {
+            val prefix = if (selectedProfile.mode == WalkSpeedMode.RANGE) "區間 · " else ""
+            prefix + WalkSpeedProfile.number(applied) + " km/h"
+        } else selectedProfile.display
+        quickSummary?.text = "$label · $speedLabel$journey"
         val primaryLabel = when (primary) {
             OverlayPrimaryState.START -> "開始行走"
             OverlayPrimaryState.PAUSE -> "暫停行走"
@@ -626,7 +636,7 @@ class FloatingControls(
                 OverlayQuickAction.FLOWER_VISION ->
                     Triple(which, OverlayGlyph.FLOWER, "畫面偵測花")
                 OverlayQuickAction.SPEED ->
-                    Triple(which, OverlayGlyph.SPEED, "切換走路速度")
+                    Triple(which, OverlayGlyph.SPEED, "切換三種速度預設；自訂與區間速度請在主畫面設定")
                 OverlayQuickAction.MAP ->
                     Triple(which, OverlayGlyph.MAP, "打開地圖")
                 OverlayQuickAction.CLOSE ->
