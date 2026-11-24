@@ -179,6 +179,28 @@ class LanHttpPolicyTest {
         assertTrue(js.contains("/api/points/remove"))
         assertTrue(js.contains("ordinalPin(i + 1"))
         assertTrue(js.contains("line-dasharray"))
+        // Teleport never pans on a rejected request; an accepted command
+        // re-centres only the map, while the actual mock GPS comes from /state.
+        assertTrue(js.contains("if (!await act(\"/api/teleport\", destination)) return"))
+        assertTrue(js.contains("map?.jumpTo({center:[destination.lon,destination.lat]"))
+        assertTrue(js.contains("請以手機回報的位置為準"))
+        // Web matches native Android's blue/orange 24dp current-position dots,
+        // rather than the former oversized Chinese-label markers.
+        assertTrue(js.contains("element:currentPositionDot(true)"))
+        assertTrue(js.contains("element:currentPositionDot(false)"))
+        assertFalse(js.contains("ordinalPin(\"模\""))
+        assertFalse(js.contains("ordinalPin(\"真\""))
+        assertFalse(js.contains("ordinalPin(\"起\""))
+        assertTrue(html.contains(".position-dot.virtual{--dot:#f8902e"))
+        assertTrue(html.contains(".position-dot{--dot:#357def"))
+        assertTrue(html.contains(".ordinal-pin.first{background:#159e5e}"))
+        assertTrue(html.contains(".ordinal-pin.last{background:#df454d}"))
+        // Drawer never covers map style/favourites; long routes scroll within
+        // their own list and stay read-only during an active walk.
+        assertTrue(html.contains("right:400px;"))
+        assertTrue(html.contains("body.remote-active #route-order{max-height:"))
+        assertTrue(js.contains("if (index >= 0 && !busy)"))
+        assertTrue(js.contains("行走中路點暫時為唯讀"))
         assertTrue(js.contains("realPosition"))
         assertTrue(js.contains("map.on(\"error\""))
         assertTrue(js.contains("map.on(\"webglcontextlost\""))
