@@ -1,5 +1,22 @@
 /** Pure helpers shared by the controller and its regression tests. */
 export const BRIGHT_STYLE_URL = "https://tiles.openfreemap.org/styles/bright";
+
+/** The flag URL is local and can never be a user-supplied asset path. */
+export function countryFlagPath(countryCode) {
+  const code = typeof countryCode === "string" ? countryCode.trim().toLowerCase() : "";
+  return /^[a-z]{2}$/.test(code) ? "/flags/" + code + ".png" : null;
+}
+/** A destination clock needs no physical GPS reference or browser time-zone guess. */
+export function destinationTime(zone, date = new Date()) {
+  if (typeof zone !== "string" || !zone || zone.length > 90 || /^[+-]/.test(zone))
+    return "當地時間待確認，可補齊舊收藏";
+  try {
+    const clock = new Intl.DateTimeFormat("en-GB", {
+      timeZone: zone, hour:"2-digit", minute:"2-digit", hourCycle:"h23"
+    }).format(date);
+    return "當地時間 " + clock;
+  } catch (_) { return "當地時間待確認，可補齊舊收藏"; }
+}
 export function samePosition(a,b, toleranceMetres = 3) {
   if (!a || !b || ![a.lat,a.lon,b.lat,b.lon].every(Number.isFinite)) return false;
   const dy = (a.lat-b.lat)*111320;

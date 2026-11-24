@@ -1,5 +1,7 @@
 package com.naos.pikminbee.ui
 
+import android.graphics.BitmapFactory
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -7,6 +9,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -25,13 +28,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.naos.pikminbee.data.SavedPlace
 import com.naos.pikminbee.data.SavedPlaceTimePolicy
 import com.naos.pikminbee.data.SavedPlaceMetadataPolicy
-import com.naos.pikminbee.data.VerifiedRealTimeZone
 import kotlinx.coroutines.delay
 
 /**
@@ -41,7 +45,6 @@ import kotlinx.coroutines.delay
 @Composable
 fun FavouritesPanel(
     places: List<SavedPlace>,
-    realZoneReference: VerifiedRealTimeZone?,
     foreground: Color,
     muted: Color,
     onSelectPlace: (SavedPlace) -> Unit,
@@ -112,21 +115,30 @@ fun FavouritesPanel(
                 ) {
                     Text(place.name, color = foreground, fontWeight = FontWeight.SemiBold,
                         fontSize = 15.sp, maxLines = 1)
-                    val flag = SavedPlaceTimePolicy.flagEmoji(place.countryCode)
+                    val context = LocalContext.current
+                    val flag = remember(context, place.countryCode) {
+                        SavedPlaceTimePolicy.flagAssetPath(place.countryCode)?.let { path ->
+                            runCatching {
+                                context.assets.open(path).use { BitmapFactory.decodeStream(it) }?.asImageBitmap()
+                            }.getOrNull()
+                        }
+                    }
                     val countryLine = listOfNotNull(
                         place.countryName ?: place.countryCode, place.city,
                     ).joinToString(" · ")
                     Row(verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                        if (flag.isNotBlank()) Text(flag, fontSize = 22.sp)
+                        if (flag != null) Image(
+                            bitmap = flag,
+                            contentDescription = null,
+                            modifier = Modifier.size(width = 28.dp, height = 20.dp),
+                        )
                         Text(countryLine.ifBlank { "國家／城市待確認，可補齊舊收藏" },
                             color = muted, fontSize = 12.sp)
                     }
                     val local = SavedPlaceTimePolicy.localClock(place.timeZoneId, nowMillis)
-                    val difference = SavedPlaceTimePolicy.differenceLabel(
-                        place.timeZoneId, realZoneReference?.freshId(nowMillis), nowMillis)
-                    Text(if (local == null) "當地時間待確認"
-                        else "當地 $local · ${difference ?: "時差待確認"}",
+                    Text(if (local == null) "當地時間待確認，可補齊舊收藏"
+                        else "當地時間 $local",
                         color = foreground, fontSize = 12.sp)
                     TextButton(onClick = {
                         detailId = if (detailId == place.id) null else place.id

@@ -60,6 +60,19 @@ class LanHttpPolicyTest {
         assertTrue(policy.contains("connect-src 'self' https://tiles.openfreemap.org"))
     }
 
+    @Test fun binaryFlagReplyPreservesPngBytes() {
+        val directory = sequenceOf(File("src/main/assets/lan"), File("app/src/main/assets/lan"))
+            .firstOrNull { it.isDirectory } ?: error("Missing LAN assets")
+        for (name in listOf("tw", "jp", "us", "gb", "np", "xk")) {
+            val png = File(directory, "flags/$name.png").readBytes()
+            assertArrayEquals(byteArrayOf(-119, 80, 78, 71, 13, 10, 26, 10), png.copyOf(8))
+            val reply = LanReply(200, "", "image/png", binaryBody = png)
+            assertArrayEquals(png, reply.payloadBytes())
+            assertEquals("image/png", reply.contentType)
+        }
+        assertArrayEquals("正常文字".toByteArray(Charsets.UTF_8), LanReply(200, "正常文字").payloadBytes())
+    }
+
     @Test fun browserBundlesTheExactReviewedMaplibreAssetsLocally() {
         val directory = sequenceOf(
             File("src/main/assets/lan"),
@@ -138,12 +151,17 @@ class LanHttpPolicyTest {
         assertTrue(js.contains("originalBrightPaint"))
         assertTrue(js.contains("document.documentElement.dataset.webTheme"))
         assertTrue(js.contains("chooseWebAppearance()"))
-        assertTrue(js.contains("countryFlag(result.countryCode)"))
+        assertTrue(js.contains("countryFlag(place.countryCode)"))
+        assertTrue(js.contains("countryFlagPath(countryCode)"))
         assertTrue(js.contains("await call(\"/api/saved/place/add\",\"POST\","))
-        assertTrue(html.contains(".saved-country-flag{font-size:23px"))
+        assertTrue(html.contains(".saved-country-flag{width:28px"))
+        assertTrue(html.contains(".maplibregl-popup-content{"))
+        assertTrue(html.contains("border-top-color:var(--surface)"))
+        assertTrue(html.contains("button.maplibregl-popup-close-button{"))
         assertTrue(js.contains("只有真正失敗") ||
             js.contains("Only a genuinely failed/timed-out lookup"))
-        assertTrue(js.contains("realTimeZoneExpiresAtMillis"))
+        assertFalse(js.contains("時差待確認"))
+        assertFalse(js.contains("realTimeZoneExpiresAtMillis"))
         assertTrue(js.contains("refreshSavedClocks()"))
         assertFalse(html.contains("id=\"flower-optimize\""))
         assertFalse(js.contains("selectMode(\"FLOWERS\""))
