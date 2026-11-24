@@ -84,11 +84,25 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
 .stop-actions{display:flex;gap:4px;flex:0 0 auto}
 .stop-actions button{min-width:36px;min-height:42px;padding:6px 8px;font-size:12px}
 .stop-actions button:disabled{opacity:.35}
-.ordinal-pin{display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:50%;border:2px solid #fff;background:#356b72;color:#fff;box-shadow:0 1px 4px #0006;font-size:12px;font-weight:800}
-.ordinal-pin.last{background:#9a4c55}
-.ordinal-pin.start{background:#436e85}
-.ordinal-pin.real{background:#327da9}
-.ordinal-pin.virtual{background:#a47631}
+.ordinal-pin{display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:50%;border:3px solid #fff;background:#306eee;color:#fff;box-shadow:0 1px 4px #0006;font-size:12px;font-weight:800}
+.ordinal-pin.first{background:#159e5e}
+.ordinal-pin.via{background:#306eee}
+.ordinal-pin.last{background:#df454d}
+/* Reproduce Android RoutePinBitmap.current() without Chinese glyphs:
+   blue = verified real, orange = simulated, each with a white ring and halo. */
+.position-dot{--dot:#357def;--halo:rgba(53,125,239,.10);
+  position:relative;width:24px;height:24px;border-radius:50%;
+  background:var(--halo);box-shadow:0 1px 3px #0002}
+.position-dot.virtual{--dot:#f8902e;--halo:rgba(248,144,46,.10)}
+.position-dot::before,.position-dot::after{content:"";position:absolute;
+  top:50%;left:50%;transform:translate(-50%,-50%);border-radius:50%}
+.position-dot::before{width:15px;height:15px;background:#fff}
+.position-dot::after{width:11px;height:11px;background:var(--dot)}
+.route-origin-pin{display:grid;place-items:center;width:21px;height:21px;
+  border:3px solid #159e5e;border-radius:50%;background:#fff;
+  box-shadow:0 1px 3px #0005}
+.route-origin-pin::after{content:"";width:6px;height:6px;border-radius:50%;
+  background:#159e5e}
 .spacer{height:8px}
 .hidden{display:none!important}
 #pairbox{max-width:540px;margin:42px auto}
@@ -232,9 +246,13 @@ body.remote-active #map-panel{position:absolute;inset:0;top:0;min-width:0;max-wi
   margin:0;padding:0;border:0;border-radius:0;background:transparent;box-shadow:none;z-index:1}
 body.remote-active #map-wrap{position:absolute;inset:0;border:0;border-radius:0}
 body.remote-active #map{height:100%;width:100%;min-height:0;max-height:none}
-body.remote-active .map-header{position:absolute;z-index:11;top:17px;right:18px;
-  width:auto;max-width:calc(100vw - 330px);justify-content:flex-end;
+/* Reserve the right-hand drawer's footprint so Map Style/Favourites cannot
+   be obscured behind it. The collapsed drawer uses a smaller right gutter. */
+body.remote-active .map-header{position:absolute;z-index:11;top:17px;right:400px;
+  width:auto;max-width:calc(100vw - 460px);justify-content:flex-end;
   margin:0!important;flex-wrap:nowrap;pointer-events:auto}
+body.remote-active:has(#control-panel[data-panel="closed"]) .map-header{
+  right:87px;max-width:calc(100vw - 370px)}
 body.remote-active .map-header>*{flex:0 0 auto}
 body.remote-active .map-header strong{display:none}
 body.remote-active #map-status{background:var(--surface);box-shadow:var(--shadow)}
@@ -259,6 +277,11 @@ body.remote-active #control-panel{position:absolute;z-index:14;right:16px;top:80
   border-radius:20px;background:var(--surface);border:1px solid var(--rim);
   box-shadow:var(--shadow);overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}
 body.remote-active #control-panel .control-title{padding:2px 2px 10px}
+body.remote-active:not([data-device="mobile"]) #control-panel[data-panel="open"] .control-title{
+  position:sticky;top:-12px;z-index:4;background:var(--surface);
+  padding-top:9px;border-bottom:1px solid var(--line)}
+body.remote-active #route-order{max-height:min(40dvh,380px);overflow-y:auto;
+  overscroll-behavior:contain;padding-right:4px;scrollbar-width:thin}
 body.remote-active #control-panel #mode-panel-title{font-size:20px;margin:4px 0 0}
 body.remote-active #control-panel .control-title .eyebrow{font-size:9px}
 body.remote-active #panel-toggle{display:grid;place-items:center;flex:none;
@@ -298,7 +321,9 @@ body.remote-active #control-panel .row>*{min-width:0}
 @media(min-width:601px) and (max-width:1060px){
   body.remote-active #control-panel{width:326px;right:12px;top:80px;bottom:12px}
   body.remote-active:not([data-device="mobile"]) #control-panel[data-panel="closed"]{width:54px;bottom:auto}
-  body.remote-active .map-header{top:17px;right:12px;max-width:calc(100vw - 270px)}
+  body.remote-active .map-header{top:17px;right:352px;max-width:calc(100vw - 385px)}
+  body.remote-active:has(#control-panel[data-panel="closed"]) .map-header{
+    right:83px;max-width:calc(100vw - 135px)}
   body.remote-active .head{left:13px}
   body.remote-active .map-locations{left:88px;width:min(290px,calc(100vw - 110px))}
   body.remote-active #compact-walk-controls:not(.hidden){left:88px;width:290px}
@@ -316,7 +341,9 @@ body.remote-active #control-panel .row>*{min-width:0}
     top:124px;left:11px;right:auto;
     width:min(275px,calc(100vw - 95px));padding:6px 8px;gap:3px}
   body.remote-active #session-panel button{min-height:42px;font-size:11px}
-  body.remote-active .map-header{top:76px;left:10px;right:10px;
+  body.remote-active .map-header,
+  body.remote-active:has(#control-panel[data-panel="closed"]) .map-header{
+    top:76px;left:10px;right:10px;
     width:auto;max-width:none;gap:6px;justify-content:flex-end}
   body.remote-active .map-header select{width:124px!important;max-width:124px!important;
     min-height:42px;font-size:11px}
@@ -509,7 +536,8 @@ body.remote-active #control-panel .row>*{min-width:0}
   <div id="speed-applied" class="muted" role="status" aria-live="polite"></div>
   <details class="advanced-details"><summary>進階：設定預設速度</summary><div class="row"><span id="default-speed" class="muted">目前預設：走路</span><button id="make-speed-default">設為預設速度</button></div></details>
   <div id="pointcount" class="muted">0 個路點</div>
-  <ol id="route-order" class="route-order" aria-label="路點順序" aria-live="polite"></ol>
+  <ol id="route-order" class="route-order" tabindex="0"
+    aria-label="路點順序，可捲動查看全部路點" aria-live="polite"></ol>
   <div class="sub">清單與虛線只表示行走順序；須按「規劃並預覽道路」取得道路線。</div>
   <div id="routehint" class="sub">選擇起點及目的地，先規劃道路再開始。</div>
   <div class="row"><button id="add">加入路點</button><button id="undo">撤銷上一點</button><button id="clear">清除全部</button></div>
