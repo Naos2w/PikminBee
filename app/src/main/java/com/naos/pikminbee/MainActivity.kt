@@ -77,8 +77,6 @@ import com.naos.pikminbee.data.PlaceLookup
 import com.naos.pikminbee.data.PlaceSuggestion
 import com.naos.pikminbee.data.PlaceSuggestionPolicy
 import com.naos.pikminbee.data.SavedPlaceMetadataPolicy
-import com.naos.pikminbee.data.SavedPlaceTimePolicy
-import com.naos.pikminbee.data.VerifiedRealTimeZone
 import com.naos.pikminbee.flower.FlowerCatalogStore
 import com.naos.pikminbee.flower.FlowerJsonCodec
 import com.naos.pikminbee.data.MapAppearance
@@ -233,7 +231,6 @@ private fun PikminBeeScreen() {
     var showWifiPanel by remember { mutableStateOf(false) }
     var places by remember { mutableStateOf(prefs.places()) }
     var showFavourites by remember { mutableStateOf(false) }
-    var realZoneReference by remember { mutableStateOf<VerifiedRealTimeZone?>(null) }
     var backfillingPlaces by remember { mutableStateOf(false) }
     var backfillResult by remember { mutableStateOf("") }
     var savingPlace by remember { mutableStateOf(false) }
@@ -248,15 +245,6 @@ private fun PikminBeeScreen() {
     var mockGpsJitterLevel by remember { mutableStateOf(prefs.mockGpsJitterLevel()) }
     var virtualStrideMetres by remember { mutableStateOf(prefs.virtualStrideMetres()) }
     val work = rememberCoroutineScope()
-    LaunchedEffect(showFavourites) {
-        if (!showFavourites) return@LaunchedEffect
-        realZoneReference = null
-        val verified = VerifiedPhysicalFixState.fresh() ?: return@LaunchedEffect
-        val zone = placeLookup.zoneForVerifiedPhysical(verified.coordinate)
-        if (showFavourites && zone != null) {
-            realZoneReference = VerifiedRealTimeZone(zone, verified.timestampMillis)
-        }
-    }
     val mockStatus by LocationStatus.display.collectAsState()
     val mockPosition by LocationStatus.selected.collectAsState()
     val walkPhase by LocationStatus.phase.collectAsState()
@@ -1168,13 +1156,11 @@ private fun PikminBeeScreen() {
                                                             )
                                                         }
                                                         places = prefs.places()
-                                                        val flag = SavedPlaceTimePolicy.flagEmoji(
-                                                            suggestion.countryCode)
                                                         message = if (suggestion.displayName ==
                                                             PlaceSuggestionPolicy.pointLabel(target))
                                                             "地名查詢無結果，已用座標名稱收藏；可稍後補齊資訊"
                                                         else "已自動命名並收藏「${suggestion.displayName}」 " +
-                                                            listOf(flag, suggestion.city, suggestion.countryName)
+                                                            listOf(suggestion.city, suggestion.countryName ?: suggestion.countryCode)
                                                                 .filterNot { it.isNullOrBlank() }
                                                                 .joinToString(" · ")
                                                     } catch (e: Exception) {
@@ -1241,8 +1227,6 @@ private fun PikminBeeScreen() {
             ) {
                 FavouritesPanel(
                     places = places,
-                    // A system time zone is NOT proof of the phone's actual GPS time zone.
-                    realZoneReference = realZoneReference,
                     foreground = foreground,
                     muted = muted,
                     onSelectPlace = { place ->

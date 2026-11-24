@@ -1,7 +1,30 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
-import { BRIGHT_STYLE_URL, samePosition, currentPosition, createCameraFocus, visibleMapPadding } from "../app/src/main/assets/lan/map-ui-policy.mjs";
+import { BRIGHT_STYLE_URL, samePosition, currentPosition, createCameraFocus, visibleMapPadding, countryFlagPath, destinationTime } from "../app/src/main/assets/lan/map-ui-policy.mjs";
+
+test("country flags are local PNGs with safe two-letter names",()=>{
+  for (const code of ["TW","jp","US","GB","NP","XK"]) {
+    const path=countryFlagPath(code);
+    assert.equal(path,"/flags/"+code.toLowerCase()+".png");
+    const png=readFileSync(new URL("../app/src/main/assets/lan"+path,import.meta.url));
+    assert.deepEqual([...png.subarray(0,8)],[137,80,78,71,13,10,26,10]);
+  }
+  for (const bad of [null,"","TWN","../tw","/tw.png","1A","T/","東京"])
+    assert.equal(countryFlagPath(bad),null);
+});
+test("destination clock needs no physical GPS, respects DST and handles unknown zones",()=>{
+  const winter=new Date("2026-11-22T12:00:00Z");
+  const summer=new Date("2026-07-22T12:00:00Z");
+  assert.equal(destinationTime("Asia/Taipei",winter),"當地時間 20:00");
+  assert.equal(destinationTime("Asia/Tokyo",winter),"當地時間 21:00");
+  assert.equal(destinationTime("America/New_York",winter),"當地時間 07:00");
+  assert.equal(destinationTime("America/New_York",summer),"當地時間 08:00");
+  assert.equal(destinationTime("Asia/Kathmandu",winter),"當地時間 17:45");
+  assert.equal(destinationTime("UTC",new Date("2026-11-22T00:00:00Z")),"當地時間 00:00");
+  for (const bad of [null,"","invalid/City","+02:00"])
+    assert.equal(destinationTime(bad,winter),"當地時間待確認，可補齊舊收藏");
+});
 
 const taipei = {lat:25.033,lon:121.5654};
 const tokyo = {lat:35.681236,lon:139.767125};

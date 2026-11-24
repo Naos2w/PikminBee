@@ -251,6 +251,13 @@ class LanController(private val context: Context) {
         if (req.method == "GET" && req.path == "/map-ui-policy.mjs") {
             return asset("lan/map-ui-policy.mjs", "application/javascript; charset=utf-8")
         }
+        // Only two-letter flag filenames are served; no arbitrary asset paths.
+        if (req.method == "GET" && req.path.matches(Regex("/flags/[a-z]{2}\\.png"))) {
+            return runCatching {
+                LanReply(200, "", "image/png",
+                    binaryBody = context.assets.open("lan${req.path}").use { it.readBytes() })
+            }.getOrElse { error(404, "國旗圖片不存在") }
+        }
         if (req.method == "GET" && req.path == "/vendor/maplibre-gl.mjs") {
             return asset("lan/vendor/maplibre-gl/maplibre-gl.mjs", "application/javascript; charset=utf-8")
         }
