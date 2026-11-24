@@ -84,8 +84,6 @@ fun MapFirstShell(
     modeContent: @Composable () -> Unit,
     backdrop: Bitmap? = null,
     routeStopsCount: Int = 0,
-    flowerStopsCount: Int = 0,
-    flowerActive: Boolean = false,
     walkingProgress: WalkingProgressSnapshot = WalkingProgressSnapshot(),
     walkEstimatedSteps: Long = 0L,
     walkStopped: Boolean = false,
@@ -114,10 +112,9 @@ fun MapFirstShell(
     }
     val p = NaosDesignSystem.palette(LocalNaosVisualState.current.family, dark)
     val heightDp = LocalConfiguration.current.screenHeightDp
-    val active = modeIndex.coerceIn(0, 2)
+    val active = modeIndex.coerceIn(0, 1)
     // Ongoing walking must remain controllable even after changing map tabs.
-    val showQuick = (modeIndex == 1 && routeStopsCount > 0) ||
-        (modeIndex == 2 && flowerStopsCount > 0) || routeActive || flowerActive
+    val showQuick = (modeIndex == 1 && routeStopsCount > 0) || routeActive
 
     Box(Modifier.fillMaxSize().background(p.bg)) {
         mapContent()
@@ -166,13 +163,8 @@ fun MapFirstShell(
         }
 
         if (showQuick) {
-            val activeWalking = routeActive || flowerActive
-            val modeStopsCount = when {
-                flowerActive -> flowerStopsCount
-                routeActive -> routeStopsCount
-                modeIndex == 2 -> flowerStopsCount
-                else -> routeStopsCount
-            }
+            val activeWalking = routeActive
+            val modeStopsCount = routeStopsCount
             MapGlass(
                 dark,
                 Modifier.align(Alignment.BottomCenter).navigationBarsPadding()
@@ -190,7 +182,7 @@ fun MapFirstShell(
                         Text(
                             when {
                                 activeWalking && routePaused -> "已暫停 · 本次估算"
-                                activeWalking -> (if (flowerActive) "尋花中" else "行走中") + " · 本次估算"
+                                activeWalking -> "行走中 · 本次估算"
                                 walkStopped -> "已結束 · 本次估算"
                                 else -> "下一個路點"
                             },

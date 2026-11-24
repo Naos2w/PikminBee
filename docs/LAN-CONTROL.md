@@ -25,8 +25,8 @@ This is a **private LAN-only, opt-in** controller. It shares the same Android GP
 - `POST /api/teleport`, `/api/points/add`, `/api/points/undo`, `/api/points/clear`, `/api/route/start`, `/api/speed`, `/api/speed/default`, `/api/control`: shared existing location-service operations. Speed presets in all control surfaces use km/h (Slow 0.8, Walk 1.4 factory default, Fast 10.8). The remote `/api/speed` changes the **current session** and may update an active walk without restarting its route; authenticated `/api/speed/default` explicitly saves the selected **personal startup default**. Older `walk_speed_preset` settings are migrated on first launch. Only the personal default survives a fresh process launch.
 - `stop` keeps the simulated GPS where it is. `restore-real` explicitly ends mock mode **and closes the web listener**.
 - Routing uses Valhalla pedestrian roads. Failed route planning returns an error state; it never silently switches to a straight-line walking path.
-- Server, **not just browser buttons**, checks route limits: normal route 15 stops, looping normal route 14 stops, flower route **14 stops**. Flower stops require an active mock GPS origin and cannot be within 2 m of the start or 25 m of an existing flower stop. Invalid requests return HTTP 409 without changing the draft; invalid speed presets return HTTP 400 before network route planning. A failed external route response does not move GPS.
-- The browser disables Add/Start when preconditions are missing, and shows a per-mode limit. These controls are hints only; direct API requests are independently validated.
+- Server, **not just browser buttons**, checks route limits: normal route 15 stops, looping normal route 14 stops. Dedicated flower mode and all `/api/flowers/*` handlers are retired (HTTP 410); `mode=FLOWERS` cannot create, preview or start a route. Historical flower-labelled favourites may be loaded as **ordinary route drafts** without deleting the original saved record. Invalid route requests return HTTP 400/409 without changing the draft; a failed external route response does not move GPS.
+- The browser disables Add/Start when preconditions are missing, and shows the ordinary-route limit. These controls are hints only; direct API requests are independently validated.
 
 ## Safety and limitations
 
@@ -38,7 +38,7 @@ This is a **private LAN-only, opt-in** controller. It shares the same Android GP
 - Browser style preference is **local to that browser** (no phone style mutation); the phone offers the same four named keyless map styles and an automatic appearance mode. Switching map styles does **not** trigger teleport or GPS route commands.
 - Mobile app map remains OpenFreeMap or official Google Maps SDK. The browser does not include Google Maps JS, which would need a separately authorised web API key/billing.
 - Android targetSdk 36: current `INTERNET` permission covers LAN access. **Before updating targetSdk to 37**, add the Android 17 `ACCESS_LOCAL_NETWORK` runtime permission flow.
-- Browser pairing, phone approval, map rendering, LAN switching, HTTP errors and HyperOS background operation are **not device-tested yet**. Code build and JVM tests alone do not qualify this as released. Grouped POCO UAT must include browser style switching, route limits, loop-at-cap error, duplicate/near-origin flower rejection, and phone/web draft synchronisation.
+- Browser pairing, phone approval, map rendering, LAN switching, HTTP errors and HyperOS background operation are **not device-tested yet**. Code build and JVM tests alone do not qualify this as released. Grouped POCO UAT must include browser style switching, ordinary route limits, legacy favourite conversion, explicit retired-mode/API rejection, and phone/web draft synchronisation.
 - For internet/public-network access in the future, design a genuinely encrypted and mutually authenticated transport, not this private-LAN HTTP endpoint.
 
 ## Validation approach without APK churn

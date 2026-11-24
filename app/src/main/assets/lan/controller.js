@@ -17,7 +17,7 @@ let positionMarker = null, realMarker = null, originMarker = null, selectionMark
 let routeMarkers = [];
 let lastStopsKey = "", lastLineKey = "", lastDraftKey = "", lastOrderKey = "";
 let focusRealWhenReady = false;
-const loops = {ROUTE: false, FLOWERS: true};
+const loops = {ROUTE: false};
 const setMessage = value => { $("message").textContent = value; };
 const setPairMessage = value => { $("pairmessage").textContent = value; };
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -128,7 +128,7 @@ function readCoordinate() {
 
 function updateModeView() {
   for (const [id,value] of [
-    ["mode-teleport","TELEPORT"],["mode-route","ROUTE"],["mode-flowers","FLOWERS"]
+    ["mode-teleport","TELEPORT"],["mode-route","ROUTE"]
   ]) {
     const tab = $(id);
     const active = !settingsOpen && mode === value;
@@ -139,13 +139,10 @@ function updateModeView() {
   $("mode-settings").setAttribute("aria-pressed", settingsOpen ? "true" : "false");
   $("location-panel").classList.toggle("hidden", settingsOpen);
   $("teleport-panel").classList.toggle("hidden", settingsOpen || mode !== "TELEPORT");
-  $("route-panel").classList.toggle("hidden", settingsOpen ||
-    (mode !== "ROUTE" && mode !== "FLOWERS"));
+  $("route-panel").classList.toggle("hidden", settingsOpen || mode !== "ROUTE");
   $("web-settings").classList.toggle("hidden", !settingsOpen);
-  $("flower-guide").classList.toggle("hidden", settingsOpen || mode !== "FLOWERS");
-  $("flower-catalogue").classList.toggle("hidden", settingsOpen || mode !== "FLOWERS");
   $("mode-panel-title").textContent = settingsOpen ? "設定" :
-    ({TELEPORT:"瞬移",ROUTE:"路徑",FLOWERS:"尋花"}[mode] || "瞬移");
+    ({TELEPORT:"瞬移",ROUTE:"路徑"}[mode] || "瞬移");
 }
 // V2: the actual map canvas fills the viewport; these controls only change
 // overlays, not the map's view, GPS provider or current route.
@@ -167,7 +164,7 @@ function setSheetState(next) {
   $("control-panel").dataset.sheet = next;
   $("sheet-handle").setAttribute("aria-expanded", String(next !== "collapsed"));
   $("sheet-summary").textContent = (settingsOpen ? "設定" :
-    ({TELEPORT:"瞬移",ROUTE:"路徑",FLOWERS:"尋花"}[mode] || "瞬移")) +
+    ({TELEPORT:"瞬移",ROUTE:"路徑"}[mode] || "瞬移")) +
     (next === "collapsed" ? " · 向上展開" : " · 向下收合");
   updateCompactWalkControls();
   requestAnimationFrame(() => map?.resize());
@@ -196,12 +193,12 @@ function applyResponsiveLayout() {
   requestAnimationFrame(() => map?.resize());
 }
 function selectMode(next, userAction = true) {
-  if (!["TELEPORT","ROUTE","FLOWERS"].includes(next)) return;
+  if (!["TELEPORT","ROUTE"].includes(next)) return;
   const wasCurrent = !settingsOpen && mode === next;
   mode = next;
   settingsOpen = false;
   updateModeView();
-  if (mode === "ROUTE" || mode === "FLOWERS") $("loop").value = String(loops[mode]);
+  if (mode === "ROUTE") $("loop").value = String(loops.ROUTE);
   $("confirm-snap").checked = false;
   updateRouteControls();
   renderMap();
@@ -212,7 +209,7 @@ function selectMode(next, userAction = true) {
   }
 }
 for (const [id,value] of [
-  ["mode-teleport","TELEPORT"],["mode-route","ROUTE"],["mode-flowers","FLOWERS"]
+  ["mode-teleport","TELEPORT"],["mode-route","ROUTE"]
 ]) $(id).addEventListener("click", () => selectMode(value));
 $("mode-settings").addEventListener("click", () => {
   const wasCurrent = settingsOpen;
@@ -249,9 +246,9 @@ $("sheet-handle").addEventListener("click", () => {
 window.addEventListener("resize", applyResponsiveLayout, {passive:true});
 selectMode("TELEPORT", false);
 applyResponsiveLayout();
-// Horizontal swipe switches only the three functional modes, never Settings or the map.
+// Horizontal swipe switches only Teleport and Route, never Settings or the map.
 const swipeArea = $("mode-content");
-const modeOrder = ["TELEPORT", "ROUTE", "FLOWERS"];
+const modeOrder = ["TELEPORT", "ROUTE"];
 let swipeStart = null;
 swipeArea.addEventListener("touchstart", event => {
   swipeStart = null;
@@ -271,69 +268,11 @@ swipeArea.addEventListener("touchend", event => {
   if (next >= 0 && next < modeOrder.length) selectMode(modeOrder[next]);
 }, {passive:true});
 $("loop").addEventListener("change", () => {
-  if (mode === "ROUTE" || mode === "FLOWERS") loops[mode] = $("loop").value === "true";
+  if (mode === "ROUTE") loops.ROUTE = $("loop").value === "true";
   $("confirm-snap").checked = false;
   updateRouteControls();
 });
 $("confirm-snap").addEventListener("change", updateRouteControls);
-
-async function searchFlowers() {
-  if (!token || mode !== "FLOWERS") return;
-  const origin = chosen || latest?.origin || latest?.realPosition || latest?.position;
-  const list = $("flower-list");
-  if (!origin) {
-    $("flower-status").textContent="請先在地圖選擇搜尋中心或指定起點";
-    return;
-  }
-  $("flower-search").disabled=true;
-  $("flower-status").textContent="正在查詢手機已記錄的花點（非官方即時資料）…";
-  list.replaceChildren();
-  try {
-    const response=await call("/api/flowers/nearby","POST",{
-      lat:origin.lat, lon:origin.lon,
-      radiusMetres:Number($("flower-radius").value),
-      onlyChecked:$("flower-filter").value==="checked"
-    });
-    const matches=response.flowers||[];
-    $("flower-status").textContent="附近已記錄 "+matches.length+
-      " 個花點 · 距離為直線距離，非道路最短路徑";
-    if(!matches.length){
-      const none=document.createElement("small");none.className="muted";
-      none.textContent="此範圍沒有符合條件的花點；可先在 Android 記錄或匯入";
-      list.append(none);
-    }
-    for(const flower of matches){
-      const row=document.createElement("article");row.className="flower-item";
-      const info=document.createElement("div");info.className="stop-detail";
-      const name=document.createElement("strong");name.textContent=flower.name;
-      const detail=document.createElement("small");
-      const unverified=flower.evidence==="UNVERIFIED_IMPORT";
-      detail.textContent=(unverified?"匯入候選 · 尚未確認":"本人確認")+
-        " · 約 "+Math.round(flower.distanceMetres)+" 公尺";
-      info.append(name,detail);
-      const add=document.createElement("button");add.type="button";
-      add.textContent="加入路線";
-      add.disabled=!latest?.origin||["MOVING","PAUSED"].includes(latest?.phase);
-      add.addEventListener("click",async()=>{
-        if(unverified&&!confirm("此花點僅是匯入候選，尚未確認為遊戲大花。確定加入尋花路線？"))
-          return;
-        if(await act("/api/flowers/add",{id:flower.id,confirmUnverified:unverified})){
-          $("flower-status").textContent="已加入花點；請確認順序並重新預覽道路";
-          updateRouteControls();
-        }
-      });
-      row.append(info,add);list.append(row);
-    }
-  }catch(error){
-    $("flower-status").textContent=error.message||"無法讀取花點";
-  }finally{$("flower-search").disabled=false;}
-}
-$("flower-search").addEventListener("click",searchFlowers);
-$("flower-optimize").addEventListener("click",async()=>{
-  if(!confirm("使用 Valhalla 步行道路距離建議尋花順序？路點不會被加入或刪除，仍須重新預覽才能開始。"))return;
-  if(await act("/api/flowers/optimise",{loop:$("loop").value==="true"}))
-    $("flower-status").textContent="正在計算步行道路順序，請查看完成後的路點順序及狀態";
-});
 
 async function act(path, body, note = "") {
   try {
@@ -657,15 +596,14 @@ function renderMap() {
     selectionMarker = null;
   }
 
-  const stops = mode === "FLOWERS" ? (latest?.flowerStops || []) :
-    mode === "ROUTE" ? (latest?.routeStops || []) : [];
+  const stops = mode === "ROUTE" ? (latest?.routeStops || []) : [];
   const key = mode + "|" + JSON.stringify(stops);
   if (key !== lastStopsKey) {
     routeMarkers.forEach(marker => marker.remove());
     routeMarkers = stops.map((item,i) =>
       new maplibre.Marker({element:ordinalPin(i + 1, i === stops.length-1 ? "last" : ""),anchor:"center"})
         .setLngLat([item.lon,item.lat])
-        .setPopup(new maplibre.Popup().setText((mode === "FLOWERS" ? "花點 " : "路點 ") + (i+1)))
+        .setPopup(new maplibre.Popup().setText("路點 " + (i+1)))
         .addTo(map));
     lastStopsKey = key;
   }
@@ -711,8 +649,7 @@ function formatDistance(metres) {
     Math.round(metres) + " 公尺";
 }
 function renderRouteOrder() {
-  const stops = mode === "FLOWERS" ? (latest?.flowerStops || []) :
-    mode === "ROUTE" ? (latest?.routeStops || []) : [];
+  const stops = mode === "ROUTE" ? (latest?.routeStops || []) : [];
   const origin = latest?.origin;
   const busy = latest?.planning || latest?.phase === "MOVING" || latest?.phase === "PAUSED";
   const key = mode + "|" + JSON.stringify(stops) + "|" +
@@ -721,8 +658,8 @@ function renderRouteOrder() {
   lastOrderKey = key;
   const list = $("route-order");
   list.replaceChildren();
-  if (mode !== "ROUTE" && mode !== "FLOWERS") return;
-  const label = mode === "FLOWERS" ? "花點" : "路點";
+  if (mode !== "ROUTE") return;
+  const label = "路點";
   const coordinates = point => point.lat.toFixed(5) + ", " + point.lon.toFixed(5);
   function addRow(point, index) {
     const li = document.createElement("li");
@@ -784,9 +721,8 @@ function renderRouteOrder() {
 }
 
 function updateRouteControls() {
-  const navigating = mode === "ROUTE" || mode === "FLOWERS";
-  const stops = mode === "FLOWERS" ? (latest?.flowerStops || []) :
-    (latest?.routeStops || []);
+  const navigating = mode === "ROUTE";
+  const stops = latest?.routeStops || [];
   const prepared = latest?.previews?.[mode];
   const hasOrigin = !!latest?.origin;
   const moving = latest?.phase === "MOVING";
@@ -795,21 +731,17 @@ function updateRouteControls() {
   const loop = $("loop").value === "true";
   const ready = !!prepared?.id && prepared.loop === loop;
   const needSnap = ready && prepared.maxSnapMetres > 40;
-  const max = mode === "ROUTE" ? 15 : 14;
-  $("pointcount").textContent = stops.length + " / " + max + " 個" +
-    (mode === "FLOWERS" ? "花點" : "路點") + " · 按清單順序行走";
+  const max = 15;
+  $("pointcount").textContent = stops.length + " / " + max + " 個路點 · 按清單順序行走";
   renderRouteOrder();
   $("originlabel").textContent = hasOrigin ? "目前起點：" +
     latest.origin.lat.toFixed(6) + ", " + latest.origin.lon.toFixed(6) :
     "尚未指定起點 · 在地圖選擇後按「設為起點」";
-  $("add").disabled = !navigating || busy || stops.length >= max ||
-    (mode === "FLOWERS" && !hasOrigin);
+  $("add").disabled = !navigating || busy || stops.length >= max;
   $("set-origin").disabled = !navigating || busy;
   $("undo").disabled = !navigating || busy || stops.length === 0;
   $("clear").disabled = !navigating || busy || stops.length === 0;
   $("plan").disabled = !navigating || busy || !hasOrigin || stops.length === 0;
-  $("flower-optimize").disabled = mode !== "FLOWERS" || busy || !hasOrigin ||
-    stops.length < (loop ? 2 : 3);
   $("start").disabled = !navigating || busy || !ready ||
     (needSnap && !$("confirm-snap").checked) ||
     !latest?.mockPermissionReady;
@@ -1105,14 +1037,16 @@ function renderSaved() {
     const card=document.createElement("article");card.className="saved-card";
     card.append(labelledText(route.name||"未命名路線","strong"));
     card.append(labelledText((route.stops||[]).length+" 個路點 · "+
-      (route.mode==="FLOWERS"?"尋花":"道路")));
+      (route.mode==="FLOWERS"?"舊巡花收藏":"道路")));
     const button=document.createElement("button");
     button.textContent="載入草稿（仍須預覽）";
     button.addEventListener("click",async()=>{
       if(await act("/api/saved/load",{id:route.id})){
         $("saved-dialog").close();
-        selectMode(route.mode==="FLOWERS"?"FLOWERS":"ROUTE");
-        setMessage("收藏路線已載入，請先預覽步行道路");
+        selectMode("ROUTE");
+        setMessage(route.mode==="FLOWERS"
+          ? "舊巡花收藏已轉成一般道路草稿；原收藏保留，請重新預覽"
+          : "收藏路線已載入，請先預覽步行道路");
       }
     });
     card.append(button);list.append(card);
