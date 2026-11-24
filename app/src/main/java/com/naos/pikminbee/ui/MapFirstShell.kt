@@ -278,20 +278,17 @@ fun MapFirstShell(
                 if (activeWalking && walkingProgress.totalMetres > 0.0) {
                     val total = walkingProgress.totalMetres / 1000.0
                     val done = walkingProgress.travelledMetres / 1000.0
-                    val progressText = buildString {
-                        append("路段 ")
-                        append(walkingProgress.activeLegLabel)
-                        append(" · 共 ")
-                        append(walkingProgress.waypointCount.coerceAtLeast(modeStopsCount))
-                        append(" 點 · ")
-                        append(String.format(Locale.US, "%.2f / %.2f km", done, total))
-                        append(" · ")
-                        append(routeSpeedKmh)
-                        append(" km/h · ")
-                        append(walkingProgress.remainingSeconds / 60)
-                        append(" 分")
-                    }
-                    Text(progressText, color = p.muted, fontSize = 10.sp, maxLines = 1)
+                    Text(
+                        "路段 ${walkingProgress.activeLegLabel} · " +
+                            String.format(Locale.US, "%.2f / %.2f km", done, total),
+                        color = p.ink, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 2,
+                    )
+                    Text(
+                        "${walkingProgress.waypointCount.coerceAtLeast(modeStopsCount)} 點 · " +
+                            String.format(Locale.US, "%.1f km/h", routeSpeedKmh) +
+                            " · 剩餘約 ${(walkingProgress.remainingSeconds + 59L) / 60L} 分鐘",
+                        color = p.muted, fontSize = 11.sp, lineHeight = 15.sp, maxLines = 2,
+                    )
                     Box(Modifier.fillMaxWidth().height(4.dp)
                         .background(p.soft, RoundedCornerShape(4.dp))) {
                         Box(Modifier.fillMaxWidth(walkingProgress.fraction).height(4.dp)

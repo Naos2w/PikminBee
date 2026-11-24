@@ -13,9 +13,21 @@ class FloatingRouteDraftTest {
         assertEquals(listOf(current, first, second), points)
     }
 
-    @Test fun flowerCycleReturnsToOrigin() {
+    @Test fun ordinaryLoopReturnsToOrigin() {
         val points = FloatingRouteDraft.anchors(current, listOf(first, second), true)
         assertEquals(listOf(current, first, second, current), points)
+    }
+
+    @Test fun fifteenDestinationsAllowedForOneWayButLoopNeedsReturnSlot() {
+        val stops = (1..15).map {
+            Coordinate(25.03 + it * .001, 121.56 + it * .001)
+        }
+        val planned = FloatingRouteDraft.anchors(current, stops, false)
+        assertEquals(16, planned.size)
+        assertThrows(IllegalArgumentException::class.java) {
+            FloatingRouteDraft.anchors(current, stops, true)
+        }
+        assertEquals(16, FloatingRouteDraft.anchors(current, stops.take(14), true).size)
     }
 
     @Test fun requiresARealCurrentOrigin() {

@@ -53,8 +53,7 @@ fun RouteLibraryPanel(
         }
         if (expanded) {
             Text(
-                "儲存目前的" + (if (mode == WalkMode.FLOWERS) "尋花點" else "路點") +
-                    "，下次可直接載入；載入不會自動開始行走。",
+                "儲存目前的路點，下次可直接載入。舊巡花收藏也會以一般路線草稿開啟，不會自動開始行走。",
                 color = muted, fontSize = 12.sp,
             )
             OutlinedTextField(
@@ -98,7 +97,7 @@ fun RouteLibraryPanel(
                             Text(route.name, color = foreground, fontSize = 14.sp,
                                 fontWeight = FontWeight.SemiBold, maxLines = 1)
                             Text(route.stops.size.toString() + " 個路點 · " +
-                                (if (route.mode == WalkMode.FLOWERS) "尋花" else "道路"),
+                                (if (route.mode == WalkMode.FLOWERS) "舊巡花收藏 · 可轉一般路線" else "道路"),
                                 color = muted, fontSize = 11.sp)
                             Row(Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(2.dp)) {

@@ -40,11 +40,15 @@ class RoutePointDraftTest {
             RoutePointDraft.select(emptyList(), origin, origin).outcome)
     }
 
-    @Test fun maxFourteenDestinationsAndInvalidEditAreSafe() {
-        val stops = (1..14).map { Coordinate(25.0 + it * .001, 121.5 + it * .001) }
-        val over = RoutePointDraft.select(stops, origin, replacement)
+    @Test fun maxFifteenDestinationsAndInvalidEditAreSafe() {
+        val fourteen = (1..14).map { Coordinate(25.0 + it * .001, 121.5 + it * .001) }
+        val last = Coordinate(25.080, 121.580)
+        val accepted = RoutePointDraft.select(fourteen, origin, last)
+        assertEquals(RoutePointDraft.MAX_STOPS, accepted.stops.size)
+        assertEquals(RoutePointDraft.Outcome.ADDED, accepted.outcome)
+        val over = RoutePointDraft.select(accepted.stops, origin, replacement)
         assertEquals(RoutePointDraft.Outcome.FULL, over.outcome)
-        assertEquals(stops, over.stops)
+        assertEquals(accepted.stops, over.stops)
         val invalid = RoutePointDraft.select(listOf(first), origin, second, 9)
         assertEquals(RoutePointDraft.Outcome.INVALID_INDEX, invalid.outcome)
     }

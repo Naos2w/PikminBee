@@ -27,6 +27,7 @@ This is a **private LAN-only, opt-in** controller. It shares the same Android GP
 - Routing uses Valhalla pedestrian roads. Failed route planning returns an error state; it never silently switches to a straight-line walking path.
 - Server, **not just browser buttons**, checks route limits: normal route 15 stops, looping normal route 14 stops. Dedicated flower mode and all `/api/flowers/*` handlers are retired (HTTP 410); `mode=FLOWERS` cannot create, preview or start a route. Historical flower-labelled favourites may be loaded as **ordinary route drafts** without deleting the original saved record. Invalid route requests return HTTP 400/409 without changing the draft; a failed external route response does not move GPS.
 - The browser disables Add/Start when preconditions are missing, and shows the ordinary-route limit. These controls are hints only; direct API requests are independently validated.
+- **UI/UX fix branch (2026-11-24):** A fixed compact Pause/Resume/Stop control is always available while walking on mobile (all sheet states), portrait/landscape tablets (including a closed drawer), and desktop; Stop requires explicit confirmation. Native Android route Stop also requires confirmation in the main map and route sheet. Ordinary non-loop routes now allow 15 waypoints in both Android and Web, while 14 remain the maximum for loop-return routes. Dark OpenFreeMap road colours are slightly brightened in both native and Web styles. These changes are **source-only until device/browser UAT**.
 
 ## Safety and limitations
 
