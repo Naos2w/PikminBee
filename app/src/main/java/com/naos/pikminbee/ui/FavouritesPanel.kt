@@ -22,6 +22,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -78,7 +79,7 @@ fun FavouritesPanel(
                 enabled = !backfillBusy,
                 onClick = onBackfill,
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text(if (backfillBusy) "正在補齊收藏資訊…" else "補齊舊收藏國家／時區（每次最多 5 筆）") }
+            ) { Text(if (backfillBusy) "正在補齊收藏資訊…" else "補齊舊收藏地名／國旗／時區（每次最多 5 筆）") }
             Text("僅點擊後查詢 Photon／TimeAPI；不改動你的收藏名稱、座標或 GPS。",
                 color = muted, fontSize = 11.sp)
         }
@@ -111,12 +112,16 @@ fun FavouritesPanel(
                 ) {
                     Text(place.name, color = foreground, fontWeight = FontWeight.SemiBold,
                         fontSize = 15.sp, maxLines = 1)
+                    val flag = SavedPlaceTimePolicy.flagEmoji(place.countryCode)
                     val countryLine = listOfNotNull(
-                        SavedPlaceTimePolicy.flagEmoji(place.countryCode).ifBlank { null },
                         place.countryName ?: place.countryCode, place.city,
                     ).joinToString(" · ")
-                    Text(countryLine.ifBlank { "國家／城市待確認" },
-                        color = muted, fontSize = 12.sp)
+                    Row(verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                        if (flag.isNotBlank()) Text(flag, fontSize = 22.sp)
+                        Text(countryLine.ifBlank { "國家／城市待確認，可補齊舊收藏" },
+                            color = muted, fontSize = 12.sp)
+                    }
                     val local = SavedPlaceTimePolicy.localClock(place.timeZoneId, nowMillis)
                     val difference = SavedPlaceTimePolicy.differenceLabel(
                         place.timeZoneId, realZoneReference?.freshId(nowMillis), nowMillis)

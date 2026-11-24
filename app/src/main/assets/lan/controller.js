@@ -504,14 +504,26 @@ $("real").addEventListener("click", async () => {
 });
 
 const darkQuery = matchMedia("(prefers-color-scheme: dark)");
-const styles = ["auto","liberty","bright","positron","dark"];
+const webThemeStoreKey = "pikminbee-web-theme";
+const webThemes = ["auto","light","dark"];
+const savedWebTheme = localStorage.getItem(webThemeStoreKey) || "auto";
+$("web-appearance").value = webThemes.includes(savedWebTheme) ? savedWebTheme : "auto";
+document.documentElement.dataset.webTheme = $("web-appearance").value;
+function webThemeIsDark() {
+  const chosenTheme = $("web-appearance").value;
+  return chosenTheme === "dark" || (chosenTheme === "auto" && darkQuery.matches);
+}
+const styles = ["auto","positron","bright","dark"];
 const storeKey = "pikminbee-map-appearance";
 const savedStyle = localStorage.getItem(storeKey) || "auto";
-$("theme").value = styles.includes(savedStyle) ? savedStyle : "auto";
+// Migrate the retired Liberty option without fetching it again.
+$("theme").value = savedStyle === "liberty" ? "positron" :
+  (styles.includes(savedStyle) ? savedStyle : "auto");
+$("theme-settings").value = $("theme").value;
 function styleUrl() {
   const choice = $("theme").value;
-  const name = choice === "auto" ? (darkQuery.matches ? "dark" : "liberty") :
-    (styles.includes(choice) ? choice : "liberty");
+  const name = choice === "auto" ? (webThemeIsDark() ? "dark" : "positron") :
+    (styles.includes(choice) ? choice : "positron");
   return "https://tiles.openfreemap.org/styles/" + name;
 }
 
@@ -586,19 +598,33 @@ function reloadMap() {
   initialiseMap();
 }
 $("retry-map").addEventListener("click", reloadMap);
-function chooseMapStyle() {
-  localStorage.setItem(storeKey,$("theme").value);
+function chooseMapStyle(choice = $("theme").value) {
+  const selectedStyle = styles.includes(choice) ? choice : "auto";
+  $("theme").value = selectedStyle;
+  $("theme-settings").value = selectedStyle;
+  localStorage.setItem(storeKey, selectedStyle);
   if (map) {
     armMapWait();
     mapStyleReady = false;
     lastLineKey = ""; lastDraftKey = "";
     try { map.setStyle(styleUrl()); map.resize(); }
-    catch (error) { setMapStatus("error", "無法切換地圖樣式，請按重新載入地圖。"); }
+    catch (error) { setMapStatus("error", "無法切換地圖底圖，請按重新載入地圖。"); }
   }
 }
-$("theme").addEventListener("change", chooseMapStyle);
+function chooseWebAppearance() {
+  const choice = $("web-appearance").value;
+  const selectedTheme = webThemes.includes(choice) ? choice : "auto";
+  document.documentElement.dataset.webTheme = selectedTheme;
+  localStorage.setItem(webThemeStoreKey, selectedTheme);
+  if ($("theme").value === "auto") chooseMapStyle("auto");
+}
+$("theme").addEventListener("change", () => chooseMapStyle($("theme").value));
+$("theme-settings").addEventListener("change", () =>
+  chooseMapStyle($("theme-settings").value));
+$("web-appearance").addEventListener("change", chooseWebAppearance);
 darkQuery.addEventListener?.("change", () => {
-  if ($("theme").value === "auto" && map) chooseMapStyle();
+  if ($("web-appearance").value === "auto" && $("theme").value === "auto" && map)
+    chooseMapStyle("auto");
 });
 async function initialiseMap() {
   if (map) return;
@@ -1123,6 +1149,11 @@ function labelledText(textValue, tag = "small") {
   element.textContent = textValue;
   return element;
 }
+function countryFlag(countryCode) {
+  const code = String(countryCode || "").toUpperCase();
+  return /^[A-Z]{2}$/.test(code) ? String.fromCodePoint(...[...code]
+    .map(ch => 0x1F1E6 + ch.charCodeAt(0) - 65)) : "";
+}
 function refreshSavedClocks() {
   if (!$("saved-dialog").open) return;
   document.querySelectorAll(".saved-clock").forEach(clock => {
@@ -1148,11 +1179,18 @@ function renderSaved() {
         !Number.isFinite(place?.position?.lon)) continue;
     const card=document.createElement("article"); card.className="saved-card";
     card.append(labelledText(place.name||"未命名位置","strong"));
-    const code=String(place.countryCode||"").toUpperCase();
-    const flag=/^[A-Z]{2}$/.test(code) ? String.fromCodePoint(...[...code]
-      .map(ch=>0x1F1E6+ch.charCodeAt(0)-65)) : "";
-    card.append(labelledText([flag,place.countryName||place.countryCode,place.city]
-      .filter(Boolean).join(" · ")||"國家／城市待確認"));
+    const flag = countryFlag(place.countryCode);
+    const countryRow = document.createElement("div");
+    countryRow.className = "saved-country-row";
+    if (flag) {
+      const flagIcon = labelledText(flag, "span");
+      flagIcon.className = "saved-country-flag";
+      flagIcon.setAttribute("aria-label", place.countryName || place.countryCode);
+      countryRow.append(flagIcon);
+    }
+    countryRow.append(labelledText([place.countryName||place.countryCode,place.city]
+      .filter(Boolean).join(" · ") || "國家／城市待確認，可補齊舊收藏"));
+    card.append(countryRow);
     const clock=labelledText(destinationTime(place.timeZoneId,latest?.realTimeZoneId));
     clock.className="saved-clock";
     clock.dataset.timeZone=place.timeZoneId||"";
@@ -1229,20 +1267,23 @@ async function refreshSaved() {
 }
 let pendingSavedPoint=null, savedLookupId=null, savedLookupGeneration=0;
 $("saved-add-button").addEventListener("click",async()=>{
+  if ($("saved-add-button").disabled) return;
   pendingSavedPoint=null;savedLookupId=null;
   $("saved-editor").classList.add("hidden");
+  const button = $("saved-add-button");
+  const previousLabel = button.textContent;
   try {
-    // Use an explicit map pick or manually entered coordinate, never the map's
-    // default camera centre or an automatically selected mock GPS position.
+    // Only this explicit tap may send the user-selected coordinate to Photon.
+    // Map panning / ordinary GPS state polling never triggers reverse geocoding.
     const point=readCoordinate();
     const generation=++savedLookupGeneration;
     pendingSavedPoint={lat:point.lat,lon:point.lon};
-    savedLookupId=null;
     const fallback="位置 "+point.lat.toFixed(5)+", "+point.lon.toFixed(5);
     $("saved-new-position").textContent="GPS: "+point.lat.toFixed(6)+", "+point.lon.toFixed(6);
     $("saved-new-name").value=fallback;
-    $("saved-new-status").textContent="正在取得附近地標／商家與時區建議…";
-    $("saved-editor").classList.remove("hidden");
+    button.disabled = true;
+    button.textContent = "正在取得名稱並收藏…";
+    $("saved-enrich-status").textContent = "正在查詢地標、國家、城市與時區；完成後自動收藏";
     const request=await call("/api/saved/place/lookup","POST",point);
     if(generation!==savedLookupGeneration||!$("saved-dialog").open) return;
     savedLookupId=request.lookupId;
@@ -1253,19 +1294,37 @@ $("saved-add-button").addEventListener("click",async()=>{
         lookupId:savedLookupId
       });
       if(result.status!=="ready")continue;
-      if($("saved-new-name").value===fallback)
-        $("saved-new-name").value=result.name||fallback;
-      const parts=[result.countryName,result.city,
-        result.timeZoneId?destinationTime(result.timeZoneId,latest?.realTimeZoneId):null]
-        .filter(Boolean);
-      $("saved-new-status").textContent=parts.join(" · ")||
-        "未找到附近地標，可自行修改名稱再儲存";
+      const name=String(result.name||fallback).trim().slice(0,80)||fallback;
+      await call("/api/saved/place/add","POST",{
+        ...point,name,lookupId:savedLookupId
+      });
+      if(generation!==savedLookupGeneration||!$("saved-dialog").open) return;
+      pendingSavedPoint=null;savedLookupId=null;
+      await refreshSaved();
+      const placeDetails=[countryFlag(result.countryCode),result.countryName,
+        result.city].filter(Boolean).join(" · ");
+      $("saved-enrich-status").textContent = name===fallback
+        ? "已用座標名稱收藏；可用「補齊舊收藏資訊」再查地名"
+        : "已自動命名並收藏「"+name+"」"+(placeDetails?" · "+placeDetails:"");
       return;
     }
-    $("saved-new-status").textContent="查詢尚未完成，可直接使用座標名稱儲存";
+    // Only a genuinely failed/timed-out lookup needs the manual fallback.
+    savedLookupId=null;
+    $("saved-editor").classList.remove("hidden");
+    $("saved-new-status").textContent="地名查詢尚未完成，可改名或用座標收藏";
+    $("saved-enrich-status").textContent="未取得地名；請確認備用名稱後儲存";
   }catch(error){
-    $("saved-new-status").textContent=error.message||"地名查詢失敗，可手動輸入";
-    if(!pendingSavedPoint) setMessage("請先在地圖選一點或輸入有效的經緯度");
+    if (pendingSavedPoint && token) {
+      savedLookupId=null;
+      $("saved-editor").classList.remove("hidden");
+      $("saved-new-status").textContent=error.message||"地名查詢失敗，可手動輸入";
+    } else {
+      $("saved-enrich-status").textContent=error.message||
+        "請先在地圖選一點或輸入有效的經緯度";
+    }
+  }finally{
+    button.disabled=false;
+    button.textContent=previousLabel;
   }
 });
 $("saved-cancel").addEventListener("click",()=>{
