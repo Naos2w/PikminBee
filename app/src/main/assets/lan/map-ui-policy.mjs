@@ -11,6 +11,45 @@ export function currentPosition(state, physical) {
   return state?.mockActive && state.position ? {point:state.position, simulated:true, historical:false}
     : physical ? {point:physical,simulated:false,historical:!!physical.historical} : null;
 }
+/** Find the largest clear rectangle in the map canvas. All bounds are
+ * viewport CSS pixels; overlays are clipped to the canvas before evaluation.
+ * Sweep the possible horizontal spans and merge their blocked Y intervals.
+ * This handles corner cards without wasting the full width/height as padding.
+ * The returned camera padding is only applied on an explicit focus action. */
+export function visibleMapPadding(viewport, overlays, margin = 8) {
+  const w = viewport.width, h = viewport.height;
+  const zero = {top:0,right:0,bottom:0,left:0};
+  if (!(w > 0 && h > 0)) return zero;
+  const clipped = (overlays || []).filter(r=>r.width>0 && r.height>0)
+    .map(r=>({
+      l:Math.max(0,r.left-viewport.left-margin),
+      r:Math.min(w,r.right-viewport.left+margin),
+      t:Math.max(0,r.top-viewport.top-margin),
+      b:Math.min(h,r.bottom-viewport.top+margin)
+    })).filter(r=>r.r>r.l && r.b>r.t);
+  const xs = [...new Set([0,w,...clipped.flatMap(r=>[r.l,r.r])])].sort((a,b)=>a-b);
+  let best=null, score=-1, bestDistance=Infinity;
+  const consider=(l,r,t,b)=>{
+    if(r-l<1 || b-t<1)return;
+    const area=(r-l)*(b-t);
+    const distance=Math.hypot((l+r-w)/2,(t+b-h)/2);
+    if(area>score || (area===score && distance<bestDistance)){
+      score=area;bestDistance=distance;best={l,r,t,b};
+    }
+  };
+  for(let i=0;i<xs.length-1;i++)for(let j=i+1;j<xs.length;j++){
+    const l=xs[i],r=xs[j];
+    const blocked=clipped.filter(o=>o.l<r && o.r>l).sort((a,b)=>a.t-b.t);
+    let y=0;
+    for(const o of blocked){
+      if(o.t>y)consider(l,r,y,o.t);
+      y=Math.max(y,o.b);
+    }
+    if(y<h)consider(l,r,y,h);
+  }
+  return best ? {top:best.t,right:w-best.r,bottom:h-best.b,left:best.l} : zero;
+}
+
 /** Last accepted explicit focus wins. Do not wait for tile downloads or state polling. */
 export function createCameraFocus() {
   let pending = null;
@@ -22,9 +61,10 @@ export function createCameraFocus() {
       const rect = map.getContainer().getBoundingClientRect();
       if (rect.width < 1 || rect.height < 1) return false;
       const {point,zoom} = pending;
+      const safePadding = typeof padding === "function" ? padding(rect) : padding;
       map.stop();
       map.resize();
-      map.jumpTo({center:[point.lon,point.lat], zoom:Math.max(zoom,map.getZoom()), padding});
+      map.jumpTo({center:[point.lon,point.lat], zoom:Math.max(zoom,map.getZoom()), padding:safePadding});
       pending = null;
       return true;
     }

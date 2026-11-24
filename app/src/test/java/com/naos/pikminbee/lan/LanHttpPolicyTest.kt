@@ -221,10 +221,16 @@ class LanHttpPolicyTest {
         assertTrue(html.contains(".position-dot{--dot:#357def"))
         assertTrue(html.contains(".ordinal-pin.first{background:#159e5e}"))
         assertTrue(html.contains(".ordinal-pin.last{background:#df454d}"))
-        // Drawer never covers map style/favourites; long routes scroll within
-        // their own list and stay read-only during an active walk.
-        assertTrue(html.contains("grid-template-columns:66px minmax(0,1fr) var(--panel-width)"))
-        assertTrue(html.contains("grid-template-rows:minmax(0,1fr) auto auto"))
+        // Map is full-viewport; the overlay drawer must not move the tools.
+        assertTrue(html.contains("#map-wrap{position:absolute;inset:0;"))
+        assertTrue(html.contains("#map{width:100%;height:100%;"))
+        assertTrue(html.contains("position:fixed;right:var(--right);bottom:var(--tools-bottom);"))
+        assertTrue(html.contains("id=\"map-zoom-in\""))
+        assertTrue(html.contains("id=\"map-zoom-out\""))
+        assertTrue(html.contains("data-panel=\"closed\""))
+        assertTrue(js.contains("visibleMapPadding(viewport, overlays)"))
+        assertFalse(html.contains("grid-template-columns:66px minmax(0,1fr) var(--panel-width)"))
+        assertFalse(html.contains("grid-template-rows:minmax(0,1fr) auto auto"))
         assertTrue(html.contains(".position-dot{position:absolute;z-index:4}"))
         assertFalse(html.contains("position:relative;width:24px;height:24px"))
         assertTrue(html.contains("body.remote-active #route-order{max-height:"))

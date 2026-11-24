@@ -242,57 +242,109 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
  .saved-scroll{max-height:66svh}
 }
 
-/* Wi-Fi Web V3: one header, one navigation rail, actual visible map
- * and a single workspace. Panels participate in layout rather than covering
- * the map. Mobile uses the same workspace with navigation along the bottom. */
+
+/* V3.1 — map-first overlay, deliberately not a split-panel layout.
+ * All overlay anchors depend on the viewport/safe area, never drawer state.
+ * The drawer scrolls inside a reserved region instead of pushing the tools. */
 body.remote-active{height:100dvh;overflow:hidden}
 body.remote-active .page{
-  --space:10px;--panel-width:356px;
-  display:grid;grid-template-rows:auto minmax(0,1fr);gap:var(--space);
-  max-width:none;margin:0;padding:var(--space);width:100%;height:100dvh}
-body.remote-active .head{
-  display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;
-  gap:8px 14px;margin:0;padding:9px 13px;background:var(--surface);
-  border:1px solid var(--line);border-radius:14px;min-width:0}
-body.remote-active .head h1{font-size:18px;line-height:1.3}
-body.remote-active .head .sub{font-size:10px}
-body.remote-active .head .stamp{padding:5px 8px;flex-shrink:0}
-body.remote-active .head-info{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:7px;min-width:0}
-body.remote-active #session-panel:not(.hidden){
-  display:flex;align-items:center;justify-content:flex-end;gap:6px;margin:0;padding:0;
-  background:transparent;border:0;font-size:11px}
-body.remote-active #session-expiry{font-variant-numeric:tabular-nums}
-body.remote-active #session-panel.is-urgent #session-expiry{color:var(--accent);font-weight:700}
-body.remote-active #session-renew{min-height:36px;padding:5px 9px}
-body.remote-active #controls.is-visible{
-  display:grid;grid-template-columns:66px minmax(0,1fr) var(--panel-width);
-  gap:var(--space);min-height:0;align-items:stretch;position:relative}
-body.remote-active #controls:has(#control-panel[data-panel="closed"]){--panel-width:56px}
+  --gap:10px;--left:calc(12px + env(safe-area-inset-left));
+  --right:calc(12px + env(safe-area-inset-right));
+  --top:calc(12px + env(safe-area-inset-top));
+  --bottom:calc(29px + env(safe-area-inset-bottom));
+  --head-height:66px;--head-width:318px;
+  --rail-width:62px;--tool-size:44px;--tools-height:190px;
+  --tools-bottom:var(--bottom);
+  --position-width:258px;--panel-width:354px;
+  --panel-top:calc(var(--top) + 55px);
+  --panel-bottom:calc(var(--tools-bottom) + var(--tools-height) + var(--gap));
+  position:fixed;inset:0;max-width:none;width:100%;height:100dvh;margin:0;padding:0;
+}
+body.remote-active #controls.is-visible{display:block;position:absolute;inset:0;min-height:0}
 body.remote-active #map-panel{
-  grid-column:2;grid-row:1;min-height:0;min-width:0;position:relative;top:auto;
-  display:flex;flex-direction:column;padding:0;border-radius:16px;overflow:hidden;
-  border:1px solid var(--line);background:var(--surface);box-shadow:none}
-body.remote-active #map-wrap{position:relative;flex:1;min-height:0;min-width:0;border:0;border-radius:0}
-body.remote-active #map{height:100%;width:100%;min-height:0;max-height:none}
-body.remote-active .map-header{
-  position:relative;display:flex;align-items:center;justify-content:space-between;
-  padding:8px;gap:8px;min-width:0;margin:0!important;border-bottom:1px solid var(--line);flex-wrap:wrap}
-body.remote-active .map-header>strong{display:none}
-body.remote-active .map-header #map-status{font-size:10px;white-space:nowrap}
-body.remote-active .map-quick-tools{display:flex;align-items:center;gap:6px;margin-left:auto;flex:0 0 auto}
-body.remote-active .map-quick-tools button{
-  display:inline-flex;align-items:center;justify-content:center;gap:5px;min-height:44px;
-  min-width:44px;padding:7px 9px;background:var(--surface);border:1px solid var(--line);
-  border-radius:10px;white-space:nowrap;font-size:12px}
-body.remote-active .map-quick-tools svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  position:absolute;inset:0;width:100%;height:100%;min-width:0;min-height:0;
+  padding:0;margin:0;border:0;border-radius:0;background:var(--bg);box-shadow:none;
+}
+body.remote-active #map-wrap{position:absolute;inset:0;border:0;border-radius:0;overflow:hidden}
+body.remote-active #map{width:100%;height:100%;min-height:0;max-height:none}
+body.remote-active .map-header{display:contents}
+body.remote-active .head,
+body.remote-active .tabs,
+body.remote-active #control-panel,
+body.remote-active #map-locations,
+body.remote-active .map-tool-group,
+body.remote-active #show-saved,
+body.remote-active #compact-walk-controls,
+body.remote-active #message:not(:empty),
+body.remote-active #map-status{
+  background:var(--surface);border:1px solid var(--line);border-radius:13px;box-shadow:var(--shadow);
+}
+body.remote-active .head{
+  position:fixed;left:var(--left);top:var(--top);right:auto;
+  width:min(var(--head-width),calc(100vw - var(--left) - var(--right) - 98px));
+  height:var(--head-height);z-index:32;margin:0;padding:8px 10px;
+  display:flex;flex-direction:column;align-items:stretch;justify-content:center;gap:4px;flex-wrap:nowrap;
+}
+body.remote-active .brand-row{display:flex;align-items:center;justify-content:space-between;gap:6px;min-width:0}
+body.remote-active .head h1{font-size:17px;line-height:1.2;white-space:nowrap}
+body.remote-active .head svg{width:23px;height:23px;vertical-align:-4px}
+body.remote-active .head .brand-subtitle{display:none}
+body.remote-active #app-version{font-size:10px;white-space:nowrap}
+body.remote-active .head-info{display:flex;align-items:center;justify-content:space-between;min-width:0;gap:5px}
+body.remote-active .head .stamp{padding:0;border:0;background:none;font-size:11px;white-space:nowrap;gap:5px;flex-shrink:0}
+body.remote-active .head .dot{width:6px;height:6px;background:var(--accent)}
+body.remote-active #session-panel:not(.hidden){
+  display:flex;align-items:center;justify-content:flex-end;flex-wrap:nowrap;gap:5px;
+  margin:0;padding:0;background:transparent;border:0;min-width:0;font-size:10px
+}
+body.remote-active #session-expiry{font-variant-numeric:tabular-nums;white-space:nowrap}
+body.remote-active #session-panel.is-urgent #session-expiry{color:var(--accent);font-weight:700}
+body.remote-active #session-renew{min-height:29px;min-width:37px;padding:3px 6px;font-size:10px;border-radius:7px}
+body.remote-active .tabs{
+  position:fixed;left:var(--left);top:calc(var(--top) + var(--head-height) + var(--gap));right:auto;bottom:auto;
+  z-index:31;display:flex;flex-direction:column;width:var(--rail-width);margin:0;padding:5px;gap:4px;
+}
+body.remote-active .tabs button{width:100%;min-width:0;min-height:57px;padding:6px 3px;font-size:11px;flex:none}
+body.remote-active .tabs svg{width:21px;height:21px}
+body.remote-active #show-saved{
+  position:fixed;top:var(--top);right:var(--right);z-index:32;
+  display:flex;align-items:center;justify-content:center;gap:6px;
+  min-height:44px;min-width:84px;padding:8px 11px;white-space:nowrap;font-size:13px;
+}
+body.remote-active #show-saved svg,
+body.remote-active .map-tool-group svg{
+  width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round
+}
+body.remote-active #map-status{
+  position:fixed;top:calc(var(--top) + 8px);right:calc(var(--right) + 94px);
+  z-index:30;padding:5px 8px;font-size:10px;white-space:nowrap;
+}
+body.remote-active #map-status[data-state="error"]{color:var(--danger);border-color:var(--danger)}
+body.remote-active .map-quick-tools{
+  position:fixed;right:var(--right);bottom:var(--tools-bottom);z-index:34;
+  display:flex;flex-direction:column;gap:8px;width:var(--tool-size);margin:0;padding:0;
+}
+body.remote-active .map-tool-group{display:flex;flex-direction:column;overflow:hidden;width:100%;border-radius:11px}
+body.remote-active .map-tool-group button{
+  display:grid;place-items:center;flex:none;
+  width:100%;height:var(--tool-size);min-height:var(--tool-size);
+  min-width:0;padding:0;background:var(--surface);border:0;border-radius:0;
+}
+body.remote-active .map-tool-group button+button{border-top:1px solid var(--line)}
+body.remote-active .map-tool-group button:hover:not(:disabled){background:var(--accent-soft)}
+body.remote-active .map-tool-group button:focus-visible{outline-offset:-4px}
+body.remote-active .map-tool-group .tool-text{display:none}
 body.remote-active #find-real{color:#357def}
 body.remote-active #find-real:disabled{color:var(--subtle)}
 body.remote-active .map-locations{
-  position:relative;min-width:120px;flex:1 1 210px;max-width:100%;padding:0;margin:0;
-  background:var(--surface);border:0;font-size:12px}
+  position:fixed;left:var(--left);bottom:var(--bottom);z-index:30;
+  width:var(--position-width);max-width:calc(100vw - var(--left) - var(--right));
+  padding:0;margin:0;font-size:12px
+}
 body.remote-active .map-locations summary{
-  min-height:44px;padding:4px 6px;cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px;
-  border-radius:10px;min-width:0;font-weight:650}
+  min-height:54px;padding:8px 10px;cursor:pointer;list-style:none;
+  display:flex;align-items:center;gap:8px;min-width:0;font-weight:650;border-radius:13px;
+}
 body.remote-active .map-locations summary::-webkit-details-marker{display:none}
 body.remote-active .map-locations summary:after{content:"⌄";margin-left:auto;color:var(--sub)}
 body.remote-active .map-locations[open] summary:after{content:"⌃"}
@@ -303,121 +355,159 @@ body.remote-active #location-toggle-label{min-width:0;display:flex;flex-directio
 body.remote-active #current-coordinate{font-weight:650;font-size:12px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
 body.remote-active #current-location-label{color:var(--sub);font-size:10px;line-height:1.3}
 body.remote-active .location-details{
-  position:absolute;top:100%;left:0;z-index:30;min-width:min(285px,calc(100vw - 40px));
-  width:min(345px,calc(100vw - 40px));max-height:50dvh;overflow:auto;
-  padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--surface);box-shadow:var(--shadow)}
+  position:absolute;bottom:calc(100% + 6px);left:0;z-index:1;
+  width:min(345px,calc(100vw - var(--left) - var(--right)));
+  max-height:min(38dvh,300px);overflow:auto;
+  padding:10px 12px;border:1px solid var(--line);border-radius:13px;background:var(--surface);box-shadow:var(--shadow)
+}
 body.remote-active #selected{font-size:11px;margin:8px 0}
-body.remote-active .mobile-overview{display:none}
-body.remote-active #map-panel>.help-details{display:none}
-body.remote-active .map-header{z-index:5}
 body.remote-active #control-panel{
-  grid-column:3;grid-row:1;width:100%;height:100%;min-width:0;min-height:0;
-  padding:12px 15px 16px;border:1px solid var(--line);border-radius:16px;
-  background:var(--surface);box-shadow:none;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain}
+  position:fixed;top:var(--panel-top);right:var(--right);bottom:auto;left:auto;z-index:31;
+  width:min(var(--panel-width),calc(100vw - var(--left) - var(--right) - var(--rail-width) - 2*var(--gap)));
+  height:auto;max-height:calc(100dvh - var(--panel-top) - var(--panel-bottom));
+  min-width:0;min-height:0;margin:0;padding:9px 13px 14px;
+  overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-width:thin
+}
 body.remote-active #control-panel .control-title{
-  position:sticky;top:-12px;z-index:4;background:var(--surface);
-  padding:9px 0 10px;border-bottom:1px solid var(--line)}
-body.remote-active #control-panel #mode-panel-title{font-size:20px;margin:4px 0 0}
+  display:flex;align-items:center;justify-content:space-between;position:sticky;top:-9px;z-index:2;
+  background:var(--surface);padding:9px 0 8px;border-bottom:1px solid var(--line);margin-bottom:8px
+}
+body.remote-active #control-panel #mode-panel-title{font-size:18px;margin:0;line-height:1.25}
+body.remote-active #control-panel .eyebrow{display:none}
 body.remote-active #panel-toggle{
-  display:grid;place-items:center;flex:none;width:42px;height:42px;min-height:42px;
-  border-radius:10px;font-size:20px;background:var(--surface)}
+  display:grid;place-items:center;flex:none;width:37px;height:37px;min-height:37px;
+  border-radius:9px;font-size:18px;padding:0;background:var(--surface)
+}
 body.remote-active #sheet-handle{display:none}
-body.remote-active #route-order{max-height:min(40dvh,380px);overflow-y:auto;overscroll-behavior:contain;padding-right:4px}
-body.remote-active .tabs{
-  grid-column:1;grid-row:1;position:static;align-self:start;display:flex;flex-direction:column;
-  margin:0;width:66px;padding:5px;gap:4px;border:1px solid var(--line);border-radius:14px;background:var(--surface);box-shadow:none}
-body.remote-active .tabs button{width:54px;min-height:64px;padding:7px 3px;font-size:11px;flex:none}
-body.remote-active .tabs svg{width:21px;height:21px}
+body.remote-active #route-order{max-height:min(32dvh,320px);overflow-y:auto;overscroll-behavior:contain;padding-right:4px}
 body.remote-active:not([data-device="mobile"]) #control-panel[data-panel="closed"]{
-  align-self:start;height:auto;padding:6px;overflow:hidden}
+  width:var(--tool-size);height:var(--tool-size);max-height:none;padding:3px;overflow:hidden
+}
 body.remote-active:not([data-device="mobile"]) #control-panel[data-panel="closed"]>:not(.control-title){display:none!important}
-body.remote-active:not([data-device="mobile"]) #control-panel[data-panel="closed"] .control-title{padding:0;border:0}
+body.remote-active:not([data-device="mobile"]) #control-panel[data-panel="closed"] .control-title{padding:0;border:0;margin:0}
 body.remote-active:not([data-device="mobile"]) #control-panel[data-panel="closed"] .control-title>div{display:none}
+body.remote-active #control-panel input#coordinate{width:100%;font-variant-numeric:tabular-nums;min-height:44px}
+body.remote-active #control-panel .row>button{min-height:44px}
+body.remote-active:not([data-mode="route"]) #control-panel #progress,
+body.remote-active:not([data-mode="route"]) #control-panel #status,
+body.remote-active:not([data-mode="route"]) #control-panel>.hint{display:none}
+body.remote-active #motion-controls,body.remote-active .motion-title{display:none}
 body.remote-active #compact-walk-controls:not(.hidden){
-  display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;
-  flex:0 0 auto;gap:8px;padding:7px 10px;border-bottom:1px solid var(--line);background:var(--surface)}
+  position:fixed;left:calc(var(--left) + var(--position-width) + var(--gap));
+  right:calc(var(--right) + var(--tool-size) + var(--gap));bottom:var(--bottom);z-index:32;
+  display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;
+  max-width:370px;margin:0 auto;gap:6px;padding:7px 9px
+}
 body.remote-active #compact-walk-controls .compact-walk-summary{font-size:12px;font-weight:700}
 body.remote-active #compact-walk-controls .row{display:flex;flex-wrap:nowrap;gap:6px;margin:0}
-body.remote-active #compact-walk-controls .row button{min-width:70px;min-height:44px;padding:6px 8px;font-weight:700}
-body.remote-active.has-compact-walk #motion-controls,body.remote-active.has-compact-walk .motion-title{display:none}
+body.remote-active #compact-walk-controls .row button{min-width:68px;min-height:40px;padding:5px 8px;font-weight:700}
 body.remote-active #message:not(:empty){
-  padding:5px 10px;margin:0;flex:0 0 auto;background:var(--surface);color:var(--accent);
-  border-top:1px solid var(--line);font-size:12px;overflow-wrap:anywhere}
+  position:fixed;left:var(--left);bottom:calc(var(--bottom) + 64px);z-index:29;
+  width:var(--position-width);max-height:62px;overflow:auto;
+  padding:8px 10px;margin:0;font-size:12px;color:var(--text);overflow-wrap:anywhere
+}
 body.remote-active #message:empty{display:none}
-body.remote-active #control-panel input#coordinate{width:100%;font-variant-numeric:tabular-nums}
+body.remote-active .mobile-overview,body.remote-active #map-panel>.help-details{display:none}
 body.remote-active button:disabled{opacity:1;color:var(--subtle);background:var(--solid);border-color:var(--line);cursor:not-allowed}
+body.remote-active .maplibregl-ctrl-bottom-right{right:env(safe-area-inset-right);bottom:env(safe-area-inset-bottom)}
+body.remote-active .map-alert{
+  left:50%;right:auto;top:calc(var(--top) + var(--head-height) + 2*var(--gap));bottom:auto;
+  transform:translateX(-50%);width:min(360px,calc(100vw - 2*var(--gap)));z-index:8;
+}
 body.remote-active .position-dot{position:absolute;z-index:4}
 body.remote-active .position-dot[data-historical="true"]{z-index:3}
 body.remote-active .ordinal-pin{z-index:1}
 body.remote-active .route-origin-pin{z-index:1}
-body.remote-active .maplibregl-ctrl-top-right{top:8px;right:8px}
-body.remote-active .maplibregl-ctrl-bottom-right{right:4px}
-body.remote-active .motion-controls.is-active{position:static}
-@media(min-width:601px) and (max-width:1060px){
-  body.remote-active .page{--panel-width:302px;--space:8px}
-  body.remote-active .map-quick-tools .tool-text{display:none}
+@media(max-width:1060px){
+  body.remote-active .page{--panel-width:308px;--head-width:300px;--position-width:238px;--gap:8px}
+}
+@media(max-height:560px){
+  body.remote-active:not([data-device="mobile"]) .page{
+    --head-height:58px;--rail-width:54px;--tool-size:40px;--tools-height:174px;
+    --panel-bottom:calc(var(--bottom) + 74px)
+  }
+  body.remote-active:not([data-device="mobile"]) #control-panel[data-panel="open"]{
+    right:calc(var(--right) + var(--tool-size) + var(--gap));
+    width:min(var(--panel-width),calc(100vw - var(--left) - var(--right) - var(--tool-size) - var(--rail-width) - 3*var(--gap)))
+  }
+  body.remote-active:not([data-device="mobile"]) .tabs button{min-height:45px;font-size:10px}
+  body.remote-active:not([data-device="mobile"]) .tabs svg{width:18px;height:18px}
 }
 body.remote-active[data-device="mobile"] .page{
-  --space:6px;padding:6px 6px calc(6px + env(safe-area-inset-bottom))}
-body.remote-active[data-device="mobile"] .head{padding:6px 8px;gap:4px 8px}
-body.remote-active[data-device="mobile"] .head h1{font-size:15px}
-body.remote-active[data-device="mobile"] .head h1 svg{width:22px;height:22px}
-body.remote-active[data-device="mobile"] .head .sub{font-size:10px}
-body.remote-active[data-device="mobile"] .head .stamp{font-size:10px;padding:3px 6px}
-body.remote-active[data-device="mobile"] .head-info{justify-content:flex-start;gap:4px 8px}
-body.remote-active[data-device="mobile"] #session-panel:not(.hidden){font-size:10px}
-body.remote-active[data-device="mobile"] #session-renew{min-height:34px}
-body.remote-active[data-device="mobile"] #controls.is-visible{
-  grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr) auto auto;gap:6px}
-body.remote-active[data-device="mobile"] #map-panel{grid-column:1;grid-row:1;border-radius:13px}
-body.remote-active[data-device="mobile"] .map-header{padding:5px;gap:4px;flex-wrap:nowrap}
-body.remote-active[data-device="mobile"] .map-header #map-status{display:none}
-body.remote-active[data-device="mobile"] .map-quick-tools .tool-text{display:none}
-body.remote-active[data-device="mobile"] .map-quick-tools{gap:4px}
-body.remote-active[data-device="mobile"] .map-quick-tools button{width:42px;min-width:42px;height:44px;padding:5px}
-body.remote-active[data-device="mobile"] .map-locations{flex:1 1 0;min-width:0}
-body.remote-active[data-device="mobile"] .map-locations summary{padding:3px;gap:6px}
-body.remote-active[data-device="mobile"] .map-locations summary:after{display:none}
-body.remote-active[data-device="mobile"] #current-coordinate{font-size:11px}
-body.remote-active[data-device="mobile"] #control-panel{
-  grid-column:1;grid-row:2;position:relative;top:auto;bottom:auto;width:100%;height:54px;
-  padding:0 11px 9px;border-radius:13px;min-height:54px}
-body.remote-active[data-device="mobile"] #control-panel[data-sheet="half"]{
-  height:min(36dvh,340px,max(54px,calc(100dvh - 390px)))}
-body.remote-active[data-device="mobile"] #control-panel[data-sheet="expanded"]{
-  height:min(51dvh,480px,max(54px,calc(100dvh - 390px)))}
-body.remote-active[data-device="mobile"] #control-panel[data-sheet="collapsed"]{height:54px;overflow:hidden}
-body.remote-active[data-device="mobile"] #sheet-handle{
-  display:flex;position:sticky;top:0;z-index:6;flex-direction:column;align-items:center;
-  justify-content:center;border:0;border-bottom:1px solid var(--line);background:var(--surface);
-  min-height:54px;width:calc(100% + 22px);margin:0 -11px;padding:4px 8px;
-  border-radius:0;touch-action:none;font-size:11px;color:var(--sub)}
-body.remote-active[data-device="mobile"] .drag-indicator{width:36px;height:4px;border-radius:5px;background:var(--subtle);margin-bottom:5px}
-body.remote-active[data-device="mobile"] #control-panel[data-sheet="collapsed"]>:not(#sheet-handle){display:none!important}
-body.remote-active[data-device="mobile"] #control-panel .control-title{position:static;padding:9px 0 6px}
-body.remote-active[data-device="mobile"] #panel-toggle{display:none}
-body.remote-active[data-device="mobile"] .tabs{
-  grid-row:3;grid-column:1;position:static;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));padding:5px;
-  width:100%;gap:4px;border-radius:13px}
-body.remote-active[data-device="mobile"] .tabs button{width:100%;min-width:0;min-height:55px;font-size:11px}
-body.remote-active[data-device="mobile"] #compact-walk-controls:not(.hidden){gap:4px;padding:5px 7px;flex-wrap:nowrap}
-body.remote-active[data-device="mobile"] #compact-walk-controls .compact-walk-summary{font-size:11px;min-width:0}
-body.remote-active[data-device="mobile"] #compact-walk-controls .row button{min-width:52px;min-height:44px}
-body.remote-active[data-device="mobile"] #message:not(:empty){font-size:11px;max-height:46px;overflow:auto}
-@media(max-height:550px){
- body.remote-active[data-device="mobile"] .head .sub{display:none}
- body.remote-active[data-device="mobile"] #control-panel[data-sheet="expanded"]{height:max(54px,min(40dvh,230px,calc(100dvh - 320px)))}
- body.remote-active[data-device="mobile"] #control-panel[data-sheet="half"]{height:max(54px,min(30dvh,170px,calc(100dvh - 320px)))}
+  --gap:6px;--left:calc(8px + env(safe-area-inset-left));--right:calc(8px + env(safe-area-inset-right));
+  --top:calc(8px + env(safe-area-inset-top));--bottom:calc(24px + env(safe-area-inset-bottom));
+  --head-height:64px;--head-width:296px;--tool-size:44px;--tools-height:190px;
+  --nav-height:64px;--tools-bottom:calc(var(--bottom) + var(--nav-height) + var(--gap));
+  --position-width:242px;--sheet-safe-top:calc(var(--top) + var(--head-height) + 128px)
 }
-
+body.remote-active[data-device="mobile"].has-compact-walk .page{
+  --sheet-safe-top:calc(var(--top) + var(--head-height) + 226px)
+}
+body.remote-active[data-device="mobile"] .head{
+  width:min(var(--head-width),calc(100vw - var(--left) - var(--right) - 52px));padding:6px 8px
+}
+body.remote-active[data-device="mobile"] .head h1{font-size:16px}
+body.remote-active[data-device="mobile"] .head .stamp{font-size:10px}
+body.remote-active[data-device="mobile"] #session-panel:not(.hidden){font-size:10px;gap:4px}
+body.remote-active[data-device="mobile"] #show-saved{min-width:44px;width:44px;height:44px;padding:0}
+body.remote-active[data-device="mobile"] #show-saved .tool-text,
+body.remote-active[data-device="mobile"] #map-status{display:none}
+body.remote-active[data-device="mobile"] #map-locations{
+  top:calc(var(--top) + var(--head-height) + var(--gap));bottom:auto;
+  width:min(var(--position-width),calc(100vw - var(--left) - var(--right) - var(--tool-size) - var(--gap)))
+}
+body.remote-active[data-device="mobile"] #map-locations summary{min-height:48px;padding:5px 9px}
+body.remote-active[data-device="mobile"] .location-details{
+  top:calc(100% + 6px);bottom:auto;max-height:32dvh
+}
+body.remote-active[data-device="mobile"] .tabs{
+  position:fixed;left:var(--left);right:var(--right);top:auto;bottom:var(--bottom);
+  width:auto;height:var(--nav-height);display:grid;grid-template-columns:repeat(3,minmax(0,1fr));padding:5px;gap:4px
+}
+body.remote-active[data-device="mobile"] .tabs button{min-height:0;height:100%;font-size:11px}
+body.remote-active[data-device="mobile"] #control-panel{
+  position:fixed;left:var(--left);right:calc(var(--right) + var(--tool-size) + var(--gap));
+  top:auto;bottom:var(--tools-bottom);width:auto;height:48px;min-height:48px;
+  max-height:max(48px,calc(100dvh - var(--tools-bottom) - var(--sheet-safe-top)));
+  padding:0 10px 10px;border-radius:14px;overflow:auto
+}
+body.remote-active[data-device="mobile"] #control-panel[data-sheet="half"]{height:min(38dvh,340px)}
+body.remote-active[data-device="mobile"] #control-panel[data-sheet="expanded"]{height:min(55dvh,480px)}
+body.remote-active[data-device="mobile"] #control-panel[data-sheet="collapsed"]{height:48px;overflow:hidden;padding-bottom:0}
+body.remote-active[data-device="mobile"] #sheet-handle{
+  display:flex;position:sticky;top:0;z-index:6;flex-direction:column;align-items:center;justify-content:center;
+  border:0;border-bottom:1px solid var(--line);background:var(--surface);min-height:48px;
+  width:calc(100% + 20px);margin:0 -10px;padding:4px 7px;border-radius:0;touch-action:none;font-size:11px;color:var(--sub)
+}
+body.remote-active[data-device="mobile"] .drag-indicator{width:34px;height:4px;border-radius:5px;background:var(--subtle);margin-bottom:5px}
+body.remote-active[data-device="mobile"] #control-panel[data-sheet="collapsed"]>:not(#sheet-handle){display:none!important}
+body.remote-active[data-device="mobile"] #control-panel .control-title{position:static;padding:8px 0 6px}
+body.remote-active[data-device="mobile"] #panel-toggle{display:none}
+body.remote-active[data-device="mobile"] #message:not(:empty){
+  top:calc(var(--top) + var(--head-height) + 54px + 2*var(--gap));bottom:auto;
+  width:min(var(--position-width),calc(100vw - var(--left) - var(--right) - var(--tool-size) - var(--gap)));
+  max-height:58px;font-size:11px;padding:6px 8px
+}
+body.remote-active[data-device="mobile"] #compact-walk-controls:not(.hidden){
+  top:calc(var(--top) + var(--head-height) + 118px + 3*var(--gap));bottom:auto;
+  left:var(--left);right:calc(var(--right) + var(--tool-size) + var(--gap));margin:0;
+  width:auto;max-width:310px;gap:4px;padding:6px 8px
+}
+body.remote-active[data-device="mobile"] #compact-walk-controls .compact-walk-summary{font-size:11px}
+body.remote-active[data-device="mobile"] #compact-walk-controls .row button{min-width:60px;min-height:40px}
+@media(max-height:620px){
+  body.remote-active[data-device="mobile"] .page{--sheet-safe-top:calc(var(--top) + var(--head-height) + 110px)}
+  body.remote-active[data-device="mobile"].has-compact-walk .page{--sheet-safe-top:calc(var(--top) + var(--head-height) + 210px)}
+}
 
 </style>
 </head>
 <body>
 <main class="page">
 <header class="head">
- <div><h1><svg aria-hidden="true" viewBox="0 0 24 24"><ellipse cx="6.7" cy="10.3" rx="3.9" ry="2.7"/><ellipse cx="17.3" cy="10.3" rx="3.9" ry="2.7"/><ellipse cx="12" cy="15.6" rx="4.8" ry="5.8"/><path d="M8 14.1h8M8.1 17.5h7.8M10.2 10 8.8 5.5M13.8 10 15.2 5.5"/></svg> PikminBee</h1><div class="sub">瀏覽器控制 · Android 手機執行</div></div>
- <div class="head-info"><span id="app-version" class="sub" title="手機 App 版本">版本待確認</span>
+ <div class="brand-row"><h1><svg aria-hidden="true" viewBox="0 0 24 24"><ellipse cx="6.7" cy="10.3" rx="3.9" ry="2.7"/><ellipse cx="17.3" cy="10.3" rx="3.9" ry="2.7"/><ellipse cx="12" cy="15.6" rx="4.8" ry="5.8"/><path d="M8 14.1h8M8.1 17.5h7.8M10.2 10 8.8 5.5M13.8 10 15.2 5.5"/></svg> PikminBee</h1><span id="app-version" class="sub" title="手機 App 版本">版本待確認</span></div>
+ <div class="brand-subtitle sub">瀏覽器控制 · Android 手機執行</div>
+ <div class="head-info">
   <div class="stamp"><span class="dot"></span><span id="connection">等待配對</span></div>
   <div class="session-panel hidden" id="session-panel" aria-live="polite">
  <span id="session-expiry" role="status">控制授權時間待確認</span>
@@ -454,10 +544,16 @@ body.remote-active[data-device="mobile"] #message:not(:empty){font-size:11px;max
   </div>
  </details>
   <span id="map-status" data-state="loading" role="status" aria-live="polite">載入中</span>
+  <button type="button" id="show-saved" title="開啟收藏" aria-label="開啟收藏地點與路線"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 4h12v17l-6-4-6 4z"/></svg><span class="tool-text">收藏</span></button>
   <div class="map-quick-tools" aria-label="地圖快捷操作">
-   <button type="button" id="follow" title="回到目前位置（不移動 GPS）" aria-label="回到目前位置"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2" fill="currentColor"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg><span class="tool-text">目前位置</span></button>
-   <button type="button" id="find-real" title="查看手機授權的真實位置" aria-label="查看真實位置"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s7-5.2 7-12a7 7 0 0 0-14 0c0 6.8 7 12 7 12Z"/><circle cx="12" cy="9" r="2.5"/></svg><span class="tool-text">真實位置</span></button>
-   <button type="button" id="show-saved" title="開啟收藏" aria-label="開啟收藏地點與路線"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 4h12v17l-6-4-6 4z"/></svg><span class="tool-text">收藏</span></button>
+   <div class="map-tool-group" aria-label="地圖縮放">
+    <button type="button" id="map-zoom-in" aria-label="放大地圖" title="放大"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+    <button type="button" id="map-zoom-out" aria-label="縮小地圖" title="縮小"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 12h14"/></svg></button>
+   </div>
+   <div class="map-tool-group" aria-label="位置定位">
+    <button type="button" id="follow" title="回到目前位置（不移動 GPS）" aria-label="回到目前位置"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2" fill="currentColor"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg><span class="tool-text">目前位置</span></button>
+    <button type="button" id="find-real" title="查看手機授權的真實位置" aria-label="查看真實位置"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s7-5.2 7-12a7 7 0 0 0-14 0c0 6.8 7 12 7 12Z"/><circle cx="12" cy="9" r="2.5"/></svg><span class="tool-text">真實位置</span></button>
+   </div>
   </div>
  </div>
  <div id="mobile-overview" class="mobile-overview" aria-live="polite">
@@ -488,14 +584,14 @@ body.remote-active[data-device="mobile"] #message:not(:empty){font-size:11px;max
   <p>選位置不會自動瞬移或開始行走。底圖由 OpenFreeMap 提供，需要手機與瀏覽器可連線到圖磚服務；地圖失敗時仍可在控制區輸入經緯度。</p>
  </details>
 </section>
-<section class="glass control-panel" id="control-panel" data-sheet="collapsed" data-panel="open">
+<section class="glass control-panel" id="control-panel" data-sheet="collapsed" data-panel="closed">
  <button type="button" id="sheet-handle" aria-label="展開或收合操作面板" aria-expanded="false">
   <span class="drag-indicator" aria-hidden="true"></span>
   <span id="sheet-summary">瞬移 · 向上展開控制</span>
  </button>
  <div class="control-title">
   <div><span class="eyebrow">ANDROID · REMOTE</span><h2 id="mode-panel-title">瞬移</h2></div>
-  <button type="button" id="panel-toggle" aria-label="收合或展開右側控制面板" aria-expanded="true">❯</button>
+  <button type="button" id="panel-toggle" aria-label="收合或展開右側控制面板" aria-expanded="false">❮</button>
  </div>
  <div id="status" class="muted" aria-live="polite">正在讀取…</div>
  <div id="progress" class="progress-card" aria-live="polite">

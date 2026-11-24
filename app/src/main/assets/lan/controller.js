@@ -1,4 +1,4 @@
-import { BRIGHT_STYLE_URL, samePosition, currentPosition, createCameraFocus } from "/map-ui-policy.mjs";
+import { BRIGHT_STYLE_URL, samePosition, currentPosition, createCameraFocus, visibleMapPadding } from "/map-ui-policy.mjs";
 const $ = id => document.getElementById(id);
 let token = null;
 let sessionDeadlineMs = 0;
@@ -38,9 +38,11 @@ function updateSessionExpiry() {
   const minutes = String(Math.floor(remaining % 3600 / 60)).padStart(2, "0");
   const seconds = String(remaining % 60).padStart(2, "0");
   $("session-expiry").textContent = remaining === 0
+    ? "授權已到期"
+    : (remaining <= 600 ? "快到期 " : "剩餘 ") + hours + ":" + minutes + ":" + seconds;
+  $("session-expiry").title = remaining === 0
     ? "控制授權時間已到，請重新配對"
-    : "控制授權剩餘 " + hours + ":" + minutes + ":" + seconds +
-      (remaining <= 600 ? " · 即將到期" : "");
+    : remaining <= 600 ? "控制授權即將到期，請在手機核准續期" : "控制授權剩餘時間";
   $("session-panel").classList.toggle("is-urgent", remaining <= 600);
   $("session-renew").disabled = renewingSession || remaining <= 0;
   $("session-renew").textContent = renewingSession
@@ -214,6 +216,7 @@ function readCoordinate() {
 }
 
 function updateModeView() {
+  document.body.dataset.mode = settingsOpen ? "settings" : mode.toLowerCase();
   for (const [id,value] of [
     ["mode-teleport","TELEPORT"],["mode-route","ROUTE"]
   ]) {
@@ -234,16 +237,15 @@ function updateModeView() {
 // V2: the actual map canvas fills the viewport; these controls only change
 // overlays, not the map's view, GPS provider or current route.
 let sheetState = "collapsed";
-let sideOpen = true;
+let sideOpen = false;
 let sideUserOverride = false;
 let lastDevice = "";
 function deviceKind() {
   // Use the design-approved 690×920 portrait tablet layout without
   // forcing ordinary narrower handsets (or short 700px phones) into a drawer.
   const w = window.innerWidth, h = window.innerHeight;
-  if (w <= 600 || (w <= 760 && h <= 800 && h > w)) return "mobile";
-  // A wide, short landscape phone needs the split workspace, not a sheet
-  // that consumes its entire visible map height.
+  if ((w <= 600 && h >= w) || (w <= 760 && h <= 800 && h > w) || w <= 480) return "mobile";
+  // Short landscape screens use the compact floating side panel, not a sheet.
   if (w <= 1060) return "tablet";
   return "desktop";
 }
@@ -256,7 +258,8 @@ function setSheetState(next) {
     ({TELEPORT:"瞬移",ROUTE:"路徑"}[mode] || "瞬移")) +
     (next === "collapsed" ? " · 向上展開" : " · 向下收合");
   updateCompactWalkControls();
-  requestAnimationFrame(() => { map?.resize(); flushMapFocus(); });
+  // A sheet is an overlay. It must not resize or pan the existing map.
+  requestAnimationFrame(flushMapFocus);
 }
 function setSidePanel(open, userAction = false) {
   sideOpen = !!open;
@@ -265,18 +268,16 @@ function setSidePanel(open, userAction = false) {
   $("panel-toggle").setAttribute("aria-expanded", String(sideOpen));
   $("panel-toggle").textContent = sideOpen ? "❯" : "❮";
   $("panel-toggle").title = sideOpen ? "收合控制面板" : "展開控制面板";
-  requestAnimationFrame(() => { map?.resize(); flushMapFocus(); });
+  // Do not reposition the map or the tools when opening/closing the panel.
+  requestAnimationFrame(flushMapFocus);
 }
 function applyResponsiveLayout() {
   const kind = deviceKind();
-  const portrait = window.innerHeight >= window.innerWidth;
   document.body.dataset.device = kind;
   // Respect a deliberate user override even when a tablet is rotated.
   if (kind !== lastDevice) {
     if (kind === "mobile") setSheetState("collapsed");
-    else if (!sideUserOverride) setSidePanel(kind === "desktop" || !portrait);
-  } else if (kind === "tablet" && !sideUserOverride) {
-    setSidePanel(!portrait);
+    else if (!sideUserOverride) setSidePanel(false);
   }
   lastDevice = kind;
   requestAnimationFrame(() => { map?.resize(); flushMapFocus(); });
@@ -294,7 +295,7 @@ function selectMode(next, userAction = true) {
   if (userAction) {
     if (deviceKind() === "mobile") {
       setSheetState(wasCurrent && sheetState !== "collapsed" ? "collapsed" : "half");
-    } else if (!sideOpen) setSidePanel(true, true);
+    } else setSidePanel(!(wasCurrent && sideOpen), true);
   }
 }
 for (const [id,value] of [
@@ -306,7 +307,7 @@ $("mode-settings").addEventListener("click", () => {
   updateModeView();
   if (deviceKind() === "mobile") {
     setSheetState(wasCurrent && sheetState !== "collapsed" ? "collapsed" : "half");
-  } else if (!sideOpen) setSidePanel(true, true);
+  } else setSidePanel(!(wasCurrent && sideOpen), true);
 });
 $("web-settings-close").addEventListener("click", () => {
   settingsOpen = false;
@@ -364,13 +365,25 @@ $("loop").addEventListener("change", () => {
 $("confirm-snap").addEventListener("change", updateRouteControls);
 
 function flushMapFocus() {
-  try { return cameraFocus.flush(map); }
-  catch (_) { return false; }
+  try {
+    // No layout work during polling/overlay toggles unless a focus is pending.
+    // Use exact rendered overlay bounds, not guessed sidebar widths.
+    return cameraFocus.flush(map, viewport => {
+      const elements = document.querySelectorAll(
+        ".head,.tabs,#control-panel,#map-locations,#map-locations[open] .location-details," +
+        "#show-saved,#map-status,.map-quick-tools,#compact-walk-controls,#message:not(:empty)," +
+        ".maplibregl-ctrl-bottom-right,#map-warning:not(.hidden)"
+      );
+      const overlays = [...elements].filter(el=>getComputedStyle(el).display!=="none")
+        .map(el=>el.getBoundingClientRect()).filter(r=>r.width>0 && r.height>0);
+      return visibleMapPadding(viewport, overlays);
+    });
+  } catch (_) { return false; }
 }
 function focusMapPosition(point, zoom = 15, collapse = true) {
   if (!point || !Number.isFinite(point.lat) || !Number.isFinite(point.lon)) return false;
-  // The grid lays out the actual unobstructed map. On mobile collapse the
-  // workspace after an explicit focus so an expanded sheet cannot shrink it.
+  // Keep the full map canvas. Collapse the mobile sheet on explicit focus,
+  // and use the unobstructed region of that canvas for camera centring.
   $("map-locations").open = false;
   if (collapse && deviceKind() === "mobile") setSheetState("collapsed");
   cameraFocus.request(point, zoom);
@@ -659,6 +672,8 @@ function reloadMap() {
   initialiseMap();
 }
 $("retry-map").addEventListener("click", reloadMap);
+$("map-zoom-in").addEventListener("click",()=>map?.zoomIn({duration:120}));
+$("map-zoom-out").addEventListener("click",()=>map?.zoomOut({duration:120}));
 function chooseWebAppearance() {
   const choice = $("web-appearance").value;
   const selectedTheme = webThemes.includes(choice) ? choice : "auto";
@@ -686,7 +701,8 @@ async function initialiseMap() {
       // The PC has a larger viewport; preserve resources on slower phones.
       maxTileCacheSize: 45
     });
-    map.addControl(new maplibre.NavigationControl({showCompass:false}),"top-right");
+    // Zoom/location actions share a permanent bottom-right overlay.
+    // Native attribution remains visible and is never covered by the tools.
     map.on("dragstart", () => cameraFocus.clear());
     map.on("click", e => {
       showCoordinate({lat:e.lngLat.lat,lon:e.lngLat.lng});
