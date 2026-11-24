@@ -132,14 +132,17 @@ fun WifiControlPanel(
                 color = muted, fontSize = 11.sp)
         }
         if (lan.pendingDevice.isNotBlank()) {
-            Text("新裝置要求連線：${lan.pendingDevice}",
+            Text("待核准連線／續期：${lan.pendingDevice}",
                 color = foreground, fontWeight = FontWeight.Bold, fontSize = 13.sp)
             Row(Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = {
                     context.startService(LanControlService.command(
                         context, LanControlService.APPROVE))
-                }, modifier = Modifier.weight(1f)) { Text("核准裝置", fontSize = 12.sp) }
+                }, modifier = Modifier.weight(1f)) {
+                    Text(if (lan.pendingDevice.startsWith("續期")) "核准續期" else "核准裝置",
+                        fontSize = 12.sp)
+                }
                 OutlinedButton(onClick = {
                     context.startService(LanControlService.command(
                         context, LanControlService.DENY))

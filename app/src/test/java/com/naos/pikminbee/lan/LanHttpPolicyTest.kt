@@ -148,6 +148,12 @@ class LanHttpPolicyTest {
         assertTrue(html.contains("id=\"compact-pause\""))
         assertTrue(html.contains("id=\"compact-resume\""))
         assertTrue(html.contains("id=\"compact-stop\""))
+        assertTrue(html.contains("id=\"session-panel\""))
+        assertTrue(html.contains("id=\"session-renew\""))
+        assertTrue(html.contains("body.remote-active #session-panel:not(.hidden)"))
+        assertTrue(js.contains("/api/session/renew/status"))
+        assertTrue(js.contains("const activeToken = token"))
+        assertTrue(js.contains("sessionExpiresInSeconds"))
         // Walking controls stay visible with either an expanded mobile sheet or a
         // collapsed tablet/desktop panel, not only at the old collapsed breakpoint.
         assertTrue(js.contains("const show = connected && active"))

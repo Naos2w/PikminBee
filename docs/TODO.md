@@ -1,5 +1,13 @@
 # PikminBee TODO — current, actionable backlog
 
+## 0a. Wi-Fi 會話改善／PR #121（2026-11-24，整合分支）
+
+- [x] **L1 · 固定 2 小時**：私人 Wi-Fi 配對後會話 120 分鐘，固定到期，不因每 2 秒輪詢延長；真實 GPS 歷史快照仍獨立最多 30 分鐘。
+- [x] **L2 · 手機核准續期**：原 IP／有效舊 Token 需在網頁提出續期，90 秒內手機明確核准才更新；更換 Token、撤銷舊 Token 與真實 GPS 分享權限。拒絕、過期、不同 IP 或系統重啟均不續期。
+- [x] **L3 · UI 整合**：倒數時間、到期前提示、手機核准按鈕與 PR #122 的固定行走控制列、斷線提示及巡花移除內容並存。不得重新啟用舊模式或背景自動續期。
+- [ ] **L4 · 來源及裝置驗收**：MSI 最終 Kotlin/JVM、Android Lint、Node.js 與 GitHub CI 必須通過；另以 POCO + MSI Edge 實際測試配對、續期倒數、拒絕、原 Token 作廢、60/120 分鐘邊界、Web 重整、短暫斷線、Wi-Fi 切換、背景服務及真實 GPS 權限。不具設備證據時，不可宣稱完成 UAT。
+- [ ] **L5 · 發佈**：遵守 `feature → develop`（PR + Squash）且不改 `staging`／`main`，未取得獨立安裝同意不可更新或卸載 POCO APK。現有工作區 `.worktrees/` 不清除。
+
 > **2026-11-24 owner decision:** Retire the user-facing `尋花` mode and live flower-screen recognition. **PR #120 has already merged** the Android, floating and LAN retirement to `develop` at `7f712df`; durable saved flower locations, legacy route labels and GPX compatibility remain. **This is source-only, not an installed APK or completed POCO acceptance.** F1–F4 below are historical and cancelled. Do not resume automatic flower recognition, harvesting or flower-farming modes. **Git revert restores source, not app data lost through uninstall or clear-storage. Do not uninstall.**
 
 ## 0. 尋花模式退場（已合併 develop／實機仍待驗收）
@@ -15,8 +23,8 @@
 - [x] **UX-1 · 行走控制可達性（原始碼）**：Android 主地圖與詳細路線停止共用「停止路線？」確認對話，行走已結束時不可誤送舊停止指令；懸浮蜜蜂的即時停止仍保留作為外部操作的緊急動作。Web 手機面板半展開、平板抽屜收合、桌面側欄捲動時均顯示固定暫停／繼續／停止列；停止前維持確認，不使斷線自動停走。
 - [x] **UX-2 · 路點上限一致（原始碼）**：Android 一般道路草稿從 14 調到 **15**（非循環），與 Wi-Fi Web、GPX 和收藏上限一致；回到起點的循環道路保留 **14** 路點限制，以符合 16 個路線錨點上限。保留既有收藏資料與路線預覽確認。
 - [x] **UX-3 · 視覺與文案（原始碼）**：Android 行走進度拆成兩行並提高字級；Web 手機底部三模式等寬、縮短收藏選取文字、舊巡花收藏標示為歷史資料；兩端 Dark OpenFreeMap 僅微調已存在的道路線條顏色以提高辨識度。
-- [ ] **UX-4 · 完整驗收**：MSI 最終來源已通過 **291 項 JVM 單元測試（0 失敗／0 跳過）、Android Lint、Node.js 語法及 Git 差異檢查**，GitHub PR／CI 待驗證；POCO 真實 Android 視覺／停止確認／深淺色／動態字級，以及 Edge/Android Chrome 的 360/390/690/830/1280 等斷點、面板開合、斷線與一鍵停止均需驗證。**本機瀏覽器模擬配對控制遭執行環境阻擋，且沒有連上的 Android ADB，尚不可宣稱設備 RWD／實機合格。**
-- [ ] **UX-5 · 後續獨立整合**：Wi-Fi 2 小時會話與手機核准續期 PR #121 不包含在本次 UI/UX PR。合併任一 PR 前須先確認另一個分支的最新 `develop` 相容性。
+- [ ] **UX-4 · 完整驗收**：MSI 最終來源已通過 **291 項 JVM 單元測試（0 失敗／0 跳過）、Android Lint、Node.js 語法及 Git 差異檢查**，PR #122 GitHub CI 已通過並合併 develop（c422978）；POCO 真實 Android 視覺／停止確認／深淺色／動態字級，以及 Edge/Android Chrome 的 360/390/690/830/1280 等斷點、面板開合、斷線與一鍵停止均需驗證。**本機瀏覽器模擬配對控制遭執行環境阻擋，且沒有連上的 Android ADB，尚不可宣稱設備 RWD／實機合格。**
+- [x] **UX-5 · 後續獨立整合（原始碼）**：Wi-Fi 2 小時會話與手機核准續期 PR #121 已在獨立分支接續已合併的 UI/UX PR #122；原始碼整合不等於 UAT，需另走 L4 實機驗收。
 
 > **Source of truth**. Initially consolidated on **2026-11-23** from `develop` at `4f4ec6107757f14810ef53e23ec1d5e9e3b3bb59` (PR #110); the **S5 closure source baseline is `712abdd7a8ad4f72761dd38465aaa800e332fe10` (PR #115)**. This list replaces repeated historical milestone checkboxes; it does **not** retroactively certify device behaviour. PRs, issues and the immutable [previous full TODO snapshot](https://github.com/Naos2w/PikminBee/blob/4f4ec6107757f14810ef53e23ec1d5e9e3b3bb59/docs/TODO.md) preserve the full audit trail. Do not create a second active task ledger.
 >

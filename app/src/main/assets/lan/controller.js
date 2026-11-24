@@ -1,5 +1,7 @@
 const $ = id => document.getElementById(id);
 let token = null;
+let sessionDeadlineMs = 0;
+let renewingSession = false;
 let mode = "TELEPORT";
 let settingsOpen = false;
 let savedRecords = null;
@@ -23,10 +25,29 @@ const setMessage = value => { $("message").textContent = value; };
 const setPairMessage = value => { $("pairmessage").textContent = value; };
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 
+function updateSessionExpiry() {
+  const visible = !!token;
+  $("session-panel").classList.toggle("hidden", !visible);
+  if (!visible) return;
+  const remaining = Math.max(0, Math.ceil((sessionDeadlineMs - Date.now()) / 1000));
+  const hours = String(Math.floor(remaining / 3600)).padStart(2, "0");
+  const minutes = String(Math.floor(remaining % 3600 / 60)).padStart(2, "0");
+  const seconds = String(remaining % 60).padStart(2, "0");
+  $("session-expiry").textContent = remaining === 0
+    ? "控制授權時間已到，請重新配對"
+    : "控制授權剩餘 " + hours + ":" + minutes + ":" + seconds +
+      (remaining <= 600 ? " · 即將到期，請在手機核准續期" : "");
+  $("session-panel").classList.toggle("is-urgent", remaining <= 600);
+  $("session-renew").disabled = renewingSession || remaining <= 0;
+  $("session-renew").textContent = renewingSession
+    ? "等待手機核准…" : "從手機核准延長 2 小時";
+}
+
 async function call(path, method = "GET", body = null, useToken = true) {
   const headers = {};
+  const requestToken = useToken ? token : null;
   if (method === "POST") headers["Content-Type"] = "application/json";
-  if (useToken && token) headers["X-PikminBee-Token"] = token;
+  if (useToken && requestToken) headers["X-PikminBee-Token"] = requestToken;
   let response;
   try {
     response = await fetch(path, {
@@ -36,9 +57,16 @@ async function call(path, method = "GET", body = null, useToken = true) {
   } catch (_) { throw Error("無法連接手機，請確認私人 Wi-Fi 與網頁控制服務"); }
   const data = await response.json().catch(() => ({}));
   if (response.status === 401 && useToken) {
+    // An old in-flight poll may finish after a phone-approved token rotation.
+    // Never tear down the newer session because an older token was rejected.
+    if (requestToken !== token || (renewingSession && path === "/api/state"))
+      throw Error("等待續期完成，忽略舊狀態");
     token = null; connected = false;
+    sessionDeadlineMs = 0;
     remoteLinkHealthy = false;
     latest = null; // clear any in-memory sensitive physical snapshot on revocation
+    current = null;
+    updateSessionExpiry();
     updateCompactWalkControls();
     document.body.classList.remove("remote-active");
     $("controls").classList.remove("is-visible");
@@ -78,6 +106,8 @@ $("connect").addEventListener("click", async () => {
     }
     if (!approved?.token) throw Error("等待手機核准逾時");
     token = approved.token; connected = true; remoteLinkHealthy = true;
+    sessionDeadlineMs = Date.now() + Math.max(0, approved.expiresInSeconds || 0) * 1000;
+    updateSessionExpiry();
     document.body.classList.add("remote-active");
     applyResponsiveLayout();
     $("pin").value = "";
@@ -92,6 +122,48 @@ $("connect").addEventListener("click", async () => {
 });
 $("pin").addEventListener("keydown", event => {
   if (event.key === "Enter") $("connect").click();
+});
+
+$("session-renew").addEventListener("click", async () => {
+  if (!token || renewingSession || sessionDeadlineMs <= Date.now()) return;
+  renewingSession = true;
+  updateSessionExpiry();
+  try {
+    const requestedToken = token;
+    const pending = await call("/api/session/renew", "POST", {});
+    if (!pending.pendingId) throw Error("無法建立續期要求");
+    setMessage("續期要求已送往手機，請在 PikminBee 設定中點「核准續期」");
+    for (let attempt = 0; attempt < 42; attempt++) {
+      await pause(2000);
+      if (token !== requestedToken) throw Error("工作階段已更換，請重新確認");
+      const result = await call("/api/session/renew/status", "POST",
+        {pendingId:pending.pendingId});
+      if (!result.token) continue;
+      token = result.token;
+      sessionDeadlineMs = Date.now() + Math.max(0, result.expiresInSeconds || 0) * 1000;
+      // A renewed token must not inherit the previous precise GPS sharing grant.
+      latest = null;
+      current = null;
+      connected = true;
+      remoteLinkHealthy = true;
+      updateCompactWalkControls();
+      document.body.classList.add("remote-active");
+      $("pairbox").style.display = "none";
+      $("controls").classList.add("is-visible");
+      $("connection").textContent = "已連結手機";
+      renderMap();
+      updateSessionExpiry();
+      await refresh();
+      setMessage("手機已核准續期，控制權限再延長 2 小時；真實 GPS 分享需重新授權");
+      return;
+    }
+    throw Error("手機核准逾時，請重新要求續期");
+  } catch (error) {
+    setMessage(error.message || "續期失敗，請使用原工作階段或重新配對");
+  } finally {
+    renewingSession = false;
+    updateSessionExpiry();
+  }
 });
 
 function showCoordinate(point) {
@@ -881,8 +953,15 @@ async function refresh() {
   if (!token || refreshing) return;
   refreshing = true;
   try {
-    latest = await call("/api/state");
+    const activeToken = token;
+    const nextState = await call("/api/state");
+    if (token !== activeToken) return; // stale response after token rotation
+    latest = nextState;
     remoteLinkHealthy = true;
+    sessionDeadlineMs = Date.now() +
+      Math.max(0, Number(latest.sessionExpiresInSeconds) || 0) * 1000;
+    updateSessionExpiry();
+    $("connection").textContent = "已連結手機";
     current = latest.position;
     if (!speedEditing) {
       const profile = latest.speedMode || "PRESET";
@@ -915,6 +994,8 @@ async function refresh() {
       focusRealWhenReady = false;
   } catch (error) {
     if (token) {
+      if (renewingSession && error.message === "等待續期完成，忽略舊狀態")
+        return;
       remoteLinkHealthy = false;
       $("connection").textContent = "手機連線中斷";
       // Never continue to show previously received precise physical coordinates
@@ -1200,6 +1281,7 @@ $("saved-search").addEventListener("input",renderSaved);
 // Update only the clock text once per minute. Rebuilding the list would reset
 // its scroll position and close expanded place details while the user reads them.
 setInterval(()=>{if(!document.hidden)refreshSavedClocks();},60000);
+setInterval(updateSessionExpiry,1000);
 setInterval(() => { if (!document.hidden && connected && token) refresh(); }, 2000);
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden && token) refresh();
