@@ -9,6 +9,7 @@ let current = null;
 let latest = null;
 let speedEditing = false;
 let connected = false;
+let remoteLinkHealthy = true;
 let refreshing = false;
 let map = null, maplibre = null;
 let mapStyleReady = false, mapWatchdog = null, mapResizeObserver = null;
@@ -36,7 +37,9 @@ async function call(path, method = "GET", body = null, useToken = true) {
   const data = await response.json().catch(() => ({}));
   if (response.status === 401 && useToken) {
     token = null; connected = false;
+    remoteLinkHealthy = false;
     latest = null; // clear any in-memory sensitive physical snapshot on revocation
+    updateCompactWalkControls();
     document.body.classList.remove("remote-active");
     $("controls").classList.remove("is-visible");
     $("pairbox").style.display = "block";
@@ -74,7 +77,7 @@ $("connect").addEventListener("click", async () => {
       if (answer.token) { approved = answer; break; }
     }
     if (!approved?.token) throw Error("等待手機核准逾時");
-    token = approved.token; connected = true;
+    token = approved.token; connected = true; remoteLinkHealthy = true;
     document.body.classList.add("remote-active");
     applyResponsiveLayout();
     $("pin").value = "";
@@ -281,6 +284,10 @@ async function act(path, body, note = "") {
     await refresh();
     return true;
   } catch (error) {
+    if ((error.message || "").includes("無法連接手機")) {
+      remoteLinkHealthy = false;
+      updateCompactWalkControls();
+    }
     setMessage(error.message || "手機無法完成操作");
     return false;
   }
@@ -418,6 +425,24 @@ function styleUrl() {
     (styles.includes(choice) ? choice : "liberty");
   return "https://tiles.openfreemap.org/styles/" + name;
 }
+
+/** OpenFreeMap Dark uses near-black minor roads on a near-black background.
+ *  Brighten known road paint layers only; keep tiles, labels and palette intact.
+ *  Ignore missing layers if the provider changes its published style. */
+function improveDarkRoadLegibility() {
+  if (!map || !styleUrl().endsWith("/dark")) return;
+  const roadColours = {
+    highway_path: "#475762",
+    highway_minor: "#394852",
+    highway_major_inner: "#536572",
+    highway_major_subtle: "#3D4E5A",
+    highway_motorway_inner: "#637784",
+    highway_motorway_subtle: "#445662"
+  };
+  for (const [id, colour] of Object.entries(roadColours)) {
+    if (map.getLayer(id)) map.setPaintProperty(id, "line-color", colour);
+  }
+}
 /** Trust only the phone-authorised, time-bounded physical snapshot. The
  * browser can never infer real GPS from its own geolocation or mock provider. */
 function trustedRealPosition() {
@@ -508,6 +533,7 @@ async function initialiseMap() {
     });
     map.on("style.load", () => {
       mapStyleReady = true;
+      improveDarkRoadLegibility();
       lastLineKey = ""; lastDraftKey = "";
       renderMap();
     });
@@ -768,14 +794,19 @@ function updateRouteControls() {
 function updateCompactWalkControls() {
   const phase = latest?.phase || "IDLE";
   const active = phase === "MOVING" || phase === "PAUSED";
-  const show = connected && deviceKind() === "mobile" &&
-    sheetState === "collapsed" && active;
+  // A running walk must remain controllable even with the mobile sheet half-open,
+  // or when a tablet/desktop drawer is closed. Never require scrolling to Stop.
+  const show = connected && active;
   $("compact-walk-controls").classList.toggle("hidden", !show);
   const step = Number(latest?.progress?.estimatedSteps || 0);
-  $("compact-walk-summary").textContent =
-    (phase === "PAUSED" ? "已暫停" : "行走中") + " · 本次估算 " + step + " 步";
+  $("compact-walk-summary").textContent = !remoteLinkHealthy
+    ? "連線中斷 · 請在手機操作暫停或停止"
+    : (phase === "PAUSED" ? "已暫停" : "行走中") + " · 本次估算 " + step + " 步";
   $("compact-pause").classList.toggle("hidden", phase !== "MOVING");
   $("compact-resume").classList.toggle("hidden", phase !== "PAUSED");
+  $("compact-pause").disabled = !remoteLinkHealthy || phase !== "MOVING";
+  $("compact-resume").disabled = !remoteLinkHealthy || phase !== "PAUSED";
+  $("compact-stop").disabled = !remoteLinkHealthy;
   document.body.classList.toggle("has-compact-walk", show);
 }
 for (const [id,action] of [["compact-pause","pause"],
@@ -851,6 +882,7 @@ async function refresh() {
   refreshing = true;
   try {
     latest = await call("/api/state");
+    remoteLinkHealthy = true;
     current = latest.position;
     if (!speedEditing) {
       const profile = latest.speedMode || "PRESET";
@@ -883,6 +915,7 @@ async function refresh() {
       focusRealWhenReady = false;
   } catch (error) {
     if (token) {
+      remoteLinkHealthy = false;
       $("connection").textContent = "手機連線中斷";
       // Never continue to show previously received precise physical coordinates
       // after the authorised session or network connection is lost.
@@ -1008,7 +1041,9 @@ function renderSaved() {
     card.append(details);
     const buttons=document.createElement("div");buttons.className="row";
     const view=document.createElement("button");
-    view.textContent="在地圖選取";view.addEventListener("click",()=>{
+    view.textContent="選取";
+    view.setAttribute("aria-label","在地圖選取「"+place.name+"」位置，不會移動手機 GPS");
+    view.addEventListener("click",()=>{
       showCoordinate(place.position);selectMode("TELEPORT");
       $("saved-dialog").close();
       map?.flyTo({center:[place.position.lon,place.position.lat],zoom:15});
@@ -1037,7 +1072,7 @@ function renderSaved() {
     const card=document.createElement("article");card.className="saved-card";
     card.append(labelledText(route.name||"未命名路線","strong"));
     card.append(labelledText((route.stops||[]).length+" 個路點 · "+
-      (route.mode==="FLOWERS"?"舊巡花收藏":"道路")));
+      (route.mode==="FLOWERS"?"舊巡花收藏 · 可轉一般路線":"道路")));
     const button=document.createElement("button");
     button.textContent="載入草稿（仍須預覽）";
     button.addEventListener("click",async()=>{

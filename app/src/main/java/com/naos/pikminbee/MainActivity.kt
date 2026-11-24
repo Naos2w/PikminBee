@@ -120,6 +120,7 @@ import com.naos.pikminbee.ui.FavouritesPanel
 import com.naos.pikminbee.ui.WifiControlPanel
 import com.naos.pikminbee.ui.BackgroundSessionPanel
 import com.naos.pikminbee.ui.MapFirstShell
+import com.naos.pikminbee.ui.WalkStopUiPolicy
 import com.naos.pikminbee.ui.BeeSettingsScreen
 import com.naos.pikminbee.ui.BeePermissionWizard
 import com.naos.pikminbee.ui.PikminBeeThemeColors
@@ -242,6 +243,7 @@ private fun PikminBeeScreen() {
     val roadStops by RouteDraftState.routeStops.collectAsState()
     val savedRoutes by SavedRouteState.routes.collectAsState()
     var planning by remember { mutableStateOf(false) }
+    var confirmStopWalk by remember { mutableStateOf(false) }
     val speedPreset by WalkSpeedState.selected.collectAsState()
     val speedProfile by WalkSpeedState.profile.collectAsState()
     val defaultSpeedPreset by WalkSpeedState.preferred.collectAsState()
@@ -265,6 +267,10 @@ private fun PikminBeeScreen() {
     val walkingProgress by LocationStatus.progress.collectAsState()
     val walkEstimatedSteps by LocationStatus.walkEstimatedSteps.collectAsState()
     val overlayVisible by LocationStatus.overlayVisible.collectAsState()
+    LaunchedEffect(walkPhase) {
+        if (!WalkStopUiPolicy.canRequest(walkMode, walkPhase))
+            confirmStopWalk = false
+    }
     // Draft edits invalidate their previous preview.
     LaunchedEffect(roadStops) { PreparedRouteState.route.value = null }
 
@@ -571,6 +577,11 @@ private fun PikminBeeScreen() {
     }
 
     /** One preview → confirm → start/pause/resume command for both main modes. */
+    fun requestStopWalk() {
+        if (WalkStopUiPolicy.canRequest(walkMode, walkPhase))
+            confirmStopWalk = true
+    }
+
     fun handleJourneyPrimary() {
         if (walkPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)) {
             runCatching {
@@ -754,6 +765,32 @@ private fun PikminBeeScreen() {
         CompositionLocalProvider(
             LocalNaosVisualState provides NaosVisualState(naosFamily, naosMaterial, dark)
         ) {
+        if (confirmStopWalk) {
+            AlertDialog(
+                onDismissRequest = { confirmStopWalk = false },
+                title = { Text("停止目前的路線？") },
+                text = {
+                    Text("停止後模擬 GPS 會停留在目前位置，不會自動恢復真實定位。若只是暫時停下，可改用「暫停」。")
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        confirmStopWalk = false
+                        if (WalkStopUiPolicy.canRequest(walkMode, walkPhase)) {
+                            runCatching {
+                                context.startService(MockLocationService.command(
+                                    context, MockLocationService.ACTION_STOP_ROUTE))
+                            }.onSuccess { message = "已要求停止路線，請確認手機定位狀態" }
+                                .onFailure { message = "無法停止路線：${it.message ?: "請檢查系統狀態"}" }
+                        }
+                    }) { Text("確認停止") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { confirmStopWalk = false }) {
+                        Text("保留目前狀態")
+                    }
+                },
+            )
+        }
         confirmStartMode?.let { mode ->
             val ready = PreparedRouteState.get(mode)
             AlertDialog(
@@ -897,7 +934,7 @@ private fun PikminBeeScreen() {
                 message = if (tab == ToolTab.ROUTE)
                     routeEditingStopIndex?.let { "請點地圖重選第 ${it + 1} 點" }
                         ?: if (roadStops.size >= RoutePointDraft.MAX_STOPS)
-                            "已選滿 14 個路點 · 上滑可復原或刪除"
+                            "已選滿 ${RoutePointDraft.MAX_STOPS} 個路點 · 上滑可復原或刪除"
                         else "下一點：第 ${roadStops.size + 1} 點 · 上滑復原或管理路點"
                     else message,
                 coordinateInput = coordinateInput,
@@ -955,11 +992,7 @@ private fun PikminBeeScreen() {
                     }
                 },
                 onRoutePrimary = { handleJourneyPrimary() },
-                onRouteStop = {
-                    context.startService(MockLocationService.command(
-                        context, MockLocationService.ACTION_STOP_ROUTE))
-                    message = "已停止行走"
-                },
+                onRouteStop = ::requestStopWalk,
                 mapContent = {
             LocationMap(
                 provider = provider, dark = dark,
@@ -1006,7 +1039,7 @@ private fun PikminBeeScreen() {
                                     RoutePointDraft.Outcome.TOO_CLOSE_TO_ORIGIN ->
                                         message = "此位置太接近目前起點，請選擇其他位置"
                                     RoutePointDraft.Outcome.FULL ->
-                                        message = "最多 14 個目的地"
+                                        message = "最多 ${RoutePointDraft.MAX_STOPS} 個目的地"
                                     RoutePointDraft.Outcome.INVALID_INDEX -> {
                                         routeEditingStopIndex = null
                                         message = "路點已變更，請重新點選"
@@ -1162,8 +1195,7 @@ private fun PikminBeeScreen() {
                                     loop = false,
                                     onLoopChange = {},
                                     onRoutePrimary = { handleJourneyPrimary() },
-                                    onRouteStop = { context.startService(MockLocationService.command(
-                                        context, MockLocationService.ACTION_STOP_ROUTE)) },
+                                    onRouteStop = ::requestStopWalk,
                                 )
                             }
                         }

@@ -148,6 +148,15 @@ class LanHttpPolicyTest {
         assertTrue(html.contains("id=\"compact-pause\""))
         assertTrue(html.contains("id=\"compact-resume\""))
         assertTrue(html.contains("id=\"compact-stop\""))
+        // Walking controls stay visible with either an expanded mobile sheet or a
+        // collapsed tablet/desktop panel, not only at the old collapsed breakpoint.
+        assertTrue(js.contains("const show = connected && active"))
+        assertTrue(js.contains("連線中斷 · 請在手機操作暫停或停止"))
+        assertTrue(js.contains("remoteLinkHealthy = false"))
+        assertFalse(js.contains("sheetState === \"collapsed\" && active"))
+        assertTrue(html.contains("body.remote-active #compact-walk-controls:not(.hidden)"))
+        assertTrue(html.contains("grid-template-columns:repeat(3,minmax(0,1fr));padding:5px"))
+        assertTrue(js.contains("improveDarkRoadLegibility()"))
         assertTrue(html.contains("body.remote-active"))
         assertTrue(js.contains("trustedRealPosition()"))
         assertTrue(js.contains("realLocationSharingApproved"))

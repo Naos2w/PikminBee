@@ -1,18 +1,26 @@
 # PikminBee TODO — current, actionable backlog
 
-> **2026-11-24 owner decision:** Retire the user-facing `尋花` mode and live flower-screen recognition. The MSI work branch `chore/remove-flower-mode-ui-20261124` removes the Android, floating and LAN entry points, while preserving existing saved flower locations, legacy routes and GPX compatibility. **This is a development-only change, not an installed APK or passed device UAT.** F1–F4 below are historical, **not approved active work**. Do not resume automatic flower recognition, harvesting or flower-farming modes. The removal of vision/MediaProjection runtime, flower-specific UI and LAN API is now implemented on this separate branch; durable legacy records and GPX formats remain for rollback/export. **Git revert restores source code, not any phone data deleted by uninstalling or clearing App storage.** Do not uninstall.
+> **2026-11-24 owner decision:** Retire the user-facing `尋花` mode and live flower-screen recognition. **PR #120 has already merged** the Android, floating and LAN retirement to `develop` at `7f712df`; durable saved flower locations, legacy route labels and GPX compatibility remain. **This is source-only, not an installed APK or completed POCO acceptance.** F1–F4 below are historical and cancelled. Do not resume automatic flower recognition, harvesting or flower-farming modes. **Git revert restores source, not app data lost through uninstall or clear-storage. Do not uninstall.**
 
-## 0. 尋花模式退場（MSI，尚未合併／驗收）
+## 0. 尋花模式退場（已合併 develop／實機仍待驗收）
 
 - [x] **R1 · 使用者入口退場（原始碼）**：Android 底部模式只保留瞬移、路徑、設定；Wi-Fi 網頁不提供尋花模式；懸浮蜜蜂不顯示畫面辨識捷徑，也不會啟動新的尋花路線。原有執行中的路線仍可暫停／停止。
 - [x] **R2 · 保留個人資料相容性（原始碼）**：舊尋花收藏不自動刪除，Android 收藏載入時可複製為一般道路草稿而不更動原收藏；舊式 GPX 可依一般路線匯入。歷史辨識與花點資料保留供後續明確匯出／清理。
 - [x] **R3 · 來源測試**：完整移除後 MSI 本地 Kotlin 編譯及 **288 項 JVM 單元測試（0 失敗／0 跳過）** 通過，LAN JavaScript 語法及 Git 差異檢查通過；Android Lint 已通過。原有花朵辨識單元測試隨退場功能一起移除，因此測試總數下降，並非 25 項測試失敗。這些不是實機 UI 驗收。
-- [ ] **R4 · 整合與實機驗收**：先經獨立 PR／CI 後合併到 `develop`；另行批准的 UAT APK 應以 MSI／POCO 檢查三個底部動作、舊資料保留、收藏載入、GPX 和 LAN 介面。不要修改 `main` 或自動安裝手機。
+- [ ] **R4 · 實機驗收**：PR #120 已通過 GitHub CI 並合併 `develop`；UAT APK 尚未裝到 POCO。後續檢查三個底部動作、舊資料保留、收藏載入、GPX 和 LAN 介面。不要修改 `main` 或未經核准安裝手機。
 - [x] **R5 · 巡花執行碼移除（原始碼）**：刪除花朵辨識／畫面擷取、像素校正 UI 與專用前景服務、相關 Manifest 權限；移除 Android/網頁巡花入口及特定 API，禁止新建巡花路徑。保留 `WalkMode.FLOWERS` 舊資料標記／GPX 讀取、已存收藏與花點 GeoJSON 匯出；新路線僅可使用普通道路模式。Git revert 可回復程式碼，但不能取代裝置資料備份。實機驗收仍為 R4。
+
+## 0b. UI/UX 可用性修正（2026-11-24，MSI 獨立分支）
+
+- [x] **UX-1 · 行走控制可達性（原始碼）**：Android 主地圖與詳細路線停止共用「停止路線？」確認對話，行走已結束時不可誤送舊停止指令；懸浮蜜蜂的即時停止仍保留作為外部操作的緊急動作。Web 手機面板半展開、平板抽屜收合、桌面側欄捲動時均顯示固定暫停／繼續／停止列；停止前維持確認，不使斷線自動停走。
+- [x] **UX-2 · 路點上限一致（原始碼）**：Android 一般道路草稿從 14 調到 **15**（非循環），與 Wi-Fi Web、GPX 和收藏上限一致；回到起點的循環道路保留 **14** 路點限制，以符合 16 個路線錨點上限。保留既有收藏資料與路線預覽確認。
+- [x] **UX-3 · 視覺與文案（原始碼）**：Android 行走進度拆成兩行並提高字級；Web 手機底部三模式等寬、縮短收藏選取文字、舊巡花收藏標示為歷史資料；兩端 Dark OpenFreeMap 僅微調已存在的道路線條顏色以提高辨識度。
+- [ ] **UX-4 · 完整驗收**：MSI 最終來源已通過 **291 項 JVM 單元測試（0 失敗／0 跳過）、Android Lint、Node.js 語法及 Git 差異檢查**，GitHub PR／CI 待驗證；POCO 真實 Android 視覺／停止確認／深淺色／動態字級，以及 Edge/Android Chrome 的 360/390/690/830/1280 等斷點、面板開合、斷線與一鍵停止均需驗證。**本機瀏覽器模擬配對控制遭執行環境阻擋，且沒有連上的 Android ADB，尚不可宣稱設備 RWD／實機合格。**
+- [ ] **UX-5 · 後續獨立整合**：Wi-Fi 2 小時會話與手機核准續期 PR #121 不包含在本次 UI/UX PR。合併任一 PR 前須先確認另一個分支的最新 `develop` 相容性。
 
 > **Source of truth**. Initially consolidated on **2026-11-23** from `develop` at `4f4ec6107757f14810ef53e23ec1d5e9e3b3bb59` (PR #110); the **S5 closure source baseline is `712abdd7a8ad4f72761dd38465aaa800e332fe10` (PR #115)**. This list replaces repeated historical milestone checkboxes; it does **not** retroactively certify device behaviour. PRs, issues and the immutable [previous full TODO snapshot](https://github.com/Naos2w/PikminBee/blob/4f4ec6107757f14810ef53e23ec1d5e9e3b3bb59/docs/TODO.md) preserve the full audit trail. Do not create a second active task ledger.
 >
-> **Approval / scope:** The user does **not** want a LocWarp-style 花農繞圈/orbit mode or a mandatory Pikmin Bloom in-game flower-planting speed benchmark. LocWarp WALK **10.8 km/h** is only an advisory speed reference, **not** a verified planting optimum and **not** a command to overwrite the saved personal default. Keep ordinary existing flower-road routes and their current loop option.
+> **Approval / scope:** The user does **not** want a LocWarp-style 花農繞圈/orbit mode or a mandatory Pikmin Bloom in-game flower-planting speed benchmark. LocWarp WALK **10.8 km/h** is only an advisory speed reference, **not** a verified planting optimum and **not** a command to overwrite the saved personal default. Keep previously saved flower-labelled routes and GPX compatibility for explicit conversion; do not reactivate the retired route mode.
 
 ## 1. Verified source milestones — not physical acceptance
 

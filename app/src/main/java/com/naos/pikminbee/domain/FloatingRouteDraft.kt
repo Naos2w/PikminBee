@@ -6,7 +6,12 @@ package com.naos.pikminbee.domain
 object FloatingRouteDraft {
     fun anchors(origin: Coordinate?, stops: List<Coordinate>, loop: Boolean): List<Coordinate> {
         require(origin != null) { "找不到目前位置；請先取得精確定位或在地圖設定位置" }
-        require(stops.size in 1..14) { "請先新增 1 至 14 個路點" }
+        require(stops.size in 1..RoutePointDraft.MAX_STOPS) {
+            "請先新增 1 至 ${RoutePointDraft.MAX_STOPS} 個路點"
+        }
+        require(!loop || stops.size <= RoutePointDraft.MAX_STOPS - 1) {
+            "循環路線最多 ${RoutePointDraft.MAX_STOPS - 1} 個路點"
+        }
         val points = buildList {
             add(origin)
             stops.forEach { point ->
