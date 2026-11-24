@@ -440,14 +440,20 @@ class LanController(private val context: Context) {
                         System.currentTimeMillis() - it.requestedAtMillis in 0..120_000L
                 }
                 val metadata = lookup?.suggestion
+                val existing = prefs.places().firstOrNull { it.coordinate == point }
+                if (existing != null) {
+                    if (metadata != null)
+                        prefs.enrichSavedPlace(existing.id, point, metadata)
+                    return accepted("此位置已收藏為「${existing.name}」，原名稱保留")
+                }
                 prefs.addPlace(name, point, metadata?.countryCode, metadata?.countryName,
                     metadata?.city, metadata?.timeZoneId)
-                accepted("已收藏「$name」，沒有瞬移或更動路線")
+                accepted("已自動收藏「$name」，沒有瞬移或更動路線")
             }
             "/api/saved/place/enrich" -> {
                 if (!placeEnrichmentBusy.compareAndSet(false, true))
                     return error(409, "收藏資訊補齊進行中")
-                placeEnrichmentNote = "正在補齊舊收藏的國家／城市／時區"
+                placeEnrichmentNote = "正在補齊舊收藏的自動地名／國旗／城市／時區"
                 scope.launch {
                     var updated = 0
                     var scanned = 0
@@ -470,7 +476,7 @@ class LanController(private val context: Context) {
                         placeEnrichmentBusy.set(false)
                     }
                 }
-                accepted("已開始補齊缺少的國家、城市與時區，原地名不變")
+                accepted("已開始補齊地名／國旗／時區；自訂收藏名稱不會被覆寫")
             }
             "/api/saved/place/rename" -> {
                 val json = parse(req.body) ?: return error(400, "JSON 無效")

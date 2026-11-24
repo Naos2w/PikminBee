@@ -11,6 +11,18 @@ import java.net.URL
 import java.util.Locale
 import kotlin.math.roundToInt
 
+/** The public Photon endpoint supports `default` (OSM-native names), not `zh`.
+ *  Default preserves Traditional Chinese names where the OSM record has them.
+ *  A contract test keeps this request language from silently breaking flags.
+ */
+internal object PhotonReverseRequest {
+    fun url(point: Coordinate): String =
+        "https://photon.komoot.io/reverse?lat=" +
+            "%.6f".format(Locale.US, point.latitude) +
+            "&lon=" + "%.6f".format(Locale.US, point.longitude) +
+            "&radius=0.3&limit=8&lang=default"
+}
+
 /**
  * Explicit-save-only place suggestions. Sends a user-selected coordinate to
  * Photon (OSM) and TimeAPI over HTTPS at most once per cache miss; never on
@@ -33,11 +45,7 @@ class PlaceLookup(context: Context) {
             if (cached.timeZoneId != null) return@withContext cached
             return@withContext cached.copy(timeZoneId = resolveZoneCached(point))
         }
-        val raw = fetchJson(
-            "https://photon.komoot.io/reverse?lat=" + "%.6f".format(Locale.US, point.latitude) +
-                "&lon=" + "%.6f".format(Locale.US, point.longitude) +
-                "&radius=0.3&limit=8&lang=zh"
-        )
+        val raw = fetchJson(PhotonReverseRequest.url(point))
         val records = parsePhoton(raw)
         val base = PlaceSuggestionPolicy.nameFor(point, records)
         val suggestion = base.copy(timeZoneId = resolveZoneCached(point))

@@ -77,6 +77,7 @@ import com.naos.pikminbee.data.PlaceLookup
 import com.naos.pikminbee.data.PlaceSuggestion
 import com.naos.pikminbee.data.PlaceSuggestionPolicy
 import com.naos.pikminbee.data.SavedPlaceMetadataPolicy
+import com.naos.pikminbee.data.SavedPlaceTimePolicy
 import com.naos.pikminbee.data.VerifiedRealTimeZone
 import com.naos.pikminbee.flower.FlowerCatalogStore
 import com.naos.pikminbee.flower.FlowerJsonCodec
@@ -235,10 +236,7 @@ private fun PikminBeeScreen() {
     var realZoneReference by remember { mutableStateOf<VerifiedRealTimeZone?>(null) }
     var backfillingPlaces by remember { mutableStateOf(false) }
     var backfillResult by remember { mutableStateOf("") }
-    var pendingPlace by remember { mutableStateOf<Coordinate?>(null) }
-    var suggestedName by remember { mutableStateOf("") }
-    var placeSuggestion by remember { mutableStateOf<PlaceSuggestion?>(null) }
-    var lookingUpPlace by remember { mutableStateOf(false) }
+    var savingPlace by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("地圖點一下就能選擇位置") }
     val roadStops by RouteDraftState.routeStops.collectAsState()
     val savedRoutes by SavedRouteState.routes.collectAsState()
@@ -1136,23 +1134,55 @@ private fun PikminBeeScreen() {
                                     Text("模擬座標：${mockPosition!!.label()}", fontSize = 12.sp, color = muted)
                                 }
                                 TextButton(
+                                    enabled = !savingPlace,
                                     onClick = {
                                         if (!selectionExplicit) {
                                             message = "請先點地圖選取要收藏的位置"
                                         } else {
                                             val target = selected
-                                            val fallback = PlaceSuggestionPolicy.pointLabel(target)
-                                            pendingPlace = target
-                                            suggestedName = fallback
-                                            placeSuggestion = null
-                                            lookingUpPlace = true
-                                            work.launch {
-                                                val suggested = placeLookup.suggest(target)
-                                                if (pendingPlace == target) {
-                                                    if (suggestedName == fallback)
-                                                        suggestedName = suggested.displayName
-                                                    placeSuggestion = suggested
-                                                    lookingUpPlace = false
+                                            val alreadySaved = prefs.places().firstOrNull {
+                                                it.coordinate == target
+                                            }
+                                            if (alreadySaved != null) {
+                                                message = "這個位置已收藏為「${alreadySaved.name}」；可在收藏清單改名"
+                                            } else {
+                                                savingPlace = true
+                                                message = "正在取得附近地標／商家名稱與國家、時區後收藏…"
+                                                // Only this explicit tap sends the selected
+                                                // coordinate to Photon / TimeAPI, not map pans.
+                                                work.launch {
+                                                    try {
+                                                        val suggestion = runCatching {
+                                                            placeLookup.suggest(target)
+                                                        }.getOrElse {
+                                                            PlaceSuggestion(PlaceSuggestionPolicy.pointLabel(target))
+                                                        }
+                                                        // A paired browser may have saved the same
+                                                        // coordinate while the lookup was running.
+                                                        if (prefs.places().none { it.coordinate == target }) {
+                                                            prefs.addPlace(
+                                                                suggestion.displayName, target,
+                                                                suggestion.countryCode,
+                                                                suggestion.countryName,
+                                                                suggestion.city,
+                                                                suggestion.timeZoneId,
+                                                            )
+                                                        }
+                                                        places = prefs.places()
+                                                        val flag = SavedPlaceTimePolicy.flagEmoji(
+                                                            suggestion.countryCode)
+                                                        message = if (suggestion.displayName ==
+                                                            PlaceSuggestionPolicy.pointLabel(target))
+                                                            "地名查詢無結果，已用座標名稱收藏；可稍後補齊資訊"
+                                                        else "已自動命名並收藏「${suggestion.displayName}」 " +
+                                                            listOf(flag, suggestion.city, suggestion.countryName)
+                                                                .filterNot { it.isNullOrBlank() }
+                                                                .joinToString(" · ")
+                                                    } catch (e: Exception) {
+                                                        message = "收藏失敗：${e.message ?: "請再試一次"}"
+                                                    } finally {
+                                                        savingPlace = false
+                                                    }
                                                 }
                                             }
                                         }
@@ -1161,7 +1191,7 @@ private fun PikminBeeScreen() {
                                     Row(horizontalArrangement = Arrangement.spacedBy(5.dp),
                                         verticalAlignment = Alignment.CenterVertically) {
                                         NaosModeIcon(3, foreground)
-                                        Text("收藏這個位置")
+                                        Text(if (savingPlace) "正在自動命名…" else "一鍵收藏")
                                     }
                                 }
                             }
@@ -1199,65 +1229,6 @@ private fun PikminBeeScreen() {
                                 )
                             }
                         }
-                },
-            )
-        }
-        pendingPlace?.let { target ->
-            AlertDialog(
-                onDismissRequest = { pendingPlace = null; lookingUpPlace = false },
-                title = { Text("收藏這個位置") },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("選取座標：${target.label()}", color = muted, fontSize = 12.sp)
-                        OutlinedTextField(
-                            value = suggestedName,
-                            onValueChange = { suggestedName = it.take(80) },
-                            label = { Text("地點名稱（可修改）") },
-                            modifier = Modifier.fillMaxWidth(), singleLine = true,
-                        )
-                        if (lookingUpPlace)
-                            Text("正在取得附近地標／商家與當地時區建議…",
-                                color = muted, fontSize = 12.sp)
-                        val meta = placeSuggestion
-                        if (meta != null) {
-                            Text(listOfNotNull(meta.countryName, meta.city).joinToString(" · ")
-                                .ifBlank { "國家／城市待確認" },
-                                color = muted, fontSize = 12.sp)
-                            Text(if (meta.timeZoneId != null)
-                                "地點時區：${meta.timeZoneId}" else "時區待確認",
-                                color = muted, fontSize = 12.sp)
-                        }
-                        Text(
-                            "只有點擊收藏才查詢網路建議；選取座標會傳至 Photon／TimeAPI。" +
-                                "查詢失敗仍能用座標名稱儲存，日後手動名稱不會被覆寫。",
-                            color = muted, fontSize = 11.sp,
-                        )
-                    }
-                },
-                confirmButton = {
-                    TextButton(
-                        enabled = suggestedName.isNotBlank(),
-                        onClick = {
-                            val suggested = placeSuggestion
-                            prefs.addPlace(
-                                suggestedName, target,
-                                countryCode = suggested?.countryCode,
-                                countryName = suggested?.countryName,
-                                city = suggested?.city,
-                                timeZoneId = suggested?.timeZoneId,
-                            )
-                            places = prefs.places()
-                            pendingPlace = null
-                            lookingUpPlace = false
-                            message = "已收藏「${suggestedName}」，沒有移動 GPS"
-                        },
-                    ) { Text("儲存收藏") }
-                },
-                dismissButton = {
-                    TextButton(onClick = {
-                        pendingPlace = null
-                        lookingUpPlace = false
-                    }) { Text("取消") }
                 },
             )
         }
