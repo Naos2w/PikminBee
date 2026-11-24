@@ -1,5 +1,14 @@
 # PikminBee TODO — current, actionable backlog
 
+> **2026-11-24 LAN session reliability (separate from flower-mode Draft PR #120):** User approved changing the paired private-Wi-Fi browser session to **two hours** with an on-screen countdown and **phone-approved, non-automatic renewal**. Implemented on MSI branch `feat/lan-session-renewal-20261124` against `develop`; no APK installed or released. Keep the separate physical real-GPS snapshot at **30 minutes** and private-network-only HTTP restrictions. Source/tests and later UAT gates belong here, not in a second backlog.
+
+## 0. Wi-Fi 連線改善（MSI 開發分支）
+
+- [x] **L1 · 2 小時固定會話**：原本 30 分鐘 token 改 120 分鐘、只綁定手機核准的 IP，`/api/state` 只讀取剩餘秒數，不會因為輪詢而自動延長。
+- [x] **L2 · 手機核准續期**：原有有效會話從網頁提出續期、手機 Settings 允許／拒絕、90 秒有效待核准票據、核准後更換 token 並撤銷先前真實 GPS 分享權限，拒絕／過期／網路不同不得續期。
+- [x] **L3 · 網頁回饋與來源驗證**：剩餘時間倒數、到期前 10 分鐘提示、手機核准操作、保留原 2 秒可見分頁輪詢與短暫斷線重試，換權杖不復活舊請求。MSI 原始碼驗證：**317 JVM tests，0 失敗／0 跳過；Android Lint、Node JS syntax、Git diff check 通過**，不等於手機／PC 實機驗收。
+- [ ] **L4 · 驗收與發佈**：通過精確來源 CI、Android/Edge 手機+PC 測試，包括 2 小時到期、短斷線、背景、換 IP、撤銷、重啟及舊 Token／真實 GPS 保護；之後依既有分支 PR 流程、**另經批准**才建置並安裝 UAT APK。
+
 > **Source of truth**. Initially consolidated on **2026-11-23** from `develop` at `4f4ec6107757f14810ef53e23ec1d5e9e3b3bb59` (PR #110); the **S5 closure source baseline is `712abdd7a8ad4f72761dd38465aaa800e332fe10` (PR #115)**. This list replaces repeated historical milestone checkboxes; it does **not** retroactively certify device behaviour. PRs, issues and the immutable [previous full TODO snapshot](https://github.com/Naos2w/PikminBee/blob/4f4ec6107757f14810ef53e23ec1d5e9e3b3bb59/docs/TODO.md) preserve the full audit trail. Do not create a second active task ledger.
 >
 > **Approval / scope:** The user does **not** want a LocWarp-style 花農繞圈/orbit mode or a mandatory Pikmin Bloom in-game flower-planting speed benchmark. LocWarp WALK **10.8 km/h** is only an advisory speed reference, **not** a verified planting optimum and **not** a command to overwrite the saved personal default. Keep ordinary existing flower-road routes and their current loop option.

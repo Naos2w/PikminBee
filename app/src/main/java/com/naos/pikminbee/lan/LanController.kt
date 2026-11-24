@@ -146,16 +146,21 @@ class LanController(private val context: Context) {
     }
 
     fun approvePending() {
+        val renewal = LanStatus.display.value.pendingDevice.startsWith("續期")
         val approved = pairing.approve()
         LanStatus.display.value = LanStatus.display.value.copy(
             pendingDevice = "",
-            note = if (approved) "已核准網頁裝置，等待瀏覽器建立工作階段" else "沒有待核准的裝置")
+            note = if (!approved) "沒有待核准的裝置"
+                else if (renewal) "已核准續期，等待原網頁完成更新權杖"
+                else "已核准網頁裝置，等待瀏覽器建立工作階段")
     }
 
     fun denyPending() {
+        val renewal = LanStatus.display.value.pendingDevice.startsWith("續期")
         pairing.deny()
         LanStatus.display.value = LanStatus.display.value.copy(
-            pendingDevice = "", note = "已拒絕裝置配對")
+            pendingDevice = "",
+            note = if (renewal) "已拒絕網頁續期" else "已拒絕裝置配對")
     }
 
     /** Called only from the visible Android Settings consent confirmation. */
@@ -274,15 +279,40 @@ class LanController(private val context: Context) {
                     // Approving another browser revokes ALL prior precise-data consent.
                     revokePhysicalSharing("新的網頁配對已核准；真實位置必須重新授權")
                     ok(JSONObject().put("token", status.token)
-                        .put("expiresInSeconds", 1800).toString())
+                        .put("expiresInSeconds", pairing.sessionDurationSeconds).toString())
                 }
                 "pending" -> acceptedJson(JSONObject().put("status", "pending").toString())
                 else -> error(403, "裝置尚未核准、已拒絕或配對已過期")
             }
         }
         if (!pairing.authorised(req.token, req.remoteAddress)) return error(401, "請在手機取得配對碼後重新連線")
+        if (req.method == "POST" && req.path == "/api/session/renew") {
+            val renewal = pairing.requestRenewal(req.token, req.remoteAddress)
+            if (renewal.pendingId == null)
+                return error(409, "已有待核准請求，或目前會話不允許續期")
+            LanStatus.display.value = LanStatus.display.value.copy(
+                pendingDevice = "續期目前裝置 · ${req.remoteAddress}",
+                note = "網頁要求再延長 2 小時；須在手機明確核准")
+            return acceptedJson(JSONObject().put("pendingId", renewal.pendingId).toString())
+        }
+        if (req.method == "POST" && req.path == "/api/session/renew/status") {
+            val body = parse(req.body) ?: return error(400, "續期請求無效")
+            val renewal = pairing.pollRenewal(
+                req.remoteAddress, body.optString("pendingId"), req.token
+            )
+            return when (renewal.state) {
+                "approved" -> {
+                    // A rotated session never inherits consent to share precise GPS.
+                    revokePhysicalSharing("網頁已核准續期；真實 GPS 分享需要重新同意")
+                    ok(JSONObject().put("token", renewal.token)
+                        .put("expiresInSeconds", pairing.sessionDurationSeconds).toString())
+                }
+                "pending" -> acceptedJson(JSONObject().put("status", "pending").toString())
+                else -> error(403, "續期已拒絕、逾時或原本會話失效")
+            }
+        }
         if (req.method == "GET" && req.path == "/api/state")
-            return ok(snapshot(req.token))
+            return ok(snapshot(req.token, req.remoteAddress))
         if (req.method == "GET" && req.path == "/api/saved") return ok(savedSnapshot())
         if (req.method != "POST") return error(404, "找不到操作")
         return when (req.path) {
@@ -834,7 +864,7 @@ class LanController(private val context: Context) {
         LanReply(200, context.assets.open(path).bufferedReader(Charsets.UTF_8).use { it.readText() }, mime)
     }.getOrElse { error(404, "缺少控制頁面") }
 
-    private fun snapshot(requesterToken: String?): String {
+    private fun snapshot(requesterToken: String?, requesterPeer: String): String {
         fun coordinates(items: List<Coordinate>): JSONArray = JSONArray().apply {
             items.forEach { put(JSONObject().put("lat", it.latitude).put("lon", it.longitude)) }
         }
@@ -891,6 +921,7 @@ class LanController(private val context: Context) {
         val realZone = verifiedTimeZoneReference
             ?.takeIf { it.freshId(now) != null }
         return JSONObject()
+            .put("sessionExpiresInSeconds", pairing.secondsRemaining(requesterToken, requesterPeer))
             .put("status", LocationStatus.display.value)
             .put("note", LanStatus.display.value.note)
             .put("position", position?.let { JSONObject().put("lat", it.latitude).put("lon", it.longitude) })

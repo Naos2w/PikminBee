@@ -18,11 +18,13 @@ class LanPairing(
     private data class Pending(
         val ticket: String, val peer: String, val name: String,
         val token: String, val createdAt: Long, var approved: Boolean = false,
+        val renewFromToken: String? = null,
     )
 
     private val attempts = ConcurrentHashMap<String, Attempts>()
     private val tokens = ConcurrentHashMap<String, Session>()
-    private val tokenLifetimeMillis = 30 * 60_000L
+    private val tokenLifetimeMillis = 2 * 60 * 60_000L
+    val sessionDurationSeconds: Int get() = (tokenLifetimeMillis / 1_000L).toInt()
     private val pendingLifetimeMillis = 90_000L
     private val blockMillis = 5 * 60_000L
     private val attemptWindowMillis = 60_000L
@@ -71,6 +73,20 @@ class LanPairing(
         return AuthResult(pendingId = pending?.ticket)
     }
 
+    /** A renewal requires an already-authorised peer and a fresh phone approval.
+     *  It cannot extend the previous token merely by polling /api/state. */
+    @Synchronized fun requestRenewal(token: String?, remoteAddress: String): AuthResult {
+        if (!authorised(token, remoteAddress)) return AuthResult()
+        clearExpiredPending()
+        if (pending != null) return AuthResult(locked = true)
+        pending = Pending(
+            ticket = newSecret(18), peer = remoteAddress,
+            name = "續期請求", token = newSecret(32),
+            createdAt = clockMillis(), renewFromToken = token,
+        )
+        return AuthResult(pendingId = pending?.ticket)
+    }
+
     @Synchronized fun approve(): Boolean {
         clearExpiredPending()
         val current = pending ?: return false
@@ -85,7 +101,8 @@ class LanPairing(
     @Synchronized fun poll(remoteAddress: String, ticket: String?): ApprovalStatus {
         clearExpiredPending()
         val current = pending ?: return ApprovalStatus("invalid")
-        if (ticket == null || !constantTimeMatch(current.ticket, ticket) || remoteAddress != current.peer) {
+        if (current.renewFromToken != null || ticket == null ||
+            !constantTimeMatch(current.ticket, ticket) || remoteAddress != current.peer) {
             return ApprovalStatus("invalid")
         }
         if (!current.approved) return ApprovalStatus("pending")
@@ -95,6 +112,34 @@ class LanPairing(
         return ApprovalStatus("approved", current.token)
     }
 
+    /** Rotate the token only after the SAME authorised browser is approved on-phone. */
+    @Synchronized fun pollRenewal(
+        remoteAddress: String, ticket: String?, oldToken: String?,
+    ): ApprovalStatus {
+        clearExpiredPending()
+        val current = pending ?: return ApprovalStatus("invalid")
+        if (current.renewFromToken == null || ticket == null || oldToken == null ||
+            !constantTimeMatch(current.ticket, ticket) ||
+            !constantTimeMatch(current.renewFromToken, oldToken) ||
+            remoteAddress != current.peer) return ApprovalStatus("invalid")
+        if (!authorised(oldToken, remoteAddress)) {
+            pending = null
+            return ApprovalStatus("invalid")
+        }
+        if (!current.approved) return ApprovalStatus("pending")
+        tokens.clear()
+        tokens[current.token] = Session(current.peer, clockMillis() + tokenLifetimeMillis)
+        pending = null
+        return ApprovalStatus("approved", current.token)
+    }
+
+    @Synchronized fun secondsRemaining(token: String?, remoteAddress: String): Int {
+        if (!authorised(token, remoteAddress)) return 0
+        val expiry = tokens[token]?.expiresAt ?: return 0
+        return ((expiry - clockMillis()).coerceAtLeast(0L) + 999L)
+            .div(1_000L).toInt()
+    }
+
     /** Only one pairing session is active: a new browser approval revokes the old one. */
     @Synchronized fun activeSessionToken(): String? {
         val now = clockMillis()
@@ -102,7 +147,7 @@ class LanPairing(
         return tokens.keys.firstOrNull()
     }
 
-    fun authorised(token: String?, remoteAddress: String): Boolean {
+    @Synchronized fun authorised(token: String?, remoteAddress: String): Boolean {
         if (token == null || token.length !in 40..64) return false
         val session = tokens[token] ?: return false
         if (remoteAddress != session.peer || clockMillis() >= session.expiresAt) {
