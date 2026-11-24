@@ -1,5 +1,14 @@
 # PikminBee TODO — current, actionable backlog
 
+## 0f. 收藏國旗／當地時間與地圖細節（2026-11-24 最新回饋）
+
+- [x] FAV-6（來源）：App／Web 使用同一份 252 張離線 PNG 國旗（267,169 bytes；來源與版本見 flags/NOTICE.md），以國家代碼對應；缺少圖片或有效國家時保留名稱及補齊提示。LAN 僅允許兩字母 PNG 路徑並原樣回傳 bytes。
+- [x] FAV-7（來源）：只顯示收藏地點 IANA 時區的當地 HH:mm，每分鐘刷新，未知時區明示待確認，不計算與真實 GPS 時差；既有收藏不變。App 開啟收藏時不再為時差查詢真實位置的時區。
+- [x] V3-7（來源）：Web 地圖所有 MapLibre popup 的背景、箭頭、文字及關閉按鈕隨網站深淺主題，保持對比與正常操作，未更動原版 vendor。
+- [x] V3-8（來源）：App 經緯度旁原為編輯座標而非複製；改為易辨識的標準鉛筆圖示，保留原編輯／完成語意及鍵盤流程。
+- [x] 本機來源驗證：2026-11-24 18:23 MSI JVM 300 項（0 失敗／0 錯誤／0 跳過）及 Android Lint 均通過（Gradle exit 0）；Node 11 項通過。獨立無頭 Chromium、實際 packaged LAN UI 與合成資料：路點 2 popup 即時深淺切換，深色背景 #1c2b34／文字 #eaf2f2，淺色背景 #fff／文字 #20313a，箭頭及關閉鍵同步；台灣及日本 PNG 各成功解碼 100px，當地時間正確、未知時區有提示，無時差字樣。未連接 POCO，未操作真實 GPS。
+- [ ] 驗收／交付：GitHub CI、合併、單次固定簽章 UAT 與 POCO 實機 App 圖示／收藏／Web 畫面驗收；不變更 main、不清除或卸載 App。
+
 ## 0e. 地圖／Web UI/UX 一致性 V3（2026-11-24，使用者新增六項需求）
 
 > **最新需求優先於 0c/0d 舊設計。** 基準：`develop` `7c45a26`、已簽章 UAT 0.23.1（staging `4b96a2a`、GitHub run 45332524193）。下列為待開發／驗收，不能因前一輪 mock browser 或 CI 通過而關閉。沿用地圖優先與三模式；不恢復巡花、Liberty、多路線引擎，不引入額外地圖供應商、複雜 UI 或未經核准的 APK 發佈。

@@ -25,7 +25,10 @@ data class LanReply(
     val status: Int,
     val body: String,
     val contentType: String = "application/json; charset=utf-8",
-)
+    val binaryBody: ByteArray? = null,
+) {
+    fun payloadBytes(): ByteArray = binaryBody ?: body.toByteArray(StandardCharsets.UTF_8)
+}
 
 /**
  * Tiny bounded, single-request HTTP/1.1 server for an explicitly enabled private Wi-Fi IP.
@@ -151,7 +154,7 @@ class LanHttpServer(
     }
 
     private fun write(peer: Socket, reply: LanReply) {
-        val payload = reply.body.toByteArray(StandardCharsets.UTF_8)
+        val payload = reply.payloadBytes()
         val statusText = when (reply.status) {
             200 -> "OK"
             202 -> "Accepted"

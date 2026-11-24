@@ -19,6 +19,8 @@ const csp = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inl
 const assets = {
   '/': ['index.html', 'text/html; charset=utf-8'],
   '/controller.js': ['controller.js', 'application/javascript; charset=utf-8'],
+  '/map-ui-policy.mjs': ['map-ui-policy.mjs', 'application/javascript; charset=utf-8'],
+  '/bright-dark-palette.json': ['bright-dark-palette.json', 'application/json; charset=utf-8'],
   '/vendor/maplibre-gl.mjs': ['vendor/maplibre-gl/maplibre-gl.mjs', 'application/javascript; charset=utf-8'],
   '/vendor/maplibre-gl-worker.mjs': ['vendor/maplibre-gl/maplibre-gl-worker.mjs', 'application/javascript; charset=utf-8'],
   '/vendor/maplibre-gl.css': ['vendor/maplibre-gl/maplibre-gl.css', 'text/css; charset=utf-8'],
@@ -27,6 +29,8 @@ let state = {
   position: {lat:25.040815,lon:121.463424},
   origin: {lat:25.040815,lon:121.463424},
   mockActive: true,
+  sessionExpiresInSeconds:7200,
+  appVersionDisplay:'本機預覽',
   realGpsState:'locked',
   realLocationSharingApproved:false,
   realPosition:null,
@@ -47,6 +51,13 @@ let previewPlaces=[{
   id:1,name:"東京車站（合成資料）",position:{lat:35.681236,lon:139.767125},
   countryCode:"JP",countryName:"日本",city:"東京",
   timeZoneId:"Asia/Tokyo",createdAtMillis:1795180000000
+},{
+  id:2,name:"台北（合成資料）",position:{lat:25.033,lon:121.5654},
+  countryCode:"TW",countryName:"台灣",city:"台北",
+  timeZoneId:"Asia/Taipei",createdAtMillis:1795180000000
+},{
+  id:3,name:"舊收藏（合成資料）",position:{lat:40.7,lon:-74.0},
+  timeZoneId:null,createdAtMillis:1795180000000
 }];
 const readBody=async req=>{
   let body='';for await(const chunk of req)body+=chunk;
@@ -61,7 +72,7 @@ const send=(res,body,status=200,type='application/json; charset=utf-8')=>{
 };
 createServer(async (req,res)=>{
   const url=(req.url||'').split('?')[0];
-  const item=assets[url];
+  const item=/^\/flags\/[a-z]{2}\.png$/.test(url) ? [url.slice(1), 'image/png'] : assets[url];
   if(req.method==='GET'&&item){
     try{send(res,await readFile(join(root,item[0])),200,item[1]);}
     catch(error){send(res,{error:'Preview asset missing'},404);}
@@ -71,7 +82,7 @@ createServer(async (req,res)=>{
     send(res,{pendingId:'preview-only-pair'},202);return;
   }
   if(req.method==='GET'&&url==='/api/pair/status'){
-    send(res,{token:'preview-only-token'},200);return;
+    send(res,{token:'preview-only-token',expiresInSeconds:7200},200);return;
   }
   if(req.method==='GET'&&url==='/api/state'){
     if(state.realPosition?.expiresAtMillis < Date.now()){

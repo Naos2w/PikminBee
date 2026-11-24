@@ -8,31 +8,29 @@ class SavedPlaceTimePolicyTest {
     private val winter = Instant.parse("2026-11-22T12:00:00Z").toEpochMilli()
     private val summer = Instant.parse("2026-07-22T12:00:00Z").toEpochMilli()
 
-    @Test fun comparesVerifiedRealZoneRatherThanHardcodedTaiwan() {
-        assertEquals("比目前所在地快 1 小時",
-            SavedPlaceTimePolicy.differenceLabel("Asia/Tokyo","Asia/Taipei",winter))
-        assertEquals("比目前所在地慢 1 小時",
-            SavedPlaceTimePolicy.differenceLabel("Asia/Taipei","Asia/Tokyo",winter))
-        assertEquals("與目前所在地相同",
-            SavedPlaceTimePolicy.differenceLabel("Asia/Taipei","Asia/Taipei",winter))
+    @Test fun destinationClocksDoNotNeedRealGps() {
+        assertEquals("20:00", SavedPlaceTimePolicy.localClock("Asia/Taipei", winter))
+        assertEquals("21:00", SavedPlaceTimePolicy.localClock("Asia/Tokyo", winter))
+        assertEquals("17:45", SavedPlaceTimePolicy.localClock("Asia/Kathmandu", winter))
+        assertEquals("00:00", SavedPlaceTimePolicy.localClock("UTC",
+            Instant.parse("2026-11-22T00:00:00Z").toEpochMilli()))
     }
 
-    @Test fun daylightSavingDifferencesUseCurrentInstant() {
-        assertEquals("比目前所在地慢 5 小時",
-            SavedPlaceTimePolicy.differenceLabel("America/New_York","Europe/London",winter))
-        assertEquals("比目前所在地慢 5 小時",
-            SavedPlaceTimePolicy.differenceLabel("America/New_York","Europe/London",summer))
-        assertEquals("比目前所在地慢 13 小時",
-            SavedPlaceTimePolicy.differenceLabel("America/New_York","Asia/Taipei",winter))
-        assertEquals("比目前所在地慢 12 小時",
-            SavedPlaceTimePolicy.differenceLabel("America/New_York","Asia/Taipei",summer))
+    @Test fun localClockRespectsDaylightSaving() {
+        assertEquals("07:00", SavedPlaceTimePolicy.localClock("America/New_York", winter))
+        assertEquals("08:00", SavedPlaceTimePolicy.localClock("America/New_York", summer))
     }
 
-    @Test fun refusesUnknownZoneOrMissingRealReference() {
-        assertNull(SavedPlaceTimePolicy.localClock("invalid/City",winter))
-        assertNull(SavedPlaceTimePolicy.differenceLabel("Asia/Tokyo",null,winter))
-        assertNull(SavedPlaceTimePolicy.differenceLabel(null,"Asia/Taipei",winter))
-        assertNull(SavedPlaceTimePolicy.differenceLabel("invalid/City","Asia/Taipei",winter))
-        assertEquals("🇯🇵",SavedPlaceTimePolicy.flagEmoji("jp"))
+    @Test fun unknownZonesRemainUnknown() {
+        for (zone in listOf(null, "", "invalid/City", "+02:00"))
+            assertNull(SavedPlaceTimePolicy.localClock(zone, winter))
+    }
+
+    @Test fun flagPathsAreLocalAndStrictlyBounded() {
+        assertEquals("lan/flags/jp.png", SavedPlaceTimePolicy.flagAssetPath("jp"))
+        assertEquals("lan/flags/tw.png", SavedPlaceTimePolicy.flagAssetPath("TW"))
+        assertEquals("lan/flags/gb.png", SavedPlaceTimePolicy.flagAssetPath(" GB "))
+        for (code in listOf(null, "", "TWN", "../tw", "/jp.png", "1A", "東京"))
+            assertNull(SavedPlaceTimePolicy.flagAssetPath(code))
     }
 }

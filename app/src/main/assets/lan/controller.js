@@ -1,4 +1,4 @@
-import { BRIGHT_STYLE_URL, samePosition, currentPosition, createCameraFocus, visibleMapPadding } from "/map-ui-policy.mjs";
+import { BRIGHT_STYLE_URL, samePosition, currentPosition, createCameraFocus, visibleMapPadding, countryFlagPath, destinationTime } from "/map-ui-policy.mjs";
 const $ = id => document.getElementById(id);
 let token = null;
 let sessionDeadlineMs = 0;
@@ -1205,57 +1205,25 @@ $("follow").addEventListener("click", async () => {
   }
 });
 
-function zoneParts(zone, date = new Date()) {
-  if (typeof zone !== "string" || !zone || zone.length > 90) return null;
-  try {
-    const format = new Intl.DateTimeFormat("en-GB", {
-      timeZone:zone, year:"numeric", month:"2-digit", day:"2-digit",
-      hour:"2-digit", minute:"2-digit", hourCycle:"h23"
-    });
-    const values = Object.fromEntries(format.formatToParts(date)
-      .filter(part=>part.type!=="literal").map(part=>[part.type,Number(part.value)]));
-    if (!["year","month","day","hour","minute"].every(key=>Number.isFinite(values[key])))
-      return null;
-    return {
-      clock:String(values.hour).padStart(2,"0")+":"+String(values.minute).padStart(2,"0"),
-      // Same physical instant, calculated in this zone; offset can include DST.
-      offsetMinutes:Math.round((Date.UTC(values.year,values.month-1,values.day,
-        values.hour,values.minute)-date.getTime())/60000)
-    };
-  } catch (_) { return null; }
-}
-function destinationTime(zone, realZone) {
-  const date = new Date();
-  const destination = zoneParts(zone, date);
-  if (!destination) return "當地時間待確認 · 時差待確認";
-  // A previously VERIFIED physical fix remains the comparison reference even
-  // after mock GPS starts; never infer it from browser/device/Taiwan time.
-  // The server enforces 30-minute TTL, and the browser checks it again to
-  // avoid showing a stale comparison when polling has stopped.
-  const reference = Number.isFinite(latest?.realTimeZoneExpiresAtMillis) &&
-    date.getTime() <= latest.realTimeZoneExpiresAtMillis ?
-      zoneParts(realZone,date) : null;
-  if (!reference) return "當地 "+destination.clock+" · 時差待確認";
-  const delta = destination.offsetMinutes-reference.offsetMinutes;
-  if (!delta) return "當地 "+destination.clock+" · 與目前所在地同時區";
-  const a=Math.abs(delta),hours=Math.floor(a/60),mins=a%60;
-  const duration=(hours?hours+" 小時 ":"")+(mins?mins+" 分鐘":"");
-  return "當地 "+destination.clock+" · 比目前所在地"+(delta>0?"快 ":"慢 ")+duration.trim();
-}
 function labelledText(textValue, tag = "small") {
   const element = document.createElement(tag);
   element.textContent = textValue;
   return element;
 }
 function countryFlag(countryCode) {
-  const code = String(countryCode || "").toUpperCase();
-  return /^[A-Z]{2}$/.test(code) ? String.fromCodePoint(...[...code]
-    .map(ch => 0x1F1E6 + ch.charCodeAt(0) - 65)) : "";
+  const path = countryFlagPath(countryCode);
+  if (!path) return null;
+  const image = document.createElement("img");
+  image.className = "saved-country-flag";
+  image.alt = ""; // The adjacent country name/code is the accessible label.
+  image.addEventListener("error",()=>image.remove(),{once:true});
+  image.src = path;
+  return image;
 }
 function refreshSavedClocks() {
   if (!$("saved-dialog").open) return;
   document.querySelectorAll(".saved-clock").forEach(clock => {
-    clock.textContent=destinationTime(clock.dataset.timeZone||"",latest?.realTimeZoneId);
+    clock.textContent=destinationTime(clock.dataset.timeZone||"");
   });
 }
 function renderSaved() {
@@ -1280,16 +1248,11 @@ function renderSaved() {
     const flag = countryFlag(place.countryCode);
     const countryRow = document.createElement("div");
     countryRow.className = "saved-country-row";
-    if (flag) {
-      const flagIcon = labelledText(flag, "span");
-      flagIcon.className = "saved-country-flag";
-      flagIcon.setAttribute("aria-label", place.countryName || place.countryCode);
-      countryRow.append(flagIcon);
-    }
+    if (flag) countryRow.append(flag);
     countryRow.append(labelledText([place.countryName||place.countryCode,place.city]
       .filter(Boolean).join(" · ") || "國家／城市待確認，可補齊舊收藏"));
     card.append(countryRow);
-    const clock=labelledText(destinationTime(place.timeZoneId,latest?.realTimeZoneId));
+    const clock=labelledText(destinationTime(place.timeZoneId));
     clock.className="saved-clock";
     clock.dataset.timeZone=place.timeZoneId||"";
     card.append(clock);
@@ -1399,7 +1362,7 @@ $("saved-add-button").addEventListener("click",async()=>{
       if(generation!==savedLookupGeneration||!$("saved-dialog").open) return;
       pendingSavedPoint=null;savedLookupId=null;
       await refreshSaved();
-      const placeDetails=[countryFlag(result.countryCode),result.countryName,
+      const placeDetails=[result.countryName || result.countryCode,
         result.city].filter(Boolean).join(" · ");
       $("saved-enrich-status").textContent = name===fallback
         ? "已用座標名稱收藏；可用「補齊舊收藏資訊」再查地名"

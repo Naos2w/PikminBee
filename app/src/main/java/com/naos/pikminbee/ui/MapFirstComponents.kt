@@ -219,11 +219,24 @@ fun NaosActionIcon(
                 drawLine(tint, pt(20f, 11f), pt(14f, 11f), pen, StrokeCap.Round)
             }
             NaosActionGlyph.EDIT -> {
-                drawLine(tint, pt(5f, 17f), pt(6f, 21f), pen, StrokeCap.Round)
-                drawLine(tint, pt(6f, 21f), pt(10f, 20f), pen, StrokeCap.Round)
-                drawLine(tint, pt(6f, 17f), pt(17f, 6f), pen, StrokeCap.Round)
-                drawLine(tint, pt(10f, 20f), pt(21f, 9f), pen, StrokeCap.Round)
-                drawLine(tint, pt(17f, 6f), pt(21f, 9f), pen, StrokeCap.Round)
+                // Conventional diagonal pencil silhouette, with separate cap.
+                val body = Path().apply {
+                    moveTo(4f * scale, 16.5f * scale)
+                    lineTo(4f * scale, 20f * scale)
+                    lineTo(7.5f * scale, 20f * scale)
+                    lineTo(18f * scale, 9.5f * scale)
+                    lineTo(14.5f * scale, 6f * scale)
+                    close()
+                }
+                val cap = Path().apply {
+                    moveTo(15.8f * scale, 4.7f * scale)
+                    lineTo(17.5f * scale, 3f * scale)
+                    lineTo(21f * scale, 6.5f * scale)
+                    lineTo(19.3f * scale, 8.2f * scale)
+                    close()
+                }
+                drawPath(body, tint)
+                drawPath(cap, tint)
             }
             NaosActionGlyph.DONE -> {
                 drawLine(tint, pt(4f, 12f), pt(10f, 18f), pen*1.3f, StrokeCap.Round)
@@ -404,7 +417,7 @@ fun CoordinateTopBar(
                     },
                     modifier = Modifier.size(42.dp).semantics {
                         contentDescription = if (showingEditor)
-                            "完成座標編輯並收起鍵盤" else "手動編輯座標"
+                            "完成座標編輯並收起鍵盤" else "編輯經緯度"
                     },
                 ) {
                     NaosActionIcon(
