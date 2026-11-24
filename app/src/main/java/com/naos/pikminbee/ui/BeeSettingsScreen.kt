@@ -19,11 +19,13 @@ import androidx.compose.material3.Switch
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.text.selection.SelectionContainer
+import com.naos.pikminbee.data.InstalledAppVersion
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.naos.pikminbee.BuildConfig
-import com.naos.pikminbee.data.FreeMapStyle
 import com.naos.pikminbee.data.MapAppearance
 import com.naos.pikminbee.data.MapBasemapPolicy
 import com.naos.pikminbee.data.MapProvider
@@ -36,7 +38,6 @@ import com.naos.pikminbee.location.LocationCheckpoint
 fun BeeSettingsScreen(
     dark: Boolean,
     provider: MapProvider,
-    freeMapStyle: FreeMapStyle,
     appearance: MapAppearance,
     defaultSpeed: WalkSpeedPreset,
     virtualStrideMetres: Double,
@@ -46,7 +47,6 @@ fun BeeSettingsScreen(
     showWifiPanel: Boolean,
     checkpoint: LocationCheckpoint?,
     onProvider: (MapProvider) -> Unit,
-    onFreeMapStyle: (FreeMapStyle) -> Unit,
     onAppearance: (MapAppearance) -> Unit,
     onDefaultSpeed: (WalkSpeedPreset) -> Unit,
     onVirtualStrideMetres: (Double) -> Unit,
@@ -102,21 +102,7 @@ fun BeeSettingsScreen(
                     }
                 }
                 if (provider == MapProvider.OPEN_FREE_MAP) {
-                    Text("地圖樣式", fontSize = 12.sp)
-                    androidx.compose.foundation.layout.FlowRow(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(7.dp),
-                        verticalArrangement = Arrangement.spacedBy(0.dp),
-                        maxItemsInEachRow = 3,
-                    ) {
-                        FreeMapStyle.entries.forEach { option ->
-                            FilterChip(
-                                selected = freeMapStyle == option,
-                                onClick = { onFreeMapStyle(option) },
-                                label = { Text(option.label, fontSize = 12.sp) },
-                            )
-                        }
-                    }
+                    Text("Bright 地圖 · 隨介面主題切換明暗", fontSize = 12.sp, color = muted)
                 }
                 Text("介面外觀", color = foreground, fontSize = 12.sp)
                 androidx.compose.foundation.layout.FlowRow(
@@ -255,5 +241,22 @@ fun BeeSettingsScreen(
             }
         }
         HealthConnectSettings(dark = dark, onMessage = onMessage)
+        val installed = InstalledAppVersion.read(LocalContext.current)
+        androidx.compose.material3.Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(22.dp),
+            color = palette.surface,
+        ) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("關於 PikminBee", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+                SelectionContainer {
+                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text(installed.displayName, color = foreground, fontSize = 16.sp)
+                        Text("版本碼：${installed.code?.toString() ?: "待確認"}",
+                            color = muted, fontSize = 12.sp)
+                    }
+                }
+            }
+        }
     }
 }

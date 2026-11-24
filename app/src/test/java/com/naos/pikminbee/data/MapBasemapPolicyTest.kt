@@ -22,20 +22,14 @@ class MapBasemapPolicyTest {
         ))
     }
 
-    @Test fun automaticStylesFollowAppearanceAndExplicitStylesAreIndependent() {
-        assertEquals("https://tiles.openfreemap.org/styles/positron",
-            MapBasemapPolicy.openFreeMapStyleUrl(FreeMapStyle.AUTO, false))
-        assertFalse(FreeMapStyle.entries.any { it.name == "LIBERTY" })
-        assertEquals(FreeMapStyle.AUTO, MapBasemapPolicy.fromStored("LIBERTY"))
-        assertEquals(FreeMapStyle.AUTO, MapBasemapPolicy.fromStored(null))
-        assertEquals(FreeMapStyle.POSITRON, MapBasemapPolicy.fromStored("POSITRON"))
-        assertEquals("https://tiles.openfreemap.org/styles/dark",
-            MapBasemapPolicy.openFreeMapStyleUrl(FreeMapStyle.AUTO, true))
-        assertEquals("https://tiles.openfreemap.org/styles/bright",
-            MapBasemapPolicy.openFreeMapStyleUrl(FreeMapStyle.BRIGHT, true))
-        assertEquals("https://tiles.openfreemap.org/styles/positron",
-            MapBasemapPolicy.openFreeMapStyleUrl(FreeMapStyle.POSITRON, false))
-        assertEquals("https://tiles.openfreemap.org/styles/dark",
-            MapBasemapPolicy.openFreeMapStyleUrl(FreeMapStyle.DARK, false))
+    @Test fun brightIsTheOnlyBasemapForBothThemesAndLegacyPreferences() {
+        assertEquals(listOf(FreeMapStyle.BRIGHT), FreeMapStyle.entries.toList())
+        listOf(null, "AUTO", "LIBERTY", "POSITRON", "DARK", "BRIGHT", "invalid").forEach {
+            assertEquals(FreeMapStyle.BRIGHT, MapBasemapPolicy.fromStored(it))
+        }
+        listOf(true,false).forEach { dark ->
+            assertEquals("https://tiles.openfreemap.org/styles/bright",
+                MapBasemapPolicy.openFreeMapStyleUrl(FreeMapStyle.BRIGHT,dark))
+        }
     }
 }
