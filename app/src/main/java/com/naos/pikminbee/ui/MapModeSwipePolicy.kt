@@ -7,8 +7,8 @@ import kotlin.math.abs
  * never on the interactive map surface. A vertical scroll does not change tabs.
  */
 object MapModeSwipePolicy {
-    // The fourth dock action is tap-only Settings, not a swipeable mode.
-    const val TAB_COUNT = 3
+    // Settings is tap-only; only Teleport and Route are swipeable.
+    const val TAB_COUNT = 2
     const val MIN_SWIPE_DP = 72f
 
     fun target(currentIndex: Int, horizontalDistancePx: Float, thresholdPx: Float): Int? {

@@ -30,8 +30,6 @@ import android.widget.ImageView
 import android.widget.Toast
 import android.widget.ScrollView
 import com.naos.pikminbee.health.EstimatedWalkStatus
-import com.naos.pikminbee.vision.BloomVisionState
-import com.naos.pikminbee.vision.BloomCaptureService
 import android.widget.TextView
 import com.naos.pikminbee.data.AppPreferences
 import com.naos.pikminbee.data.PreparedRouteState
@@ -61,13 +59,11 @@ class FloatingControls(
     private val openMap: () -> Unit,
     private val chooseVirtualPoint: () -> Unit,
     private val onSpeedSelected: (WalkSpeedPreset) -> Unit,
-    private val onFlowerVision: () -> Unit,
 ) {
     companion object {
         const val PAUSE = "pause"
         const val RESUME = "resume"
         const val STOP_WALK = "stop_walk"
-        const val START_FLOWERS = "start_flowers"
         const val RESTORE_REAL = "restore_real"
         const val RESTORE_VIRTUAL = "restore_virtual"
         const val HIDE = "hide"
@@ -321,11 +317,6 @@ class FloatingControls(
         }
     }
 
-    private fun onStartRouteOrFlowers(mode: WalkMode) {
-        if (mode == WalkMode.ROUTE) onStartRoute()
-        else sendAction(START_FLOWERS)
-    }
-
     /** Main and overlay use the same prepared road, never an unreviewed draft. */
     private fun performQuickAction() {
         when (OverlayQuickPolicy.primary(lastPhase)) {
@@ -335,15 +326,9 @@ class FloatingControls(
                 val prefs = AppPreferences(context)
                 val routeReady = PreparedRouteState.route.value?.stops ==
                     prefs.routeDraft() && prefs.routeDraft().isNotEmpty()
-                val flowerReady = PreparedRouteState.flowers.value?.stops ==
-                    prefs.flowerDraft() && prefs.flowerDraft().isNotEmpty()
-                val requested = when {
-                    lastMode == WalkMode.ROUTE && routeReady -> WalkMode.ROUTE
-                    lastMode == WalkMode.FLOWERS && flowerReady -> WalkMode.FLOWERS
-                    routeReady && !flowerReady -> WalkMode.ROUTE
-                    flowerReady && !routeReady -> WalkMode.FLOWERS
-                    else -> null
-                }
+                // The overlay no longer starts new flower routes. Keep legacy
+                // running walks controllable with Pause / Resume / Stop only.
+                val requested = if (routeReady) WalkMode.ROUTE else null
                 val preview = requested?.let { PreparedRouteState.get(it) }
                 when {
                     requested == null -> {
@@ -356,7 +341,7 @@ class FloatingControls(
                             Toast.LENGTH_SHORT).show()
                         openMap()
                     }
-                    else -> onStartRouteOrFlowers(requested)
+                    else -> onStartRoute()
                 }
             }
         }
@@ -514,9 +499,6 @@ class FloatingControls(
             else "尚無上次虛擬位置，點選以開啟地圖選點")
         // Both icons stay tappable: without a saved virtual point we guide the
         // user to choose one instead of swallowing touches on a disabled view.
-        val capturing = BloomVisionState.state.value.phase == BloomVisionState.Phase.CAPTURING
-        iconUpdate(OverlayQuickAction.FLOWER_VISION, OverlayGlyph.FLOWER,
-            if (capturing) "停止畫面偵測花" else "開啟畫面偵測花並取得系統授權")
         iconUpdate(OverlayQuickAction.SPEED, OverlayGlyph.SPEED,
             "切換行走速度，目前 ${currentSpeed.kilometresPerHour} km/h")
         iconUpdate(OverlayQuickAction.MAP, OverlayGlyph.MAP, "開啟 PikminBee 地圖")
@@ -650,8 +632,6 @@ class FloatingControls(
                     Triple(which, OverlayGlyph.REAL, "還原真實定位")
                 OverlayQuickAction.VIRTUAL_GPS ->
                     Triple(which, OverlayGlyph.VIRTUAL, "恢復虛擬定位")
-                OverlayQuickAction.FLOWER_VISION ->
-                    Triple(which, OverlayGlyph.FLOWER, "畫面偵測花")
                 OverlayQuickAction.SPEED ->
                     Triple(which, OverlayGlyph.SPEED, "切換三種速度預設；自訂與區間速度請在主畫面設定")
                 OverlayQuickAction.MAP ->
@@ -669,12 +649,6 @@ class FloatingControls(
                         OverlayQuickAction.STOP -> sendAction(STOP_WALK)
                         OverlayQuickAction.REAL_GPS -> clickGps(OverlayQuickAction.REAL_GPS)
                         OverlayQuickAction.VIRTUAL_GPS -> clickGps(OverlayQuickAction.VIRTUAL_GPS)
-                        OverlayQuickAction.FLOWER_VISION -> {
-                            if (BloomVisionState.state.value.phase ==
-                                BloomVisionState.Phase.CAPTURING) {
-                                context.startService(BloomCaptureService.stopIntent(context))
-                            } else onFlowerVision()
-                        }
                         OverlayQuickAction.SPEED -> {
                             val next = OverlayQuickPolicy.nextSpeed(currentSpeed)
                             currentSpeed = next

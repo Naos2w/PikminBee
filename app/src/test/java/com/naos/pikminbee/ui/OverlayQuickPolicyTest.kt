@@ -15,18 +15,19 @@ class OverlayQuickPolicyTest {
         assertEquals(OverlayPrimaryState.START, OverlayQuickPolicy.primary(WalkPhase.PARKED))
     }
 
-    @Test fun originalFloatingPanelKeepsItsOwnTwoRows() {
+    @Test fun overlayDoesNotOfferRetiredFlowerVisionAction() {
         assertEquals(
             listOf(OverlayQuickAction.PRIMARY, OverlayQuickAction.STOP,
                 OverlayQuickAction.REAL_GPS, OverlayQuickAction.VIRTUAL_GPS),
             OverlayQuickPolicy.topRow,
         )
         assertEquals(
-            listOf(OverlayQuickAction.FLOWER_VISION, OverlayQuickAction.SPEED,
-                OverlayQuickAction.MAP, OverlayQuickAction.CLOSE),
+            listOf(OverlayQuickAction.SPEED, OverlayQuickAction.MAP,
+                OverlayQuickAction.CLOSE),
             OverlayQuickPolicy.bottomRow,
         )
-        assertEquals(8, (OverlayQuickPolicy.topRow + OverlayQuickPolicy.bottomRow).distinct().size)
+        assertFalse(OverlayQuickAction.entries.any { it.name == "FLOWER_VISION" })
+        assertEquals(7, (OverlayQuickPolicy.topRow + OverlayQuickPolicy.bottomRow).distinct().size)
     }
 
     @Test fun gpsModeIndicatorReflectsActualMockProviderNotLastClick() {

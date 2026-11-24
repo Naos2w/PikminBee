@@ -1,5 +1,7 @@
 const $ = id => document.getElementById(id);
 let token = null;
+let sessionDeadlineMs = 0;
+let renewingSession = false;
 let mode = "TELEPORT";
 let settingsOpen = false;
 let savedRecords = null;
@@ -9,6 +11,7 @@ let current = null;
 let latest = null;
 let speedEditing = false;
 let connected = false;
+let remoteLinkHealthy = true;
 let refreshing = false;
 let map = null, maplibre = null;
 let mapStyleReady = false, mapWatchdog = null, mapResizeObserver = null;
@@ -17,15 +20,34 @@ let positionMarker = null, realMarker = null, originMarker = null, selectionMark
 let routeMarkers = [];
 let lastStopsKey = "", lastLineKey = "", lastDraftKey = "", lastOrderKey = "";
 let focusRealWhenReady = false;
-const loops = {ROUTE: false, FLOWERS: true};
+const loops = {ROUTE: false};
 const setMessage = value => { $("message").textContent = value; };
 const setPairMessage = value => { $("pairmessage").textContent = value; };
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 
+function updateSessionExpiry() {
+  const visible = !!token;
+  $("session-panel").classList.toggle("hidden", !visible);
+  if (!visible) return;
+  const remaining = Math.max(0, Math.ceil((sessionDeadlineMs - Date.now()) / 1000));
+  const hours = String(Math.floor(remaining / 3600)).padStart(2, "0");
+  const minutes = String(Math.floor(remaining % 3600 / 60)).padStart(2, "0");
+  const seconds = String(remaining % 60).padStart(2, "0");
+  $("session-expiry").textContent = remaining === 0
+    ? "控制授權時間已到，請重新配對"
+    : "控制授權剩餘 " + hours + ":" + minutes + ":" + seconds +
+      (remaining <= 600 ? " · 即將到期，請在手機核准續期" : "");
+  $("session-panel").classList.toggle("is-urgent", remaining <= 600);
+  $("session-renew").disabled = renewingSession || remaining <= 0;
+  $("session-renew").textContent = renewingSession
+    ? "等待手機核准…" : "從手機核准延長 2 小時";
+}
+
 async function call(path, method = "GET", body = null, useToken = true) {
   const headers = {};
+  const requestToken = useToken ? token : null;
   if (method === "POST") headers["Content-Type"] = "application/json";
-  if (useToken && token) headers["X-PikminBee-Token"] = token;
+  if (useToken && requestToken) headers["X-PikminBee-Token"] = requestToken;
   let response;
   try {
     response = await fetch(path, {
@@ -35,8 +57,17 @@ async function call(path, method = "GET", body = null, useToken = true) {
   } catch (_) { throw Error("無法連接手機，請確認私人 Wi-Fi 與網頁控制服務"); }
   const data = await response.json().catch(() => ({}));
   if (response.status === 401 && useToken) {
+    // An old in-flight poll may finish after a phone-approved token rotation.
+    // Never tear down the newer session because an older token was rejected.
+    if (requestToken !== token || (renewingSession && path === "/api/state"))
+      throw Error("等待續期完成，忽略舊狀態");
     token = null; connected = false;
+    sessionDeadlineMs = 0;
+    remoteLinkHealthy = false;
     latest = null; // clear any in-memory sensitive physical snapshot on revocation
+    current = null;
+    updateSessionExpiry();
+    updateCompactWalkControls();
     document.body.classList.remove("remote-active");
     $("controls").classList.remove("is-visible");
     $("pairbox").style.display = "block";
@@ -74,7 +105,9 @@ $("connect").addEventListener("click", async () => {
       if (answer.token) { approved = answer; break; }
     }
     if (!approved?.token) throw Error("等待手機核准逾時");
-    token = approved.token; connected = true;
+    token = approved.token; connected = true; remoteLinkHealthy = true;
+    sessionDeadlineMs = Date.now() + Math.max(0, approved.expiresInSeconds || 0) * 1000;
+    updateSessionExpiry();
     document.body.classList.add("remote-active");
     applyResponsiveLayout();
     $("pin").value = "";
@@ -89,6 +122,48 @@ $("connect").addEventListener("click", async () => {
 });
 $("pin").addEventListener("keydown", event => {
   if (event.key === "Enter") $("connect").click();
+});
+
+$("session-renew").addEventListener("click", async () => {
+  if (!token || renewingSession || sessionDeadlineMs <= Date.now()) return;
+  renewingSession = true;
+  updateSessionExpiry();
+  try {
+    const requestedToken = token;
+    const pending = await call("/api/session/renew", "POST", {});
+    if (!pending.pendingId) throw Error("無法建立續期要求");
+    setMessage("續期要求已送往手機，請在 PikminBee 設定中點「核准續期」");
+    for (let attempt = 0; attempt < 42; attempt++) {
+      await pause(2000);
+      if (token !== requestedToken) throw Error("工作階段已更換，請重新確認");
+      const result = await call("/api/session/renew/status", "POST",
+        {pendingId:pending.pendingId});
+      if (!result.token) continue;
+      token = result.token;
+      sessionDeadlineMs = Date.now() + Math.max(0, result.expiresInSeconds || 0) * 1000;
+      // A renewed token must not inherit the previous precise GPS sharing grant.
+      latest = null;
+      current = null;
+      connected = true;
+      remoteLinkHealthy = true;
+      updateCompactWalkControls();
+      document.body.classList.add("remote-active");
+      $("pairbox").style.display = "none";
+      $("controls").classList.add("is-visible");
+      $("connection").textContent = "已連結手機";
+      renderMap();
+      updateSessionExpiry();
+      await refresh();
+      setMessage("手機已核准續期，控制權限再延長 2 小時；真實 GPS 分享需重新授權");
+      return;
+    }
+    throw Error("手機核准逾時，請重新要求續期");
+  } catch (error) {
+    setMessage(error.message || "續期失敗，請使用原工作階段或重新配對");
+  } finally {
+    renewingSession = false;
+    updateSessionExpiry();
+  }
 });
 
 function showCoordinate(point) {
@@ -128,7 +203,7 @@ function readCoordinate() {
 
 function updateModeView() {
   for (const [id,value] of [
-    ["mode-teleport","TELEPORT"],["mode-route","ROUTE"],["mode-flowers","FLOWERS"]
+    ["mode-teleport","TELEPORT"],["mode-route","ROUTE"]
   ]) {
     const tab = $(id);
     const active = !settingsOpen && mode === value;
@@ -139,13 +214,10 @@ function updateModeView() {
   $("mode-settings").setAttribute("aria-pressed", settingsOpen ? "true" : "false");
   $("location-panel").classList.toggle("hidden", settingsOpen);
   $("teleport-panel").classList.toggle("hidden", settingsOpen || mode !== "TELEPORT");
-  $("route-panel").classList.toggle("hidden", settingsOpen ||
-    (mode !== "ROUTE" && mode !== "FLOWERS"));
+  $("route-panel").classList.toggle("hidden", settingsOpen || mode !== "ROUTE");
   $("web-settings").classList.toggle("hidden", !settingsOpen);
-  $("flower-guide").classList.toggle("hidden", settingsOpen || mode !== "FLOWERS");
-  $("flower-catalogue").classList.toggle("hidden", settingsOpen || mode !== "FLOWERS");
   $("mode-panel-title").textContent = settingsOpen ? "設定" :
-    ({TELEPORT:"瞬移",ROUTE:"路徑",FLOWERS:"尋花"}[mode] || "瞬移");
+    ({TELEPORT:"瞬移",ROUTE:"路徑"}[mode] || "瞬移");
 }
 // V2: the actual map canvas fills the viewport; these controls only change
 // overlays, not the map's view, GPS provider or current route.
@@ -167,7 +239,7 @@ function setSheetState(next) {
   $("control-panel").dataset.sheet = next;
   $("sheet-handle").setAttribute("aria-expanded", String(next !== "collapsed"));
   $("sheet-summary").textContent = (settingsOpen ? "設定" :
-    ({TELEPORT:"瞬移",ROUTE:"路徑",FLOWERS:"尋花"}[mode] || "瞬移")) +
+    ({TELEPORT:"瞬移",ROUTE:"路徑"}[mode] || "瞬移")) +
     (next === "collapsed" ? " · 向上展開" : " · 向下收合");
   updateCompactWalkControls();
   requestAnimationFrame(() => map?.resize());
@@ -196,12 +268,12 @@ function applyResponsiveLayout() {
   requestAnimationFrame(() => map?.resize());
 }
 function selectMode(next, userAction = true) {
-  if (!["TELEPORT","ROUTE","FLOWERS"].includes(next)) return;
+  if (!["TELEPORT","ROUTE"].includes(next)) return;
   const wasCurrent = !settingsOpen && mode === next;
   mode = next;
   settingsOpen = false;
   updateModeView();
-  if (mode === "ROUTE" || mode === "FLOWERS") $("loop").value = String(loops[mode]);
+  if (mode === "ROUTE") $("loop").value = String(loops.ROUTE);
   $("confirm-snap").checked = false;
   updateRouteControls();
   renderMap();
@@ -212,7 +284,7 @@ function selectMode(next, userAction = true) {
   }
 }
 for (const [id,value] of [
-  ["mode-teleport","TELEPORT"],["mode-route","ROUTE"],["mode-flowers","FLOWERS"]
+  ["mode-teleport","TELEPORT"],["mode-route","ROUTE"]
 ]) $(id).addEventListener("click", () => selectMode(value));
 $("mode-settings").addEventListener("click", () => {
   const wasCurrent = settingsOpen;
@@ -249,9 +321,9 @@ $("sheet-handle").addEventListener("click", () => {
 window.addEventListener("resize", applyResponsiveLayout, {passive:true});
 selectMode("TELEPORT", false);
 applyResponsiveLayout();
-// Horizontal swipe switches only the three functional modes, never Settings or the map.
+// Horizontal swipe switches only Teleport and Route, never Settings or the map.
 const swipeArea = $("mode-content");
-const modeOrder = ["TELEPORT", "ROUTE", "FLOWERS"];
+const modeOrder = ["TELEPORT", "ROUTE"];
 let swipeStart = null;
 swipeArea.addEventListener("touchstart", event => {
   swipeStart = null;
@@ -271,69 +343,11 @@ swipeArea.addEventListener("touchend", event => {
   if (next >= 0 && next < modeOrder.length) selectMode(modeOrder[next]);
 }, {passive:true});
 $("loop").addEventListener("change", () => {
-  if (mode === "ROUTE" || mode === "FLOWERS") loops[mode] = $("loop").value === "true";
+  if (mode === "ROUTE") loops.ROUTE = $("loop").value === "true";
   $("confirm-snap").checked = false;
   updateRouteControls();
 });
 $("confirm-snap").addEventListener("change", updateRouteControls);
-
-async function searchFlowers() {
-  if (!token || mode !== "FLOWERS") return;
-  const origin = chosen || latest?.origin || latest?.realPosition || latest?.position;
-  const list = $("flower-list");
-  if (!origin) {
-    $("flower-status").textContent="請先在地圖選擇搜尋中心或指定起點";
-    return;
-  }
-  $("flower-search").disabled=true;
-  $("flower-status").textContent="正在查詢手機已記錄的花點（非官方即時資料）…";
-  list.replaceChildren();
-  try {
-    const response=await call("/api/flowers/nearby","POST",{
-      lat:origin.lat, lon:origin.lon,
-      radiusMetres:Number($("flower-radius").value),
-      onlyChecked:$("flower-filter").value==="checked"
-    });
-    const matches=response.flowers||[];
-    $("flower-status").textContent="附近已記錄 "+matches.length+
-      " 個花點 · 距離為直線距離，非道路最短路徑";
-    if(!matches.length){
-      const none=document.createElement("small");none.className="muted";
-      none.textContent="此範圍沒有符合條件的花點；可先在 Android 記錄或匯入";
-      list.append(none);
-    }
-    for(const flower of matches){
-      const row=document.createElement("article");row.className="flower-item";
-      const info=document.createElement("div");info.className="stop-detail";
-      const name=document.createElement("strong");name.textContent=flower.name;
-      const detail=document.createElement("small");
-      const unverified=flower.evidence==="UNVERIFIED_IMPORT";
-      detail.textContent=(unverified?"匯入候選 · 尚未確認":"本人確認")+
-        " · 約 "+Math.round(flower.distanceMetres)+" 公尺";
-      info.append(name,detail);
-      const add=document.createElement("button");add.type="button";
-      add.textContent="加入路線";
-      add.disabled=!latest?.origin||["MOVING","PAUSED"].includes(latest?.phase);
-      add.addEventListener("click",async()=>{
-        if(unverified&&!confirm("此花點僅是匯入候選，尚未確認為遊戲大花。確定加入尋花路線？"))
-          return;
-        if(await act("/api/flowers/add",{id:flower.id,confirmUnverified:unverified})){
-          $("flower-status").textContent="已加入花點；請確認順序並重新預覽道路";
-          updateRouteControls();
-        }
-      });
-      row.append(info,add);list.append(row);
-    }
-  }catch(error){
-    $("flower-status").textContent=error.message||"無法讀取花點";
-  }finally{$("flower-search").disabled=false;}
-}
-$("flower-search").addEventListener("click",searchFlowers);
-$("flower-optimize").addEventListener("click",async()=>{
-  if(!confirm("使用 Valhalla 步行道路距離建議尋花順序？路點不會被加入或刪除，仍須重新預覽才能開始。"))return;
-  if(await act("/api/flowers/optimise",{loop:$("loop").value==="true"}))
-    $("flower-status").textContent="正在計算步行道路順序，請查看完成後的路點順序及狀態";
-});
 
 async function act(path, body, note = "") {
   try {
@@ -342,6 +356,10 @@ async function act(path, body, note = "") {
     await refresh();
     return true;
   } catch (error) {
+    if ((error.message || "").includes("無法連接手機")) {
+      remoteLinkHealthy = false;
+      updateCompactWalkControls();
+    }
     setMessage(error.message || "手機無法完成操作");
     return false;
   }
@@ -479,6 +497,24 @@ function styleUrl() {
     (styles.includes(choice) ? choice : "liberty");
   return "https://tiles.openfreemap.org/styles/" + name;
 }
+
+/** OpenFreeMap Dark uses near-black minor roads on a near-black background.
+ *  Brighten known road paint layers only; keep tiles, labels and palette intact.
+ *  Ignore missing layers if the provider changes its published style. */
+function improveDarkRoadLegibility() {
+  if (!map || !styleUrl().endsWith("/dark")) return;
+  const roadColours = {
+    highway_path: "#475762",
+    highway_minor: "#394852",
+    highway_major_inner: "#536572",
+    highway_major_subtle: "#3D4E5A",
+    highway_motorway_inner: "#637784",
+    highway_motorway_subtle: "#445662"
+  };
+  for (const [id, colour] of Object.entries(roadColours)) {
+    if (map.getLayer(id)) map.setPaintProperty(id, "line-color", colour);
+  }
+}
 /** Trust only the phone-authorised, time-bounded physical snapshot. The
  * browser can never infer real GPS from its own geolocation or mock provider. */
 function trustedRealPosition() {
@@ -569,6 +605,7 @@ async function initialiseMap() {
     });
     map.on("style.load", () => {
       mapStyleReady = true;
+      improveDarkRoadLegibility();
       lastLineKey = ""; lastDraftKey = "";
       renderMap();
     });
@@ -657,15 +694,14 @@ function renderMap() {
     selectionMarker = null;
   }
 
-  const stops = mode === "FLOWERS" ? (latest?.flowerStops || []) :
-    mode === "ROUTE" ? (latest?.routeStops || []) : [];
+  const stops = mode === "ROUTE" ? (latest?.routeStops || []) : [];
   const key = mode + "|" + JSON.stringify(stops);
   if (key !== lastStopsKey) {
     routeMarkers.forEach(marker => marker.remove());
     routeMarkers = stops.map((item,i) =>
       new maplibre.Marker({element:ordinalPin(i + 1, i === stops.length-1 ? "last" : ""),anchor:"center"})
         .setLngLat([item.lon,item.lat])
-        .setPopup(new maplibre.Popup().setText((mode === "FLOWERS" ? "花點 " : "路點 ") + (i+1)))
+        .setPopup(new maplibre.Popup().setText("路點 " + (i+1)))
         .addTo(map));
     lastStopsKey = key;
   }
@@ -711,8 +747,7 @@ function formatDistance(metres) {
     Math.round(metres) + " 公尺";
 }
 function renderRouteOrder() {
-  const stops = mode === "FLOWERS" ? (latest?.flowerStops || []) :
-    mode === "ROUTE" ? (latest?.routeStops || []) : [];
+  const stops = mode === "ROUTE" ? (latest?.routeStops || []) : [];
   const origin = latest?.origin;
   const busy = latest?.planning || latest?.phase === "MOVING" || latest?.phase === "PAUSED";
   const key = mode + "|" + JSON.stringify(stops) + "|" +
@@ -721,8 +756,8 @@ function renderRouteOrder() {
   lastOrderKey = key;
   const list = $("route-order");
   list.replaceChildren();
-  if (mode !== "ROUTE" && mode !== "FLOWERS") return;
-  const label = mode === "FLOWERS" ? "花點" : "路點";
+  if (mode !== "ROUTE") return;
+  const label = "路點";
   const coordinates = point => point.lat.toFixed(5) + ", " + point.lon.toFixed(5);
   function addRow(point, index) {
     const li = document.createElement("li");
@@ -784,9 +819,8 @@ function renderRouteOrder() {
 }
 
 function updateRouteControls() {
-  const navigating = mode === "ROUTE" || mode === "FLOWERS";
-  const stops = mode === "FLOWERS" ? (latest?.flowerStops || []) :
-    (latest?.routeStops || []);
+  const navigating = mode === "ROUTE";
+  const stops = latest?.routeStops || [];
   const prepared = latest?.previews?.[mode];
   const hasOrigin = !!latest?.origin;
   const moving = latest?.phase === "MOVING";
@@ -795,21 +829,17 @@ function updateRouteControls() {
   const loop = $("loop").value === "true";
   const ready = !!prepared?.id && prepared.loop === loop;
   const needSnap = ready && prepared.maxSnapMetres > 40;
-  const max = mode === "ROUTE" ? 15 : 14;
-  $("pointcount").textContent = stops.length + " / " + max + " 個" +
-    (mode === "FLOWERS" ? "花點" : "路點") + " · 按清單順序行走";
+  const max = 15;
+  $("pointcount").textContent = stops.length + " / " + max + " 個路點 · 按清單順序行走";
   renderRouteOrder();
   $("originlabel").textContent = hasOrigin ? "目前起點：" +
     latest.origin.lat.toFixed(6) + ", " + latest.origin.lon.toFixed(6) :
     "尚未指定起點 · 在地圖選擇後按「設為起點」";
-  $("add").disabled = !navigating || busy || stops.length >= max ||
-    (mode === "FLOWERS" && !hasOrigin);
+  $("add").disabled = !navigating || busy || stops.length >= max;
   $("set-origin").disabled = !navigating || busy;
   $("undo").disabled = !navigating || busy || stops.length === 0;
   $("clear").disabled = !navigating || busy || stops.length === 0;
   $("plan").disabled = !navigating || busy || !hasOrigin || stops.length === 0;
-  $("flower-optimize").disabled = mode !== "FLOWERS" || busy || !hasOrigin ||
-    stops.length < (loop ? 2 : 3);
   $("start").disabled = !navigating || busy || !ready ||
     (needSnap && !$("confirm-snap").checked) ||
     !latest?.mockPermissionReady;
@@ -836,14 +866,19 @@ function updateRouteControls() {
 function updateCompactWalkControls() {
   const phase = latest?.phase || "IDLE";
   const active = phase === "MOVING" || phase === "PAUSED";
-  const show = connected && deviceKind() === "mobile" &&
-    sheetState === "collapsed" && active;
+  // A running walk must remain controllable even with the mobile sheet half-open,
+  // or when a tablet/desktop drawer is closed. Never require scrolling to Stop.
+  const show = connected && active;
   $("compact-walk-controls").classList.toggle("hidden", !show);
   const step = Number(latest?.progress?.estimatedSteps || 0);
-  $("compact-walk-summary").textContent =
-    (phase === "PAUSED" ? "已暫停" : "行走中") + " · 本次估算 " + step + " 步";
+  $("compact-walk-summary").textContent = !remoteLinkHealthy
+    ? "連線中斷 · 請在手機操作暫停或停止"
+    : (phase === "PAUSED" ? "已暫停" : "行走中") + " · 本次估算 " + step + " 步";
   $("compact-pause").classList.toggle("hidden", phase !== "MOVING");
   $("compact-resume").classList.toggle("hidden", phase !== "PAUSED");
+  $("compact-pause").disabled = !remoteLinkHealthy || phase !== "MOVING";
+  $("compact-resume").disabled = !remoteLinkHealthy || phase !== "PAUSED";
+  $("compact-stop").disabled = !remoteLinkHealthy;
   document.body.classList.toggle("has-compact-walk", show);
 }
 for (const [id,action] of [["compact-pause","pause"],
@@ -918,7 +953,15 @@ async function refresh() {
   if (!token || refreshing) return;
   refreshing = true;
   try {
-    latest = await call("/api/state");
+    const activeToken = token;
+    const nextState = await call("/api/state");
+    if (token !== activeToken) return; // stale response after token rotation
+    latest = nextState;
+    remoteLinkHealthy = true;
+    sessionDeadlineMs = Date.now() +
+      Math.max(0, Number(latest.sessionExpiresInSeconds) || 0) * 1000;
+    updateSessionExpiry();
+    $("connection").textContent = "已連結手機";
     current = latest.position;
     if (!speedEditing) {
       const profile = latest.speedMode || "PRESET";
@@ -951,6 +994,9 @@ async function refresh() {
       focusRealWhenReady = false;
   } catch (error) {
     if (token) {
+      if (renewingSession && error.message === "等待續期完成，忽略舊狀態")
+        return;
+      remoteLinkHealthy = false;
       $("connection").textContent = "手機連線中斷";
       // Never continue to show previously received precise physical coordinates
       // after the authorised session or network connection is lost.
@@ -1076,7 +1122,9 @@ function renderSaved() {
     card.append(details);
     const buttons=document.createElement("div");buttons.className="row";
     const view=document.createElement("button");
-    view.textContent="在地圖選取";view.addEventListener("click",()=>{
+    view.textContent="選取";
+    view.setAttribute("aria-label","在地圖選取「"+place.name+"」位置，不會移動手機 GPS");
+    view.addEventListener("click",()=>{
       showCoordinate(place.position);selectMode("TELEPORT");
       $("saved-dialog").close();
       map?.flyTo({center:[place.position.lon,place.position.lat],zoom:15});
@@ -1105,14 +1153,16 @@ function renderSaved() {
     const card=document.createElement("article");card.className="saved-card";
     card.append(labelledText(route.name||"未命名路線","strong"));
     card.append(labelledText((route.stops||[]).length+" 個路點 · "+
-      (route.mode==="FLOWERS"?"尋花":"道路")));
+      (route.mode==="FLOWERS"?"舊巡花收藏 · 可轉一般路線":"道路")));
     const button=document.createElement("button");
     button.textContent="載入草稿（仍須預覽）";
     button.addEventListener("click",async()=>{
       if(await act("/api/saved/load",{id:route.id})){
         $("saved-dialog").close();
-        selectMode(route.mode==="FLOWERS"?"FLOWERS":"ROUTE");
-        setMessage("收藏路線已載入，請先預覽步行道路");
+        selectMode("ROUTE");
+        setMessage(route.mode==="FLOWERS"
+          ? "舊巡花收藏已轉成一般道路草稿；原收藏保留，請重新預覽"
+          : "收藏路線已載入，請先預覽步行道路");
       }
     });
     card.append(button);list.append(card);
@@ -1231,6 +1281,7 @@ $("saved-search").addEventListener("input",renderSaved);
 // Update only the clock text once per minute. Rebuilding the list would reset
 // its scroll position and close expanded place details while the user reads them.
 setInterval(()=>{if(!document.hidden)refreshSavedClocks();},60000);
+setInterval(updateSessionExpiry,1000);
 setInterval(() => { if (!document.hidden && connected && token) refresh(); }, 2000);
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden && token) refresh();

@@ -24,9 +24,6 @@ import com.naos.pikminbee.data.PlaceSuggestion
 import com.naos.pikminbee.data.PlaceSuggestionPolicy
 import com.naos.pikminbee.data.SavedPlaceMetadataPolicy
 import com.naos.pikminbee.data.VerifiedRealTimeZone
-import com.naos.pikminbee.flower.FlowerCatalogStore
-import com.naos.pikminbee.flower.FlowerEvidence
-import com.naos.pikminbee.flower.FlowerFinder
 import com.naos.pikminbee.data.WalkSpeedState
 import com.naos.pikminbee.domain.WalkSpeedPreset
 import com.naos.pikminbee.domain.WalkSpeedProfile
@@ -82,7 +79,6 @@ object LanWifiAddress {
  */
 class LanController(private val context: Context) {
     private val prefs = AppPreferences(context)
-    private val flowers = FlowerCatalogStore(context)
     private val placeLookup = PlaceLookup(context)
     private val pairing = LanPairing()
     private val rateLimiter = LanRateLimiter()
@@ -146,16 +142,21 @@ class LanController(private val context: Context) {
     }
 
     fun approvePending() {
+        val renewal = LanStatus.display.value.pendingDevice.startsWith("續期")
         val approved = pairing.approve()
         LanStatus.display.value = LanStatus.display.value.copy(
             pendingDevice = "",
-            note = if (approved) "已核准網頁裝置，等待瀏覽器建立工作階段" else "沒有待核准的裝置")
+            note = if (!approved) "沒有待核准的裝置"
+                else if (renewal) "已核准續期，等待原網頁完成更新權杖"
+                else "已核准網頁裝置，等待瀏覽器建立工作階段")
     }
 
     fun denyPending() {
+        val renewal = LanStatus.display.value.pendingDevice.startsWith("續期")
         pairing.deny()
         LanStatus.display.value = LanStatus.display.value.copy(
-            pendingDevice = "", note = "已拒絕裝置配對")
+            pendingDevice = "",
+            note = if (renewal) "已拒絕網頁續期" else "已拒絕裝置配對")
     }
 
     /** Called only from the visible Android Settings consent confirmation. */
@@ -274,15 +275,42 @@ class LanController(private val context: Context) {
                     // Approving another browser revokes ALL prior precise-data consent.
                     revokePhysicalSharing("新的網頁配對已核准；真實位置必須重新授權")
                     ok(JSONObject().put("token", status.token)
-                        .put("expiresInSeconds", 1800).toString())
+                        .put("expiresInSeconds", pairing.sessionDurationSeconds).toString())
                 }
                 "pending" -> acceptedJson(JSONObject().put("status", "pending").toString())
                 else -> error(403, "裝置尚未核准、已拒絕或配對已過期")
             }
         }
         if (!pairing.authorised(req.token, req.remoteAddress)) return error(401, "請在手機取得配對碼後重新連線")
+        if (req.method == "POST" && req.path == "/api/session/renew") {
+            val renewal = pairing.requestRenewal(req.token, req.remoteAddress)
+            if (renewal.pendingId == null)
+                return error(409, "已有待核准請求，或目前會話不允許續期")
+            LanStatus.display.value = LanStatus.display.value.copy(
+                pendingDevice = "續期目前裝置 · ${req.remoteAddress}",
+                note = "網頁要求再延長 2 小時；須在手機明確核准")
+            return acceptedJson(JSONObject().put("pendingId", renewal.pendingId).toString())
+        }
+        if (req.method == "POST" && req.path == "/api/session/renew/status") {
+            val body = parse(req.body) ?: return error(400, "續期請求無效")
+            val renewal = pairing.pollRenewal(
+                req.remoteAddress, body.optString("pendingId"), req.token
+            )
+            return when (renewal.state) {
+                "approved" -> {
+                    // A rotated session never inherits consent to share precise GPS.
+                    revokePhysicalSharing("網頁已核准續期；真實 GPS 分享需要重新同意")
+                    ok(JSONObject().put("token", renewal.token)
+                        .put("expiresInSeconds", pairing.sessionDurationSeconds).toString())
+                }
+                "pending" -> acceptedJson(JSONObject().put("status", "pending").toString())
+                else -> error(403, "續期已拒絕、逾時或原本會話失效")
+            }
+        }
+        if (req.path.startsWith("/api/flowers/"))
+            return error(410, "尋花模式已移除；舊資料仍保留在手機上")
         if (req.method == "GET" && req.path == "/api/state")
-            return ok(snapshot(req.token))
+            return ok(snapshot(req.token, req.remoteAddress))
         if (req.method == "GET" && req.path == "/api/saved") return ok(savedSnapshot())
         if (req.method != "POST") return error(404, "找不到操作")
         return when (req.path) {
@@ -294,83 +322,6 @@ class LanController(private val context: Context) {
                     MockLocationService.teleportIntent(context, target)) }
                     .fold({ accepted("已送出瞬移指令") },
                         { error(409, "無法瞬移：" + (it.message ?: "請確認手機狀態")) })
-            }
-            "/api/flowers/nearby" -> {
-                val json = parse(req.body) ?: return error(400, "JSON 無效")
-                val candidate = coordinate(json) ?: return error(400, "請選擇有效搜尋中心")
-                val radius = json.optDouble("radiusMetres", 2_000.0)
-                if (radius !in listOf(500.0, 2_000.0, 5_000.0))
-                    return error(400, "搜尋範圍限 500 公尺、2 公里或 5 公里")
-                val onlyChecked = json.optBoolean("onlyChecked", true)
-                val matches = FlowerFinder.nearby(
-                    candidate, flowers.all(), radius, onlyChecked, maxCount = 100)
-                val rows = JSONArray().apply {
-                    matches.forEach { spot ->
-                        put(JSONObject()
-                            .put("id", spot.id).put("name", spot.name)
-                            .put("lat", spot.coordinate.latitude)
-                            .put("lon", spot.coordinate.longitude)
-                            .put("distanceMetres",
-                                WalkingGeometry.distanceMeters(candidate, spot.coordinate))
-                            .put("evidence", spot.evidence.name))
-                    }
-                }
-                ok(JSONObject().put("flowers", rows)
-                    .put("source", "USER_CATALOGUE_NOT_GAME_API").toString())
-            }
-            "/api/flowers/optimise" -> {
-                if (walking()) return error(409, "行走中無法最佳化尋花順序")
-                val json = parse(req.body) ?: return error(400, "JSON 無效")
-                val loop = json.optBoolean("loop", true)
-                val start = origin() ?: return error(409, "請先指定尋花起點")
-                val stops = points(WalkMode.FLOWERS).toList()
-                if (stops.size < if (loop) 2 else 3)
-                    return error(409, "花點太少，維持目前順序即可")
-                if (stops.size > 14) return error(409, "最多 14 個尋花點")
-                if (!planning.compareAndSet(false, true))
-                    return error(409, "仍有道路規劃進行中")
-                LanStatus.display.value = LanStatus.display.value.copy(
-                    note = "正在向 Valhalla 請求步行道路順序，不會移動 GPS")
-                scope.launch {
-                    try {
-                        val updated = ValhallaPlanner.optimiseFlowerStops(start, stops, loop)
-                        if (origin() != start || points(WalkMode.FLOWERS) != stops) {
-                            LanStatus.display.value = LanStatus.display.value.copy(
-                                note = "花點或起點已變更，已保留目前順序")
-                        } else if (updated != stops) {
-                            savePoints(WalkMode.FLOWERS, updated)
-                            invalidate(WalkMode.FLOWERS)
-                            LanStatus.display.value = LanStatus.display.value.copy(
-                                note = "已套用步行道路建議順序，請重新預覽再開始")
-                        } else {
-                            LanStatus.display.value = LanStatus.display.value.copy(
-                                note = "目前順序已符合道路建議，未更動草稿")
-                        }
-                    } catch (e: Exception) {
-                        LanStatus.display.value = LanStatus.display.value.copy(
-                            note = "道路順序建議失敗，保留原順序：" +
-                                (e.message ?: "請稍後再試"))
-                    } finally { planning.set(false) }
-                }
-                accepted("正在規劃道路順序，完成前不能開始行走")
-            }
-            "/api/flowers/add" -> {
-                if (walking() || planning.get())
-                    return error(409, "行走或規劃中無法修改尋花路點")
-                val json = parse(req.body) ?: return error(400, "JSON 無效")
-                val id = json.optString("id")
-                val spot = flowers.all().firstOrNull { it.id == id }
-                    ?: return error(404, "花點不存在或已移除")
-                if (spot.evidence == FlowerEvidence.UNVERIFIED_IMPORT &&
-                    !json.optBoolean("confirmUnverified", false))
-                    return error(409, "匯入候選尚未確認，請明確同意後再加入")
-                val result = LanRouteDraftPolicy.add(
-                    WalkMode.FLOWERS, points(WalkMode.FLOWERS),
-                    spot.coordinate, origin())
-                if (!result.accepted) return error(409, result.message)
-                savePoints(WalkMode.FLOWERS, result.stops)
-                invalidate(WalkMode.FLOWERS)
-                accepted("已加入「${spot.name}」；請先預覽步行道路")
             }
             "/api/points/add" -> {
                 if (walking()) return error(409, "行走中無法修改路點，請先停止")
@@ -542,9 +493,11 @@ class LanController(private val context: Context) {
                 val id = parse(req.body)?.optString("id").orEmpty()
                 val route = prefs.savedRoutes().firstOrNull { it.id == id }
                     ?: return error(404, "找不到收藏路線")
-                prefs.loadSavedRouteIntoDraft(route)
-                invalidate(route.mode)
-                accepted("已載入收藏路線，請先預覽道路")
+                if (route.mode == WalkMode.FLOWERS)
+                    prefs.saveRouteDraft(route.stops)
+                else prefs.loadSavedRouteIntoDraft(route)
+                invalidate(WalkMode.ROUTE)
+                accepted("已載入一般路線草稿，請先預覽道路")
             }
             "/api/route/preview" -> {
                 if (walking()) return error(409, "已有行走中的路線，請先停止")
@@ -834,7 +787,7 @@ class LanController(private val context: Context) {
         LanReply(200, context.assets.open(path).bufferedReader(Charsets.UTF_8).use { it.readText() }, mime)
     }.getOrElse { error(404, "缺少控制頁面") }
 
-    private fun snapshot(requesterToken: String?): String {
+    private fun snapshot(requesterToken: String?, requesterPeer: String): String {
         fun coordinates(items: List<Coordinate>): JSONArray = JSONArray().apply {
             items.forEach { put(JSONObject().put("lat", it.latitude).put("lon", it.longitude)) }
         }
@@ -891,6 +844,7 @@ class LanController(private val context: Context) {
         val realZone = verifiedTimeZoneReference
             ?.takeIf { it.freshId(now) != null }
         return JSONObject()
+            .put("sessionExpiresInSeconds", pairing.secondsRemaining(requesterToken, requesterPeer))
             .put("status", LocationStatus.display.value)
             .put("note", LanStatus.display.value.note)
             .put("position", position?.let { JSONObject().put("lat", it.latitude).put("lon", it.longitude) })
@@ -935,7 +889,6 @@ class LanController(private val context: Context) {
             .put("speedAppliedKmh", LocationStatus.appliedSpeedKmh.value)
             .put("defaultSpeedPreset", WalkSpeedState.preferred.value.name)
             .put("routeStops", coordinates(prefs.routeDraft()))
-            .put("flowerStops", coordinates(prefs.flowerDraft()))
             .put("geometry", coordinates(path))
             .toString()
     }
@@ -960,14 +913,13 @@ class LanController(private val context: Context) {
 
     private fun mode(value: String?): WalkMode? = when (value) {
         "ROUTE" -> WalkMode.ROUTE
-        "FLOWERS" -> WalkMode.FLOWERS
         else -> null
     }
     private fun points(mode: WalkMode): List<Coordinate> =
-        if (mode == WalkMode.FLOWERS) prefs.flowerDraft() else prefs.routeDraft()
+        if (mode == WalkMode.ROUTE) prefs.routeDraft() else emptyList()
 
     private fun savePoints(mode: WalkMode, list: List<Coordinate>) {
-        if (mode == WalkMode.FLOWERS) prefs.saveFlowerDraft(list) else prefs.saveRouteDraft(list)
+        if (mode == WalkMode.ROUTE) prefs.saveRouteDraft(list)
     }
 
     private fun parse(body: String): JSONObject? = runCatching { JSONObject(body) }.getOrNull()

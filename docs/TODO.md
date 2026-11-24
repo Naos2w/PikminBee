@@ -1,8 +1,34 @@
 # PikminBee TODO — current, actionable backlog
 
+## 0a. Wi-Fi 會話改善／PR #121（2026-11-24，整合分支）
+
+- [x] **L1 · 固定 2 小時**：私人 Wi-Fi 配對後會話 120 分鐘，固定到期，不因每 2 秒輪詢延長；真實 GPS 歷史快照仍獨立最多 30 分鐘。
+- [x] **L2 · 手機核准續期**：原 IP／有效舊 Token 需在網頁提出續期，90 秒內手機明確核准才更新；更換 Token、撤銷舊 Token 與真實 GPS 分享權限。拒絕、過期、不同 IP 或系統重啟均不續期。
+- [x] **L3 · UI 整合**：倒數時間、到期前提示、手機核准按鈕與 PR #122 的固定行走控制列、斷線提示及巡花移除內容並存。不得重新啟用舊模式或背景自動續期。
+- [ ] **L4 · 來源及裝置驗收**：MSI 最終 Kotlin/JVM、Android Lint、Node.js 與 GitHub CI 必須通過；另以 POCO + MSI Edge 實際測試配對、續期倒數、拒絕、原 Token 作廢、60/120 分鐘邊界、Web 重整、短暫斷線、Wi-Fi 切換、背景服務及真實 GPS 權限。不具設備證據時，不可宣稱完成 UAT。
+- [ ] **L5 · 發佈**：遵守 `feature → develop`（PR + Squash）且不改 `staging`／`main`，未取得獨立安裝同意不可更新或卸載 POCO APK。現有工作區 `.worktrees/` 不清除。
+
+> **2026-11-24 owner decision:** Retire the user-facing `尋花` mode and live flower-screen recognition. **PR #120 has already merged** the Android, floating and LAN retirement to `develop` at `7f712df`; durable saved flower locations, legacy route labels and GPX compatibility remain. **This is source-only, not an installed APK or completed POCO acceptance.** F1–F4 below are historical and cancelled. Do not resume automatic flower recognition, harvesting or flower-farming modes. **Git revert restores source, not app data lost through uninstall or clear-storage. Do not uninstall.**
+
+## 0. 尋花模式退場（已合併 develop／實機仍待驗收）
+
+- [x] **R1 · 使用者入口退場（原始碼）**：Android 底部模式只保留瞬移、路徑、設定；Wi-Fi 網頁不提供尋花模式；懸浮蜜蜂不顯示畫面辨識捷徑，也不會啟動新的尋花路線。原有執行中的路線仍可暫停／停止。
+- [x] **R2 · 保留個人資料相容性（原始碼）**：舊尋花收藏不自動刪除，Android 收藏載入時可複製為一般道路草稿而不更動原收藏；舊式 GPX 可依一般路線匯入。歷史辨識與花點資料保留供後續明確匯出／清理。
+- [x] **R3 · 來源測試**：完整移除後 MSI 本地 Kotlin 編譯及 **288 項 JVM 單元測試（0 失敗／0 跳過）** 通過，LAN JavaScript 語法及 Git 差異檢查通過；Android Lint 已通過。原有花朵辨識單元測試隨退場功能一起移除，因此測試總數下降，並非 25 項測試失敗。這些不是實機 UI 驗收。
+- [ ] **R4 · 實機驗收**：PR #120 已通過 GitHub CI 並合併 `develop`；UAT APK 尚未裝到 POCO。後續檢查三個底部動作、舊資料保留、收藏載入、GPX 和 LAN 介面。不要修改 `main` 或未經核准安裝手機。
+- [x] **R5 · 巡花執行碼移除（原始碼）**：刪除花朵辨識／畫面擷取、像素校正 UI 與專用前景服務、相關 Manifest 權限；移除 Android/網頁巡花入口及特定 API，禁止新建巡花路徑。保留 `WalkMode.FLOWERS` 舊資料標記／GPX 讀取、已存收藏與花點 GeoJSON 匯出；新路線僅可使用普通道路模式。Git revert 可回復程式碼，但不能取代裝置資料備份。實機驗收仍為 R4。
+
+## 0b. UI/UX 可用性修正（2026-11-24，MSI 獨立分支）
+
+- [x] **UX-1 · 行走控制可達性（原始碼）**：Android 主地圖與詳細路線停止共用「停止路線？」確認對話，行走已結束時不可誤送舊停止指令；懸浮蜜蜂的即時停止仍保留作為外部操作的緊急動作。Web 手機面板半展開、平板抽屜收合、桌面側欄捲動時均顯示固定暫停／繼續／停止列；停止前維持確認，不使斷線自動停走。
+- [x] **UX-2 · 路點上限一致（原始碼）**：Android 一般道路草稿從 14 調到 **15**（非循環），與 Wi-Fi Web、GPX 和收藏上限一致；回到起點的循環道路保留 **14** 路點限制，以符合 16 個路線錨點上限。保留既有收藏資料與路線預覽確認。
+- [x] **UX-3 · 視覺與文案（原始碼）**：Android 行走進度拆成兩行並提高字級；Web 手機底部三模式等寬、縮短收藏選取文字、舊巡花收藏標示為歷史資料；兩端 Dark OpenFreeMap 僅微調已存在的道路線條顏色以提高辨識度。
+- [ ] **UX-4 · 完整驗收**：MSI 最終來源已通過 **291 項 JVM 單元測試（0 失敗／0 跳過）、Android Lint、Node.js 語法及 Git 差異檢查**，PR #122 GitHub CI 已通過並合併 develop（c422978）；POCO 真實 Android 視覺／停止確認／深淺色／動態字級，以及 Edge/Android Chrome 的 360/390/690/830/1280 等斷點、面板開合、斷線與一鍵停止均需驗證。**本機瀏覽器模擬配對控制遭執行環境阻擋，且沒有連上的 Android ADB，尚不可宣稱設備 RWD／實機合格。**
+- [x] **UX-5 · 後續獨立整合（原始碼）**：Wi-Fi 2 小時會話與手機核准續期 PR #121 已在獨立分支接續已合併的 UI/UX PR #122；原始碼整合不等於 UAT，需另走 L4 實機驗收。
+
 > **Source of truth**. Initially consolidated on **2026-11-23** from `develop` at `4f4ec6107757f14810ef53e23ec1d5e9e3b3bb59` (PR #110); the **S5 closure source baseline is `712abdd7a8ad4f72761dd38465aaa800e332fe10` (PR #115)**. This list replaces repeated historical milestone checkboxes; it does **not** retroactively certify device behaviour. PRs, issues and the immutable [previous full TODO snapshot](https://github.com/Naos2w/PikminBee/blob/4f4ec6107757f14810ef53e23ec1d5e9e3b3bb59/docs/TODO.md) preserve the full audit trail. Do not create a second active task ledger.
 >
-> **Approval / scope:** The user does **not** want a LocWarp-style 花農繞圈/orbit mode or a mandatory Pikmin Bloom in-game flower-planting speed benchmark. LocWarp WALK **10.8 km/h** is only an advisory speed reference, **not** a verified planting optimum and **not** a command to overwrite the saved personal default. Keep ordinary existing flower-road routes and their current loop option.
+> **Approval / scope:** The user does **not** want a LocWarp-style 花農繞圈/orbit mode or a mandatory Pikmin Bloom in-game flower-planting speed benchmark. LocWarp WALK **10.8 km/h** is only an advisory speed reference, **not** a verified planting optimum and **not** a command to overwrite the saved personal default. Keep previously saved flower-labelled routes and GPX compatibility for explicit conversion; do not reactivate the retired route mode.
 
 ## 1. Verified source milestones — not physical acceptance
 
@@ -35,25 +61,27 @@
 
 **Remaining scope:** F1–F2 require authorised, independently labelled example frames/landmarks to claim flower-recognition accuracy; F3 Android capture/permission source safety can be audited independently; F4 only after F1/F2 evidence. **U1–U7 remain unchecked**; do not treat confirmed source tests as POCO, notification sound/DND, Android background behaviour, live HC writes, signature upgrade, or real-world flower-recognition acceptance.
 
-## 3. P1 — existing flower-image recognition, not an invented new route mode
+## 3. 已取消開發 — 舊花朵辨識稽核項目（歷史追蹤，非待辦）
 
 - [x] **Prototype exists:** `BloomDetector` supports colour/pale candidates from static, user-selected images; `BloomCaptureService` supports explicit Android MediaProjection consent with no capture-protection bypass. Manual image-pixel → GPS anchor preview and optional *unverified*, user-confirmed local flower-catalogue bridge already exist (PRs #10–#12, #90). Sources: [FLOWER-VISION.md](FLOWER-VISION.md), [Issue #17](https://github.com/Naos2w/PikminBee/issues/17).
-- [ ] **F1 · Honest recognition accuracy:** assemble only user-authorised, non-protected, non-sensitive labelled example frames and negatives; record precision, recall, per-class false positives/negatives across map scales and image sizes. Until those exist, do **not** claim real-game recognition quality or tune to imaginary examples.
-- [ ] **F2 · Independent coordinate validity:** compare pixel-to-GPS calibration against independently verified landmarks. Leave-one-out RMSE between self-supplied anchors alone is **not** ground-truth flower-position accuracy. Do not auto-inject unverified detections into GPS routes.
-- [ ] **F3 · Safe capture/session behaviour:** verify new consent per MediaProjection session, resize/orientation, protected black frames, stop/cancel and screen-share permissions. Keep image pixels/tokens transient; never bypass FLAG_SECURE. **2026-11-23 POCO Android 16 / HyperOS 3.0 diagnostic:** installed UAT 0.19.1 showed “畫面幾乎全黑” even on ordinary Android Settings, while ADB confirmed an authorised MediaProjection, foreground capture service and 1280×2772 virtual display. This does **not** establish that valid image pixels were received or that Pikmin Bloom enforces capture protection. Source audit found a reproducible **false blank** condition: treating >93% dark pixels as black discards ordinary dark UI with sparse readable text. The scoped source follow-up refines the blank heuristic, adds metadata-only frame counts / Android captured-content visibility, and buffers an early resize callback; real result still needs an approved device build and repeat Settings/share/stop/rotation UAT. Do not close F3 or Issue #17 from source tests.
-- [ ] **F4 · Evidence-driven enhancements only:** after F1/F2 evidence, decide which false-positive filters, UX hints or manual confirmation improvements genuinely need code; use small focused feature PRs rather than duplicating the detector.
+- **已取消 F1 · Honest recognition accuracy:** assemble only user-authorised, non-protected, non-sensitive labelled example frames and negatives; record precision, recall, per-class false positives/negatives across map scales and image sizes. Until those exist, do **not** claim real-game recognition quality or tune to imaginary examples.
+- **已取消 F2 · Independent coordinate validity:** compare pixel-to-GPS calibration against independently verified landmarks. Leave-one-out RMSE between self-supplied anchors alone is **not** ground-truth flower-position accuracy. Do not auto-inject unverified detections into GPS routes.
+- **已取消 F3 · Safe capture/session behaviour:** verify new consent per MediaProjection session, resize/orientation, protected black frames, stop/cancel and screen-share permissions. Keep image pixels/tokens transient; never bypass FLAG_SECURE. **2026-11-23 POCO Android 16 / HyperOS 3.0 diagnostic:** installed UAT 0.19.1 showed “畫面幾乎全黑” even on ordinary Android Settings, while ADB confirmed an authorised MediaProjection, foreground capture service and 1280×2772 virtual display. This does **not** establish that valid image pixels were received or that Pikmin Bloom enforces capture protection. Source audit found a reproducible **false blank** condition: treating >93% dark pixels as black discards ordinary dark UI with sparse readable text. The scoped source follow-up refines the blank heuristic, adds metadata-only frame counts / Android captured-content visibility, and buffers an early resize callback; real result still needs an approved device build and repeat Settings/share/stop/rotation UAT. Do not close F3 or Issue #17 from source tests.
+- **已取消 F4 · Evidence-driven enhancements only:** after F1/F2 evidence, decide which false-positive filters, UX hints or manual confirmation improvements genuinely need code; use small focused feature PRs rather than duplicating the detector.
 
 ## 4. P0 — consolidated POCO / PC UAT (not yet passed)
 
 - [ ] **U1 · Map/road route** — [Issue #16](https://github.com/Naos2w/PikminBee/issues/16): OpenFreeMap/optional configured Google Maps, road snap, max stops, saved routes, GPX, map camera, gesture/selection, preview confirmation and start/pause/resume/stop.
 - [ ] **U2 · Whole-app HyperOS and LAN** — [Issue #18](https://github.com/Naos2w/PikminBee/issues/18): actual POCO GPS provider, optional jitter, overlay foreground/background/permissions, notification, Android vs PC Edge / Android browser speed and position consistency, pairing/revocation/network failure, recovery and accessibility.
 - [ ] **U3 · Daily real vs virtual steps** — Issue #18 with S1/S3: Health Connect permissions/sources, overlap, local-day cutover, virtual ledger optional writes, 40–120 cm stride, two-line floating display and real-versus-estimated labelling. Do **not** add virtual steps to today's aggregate.
-- [ ] **U4 · Real flower-vision UI** — [Issue #17](https://github.com/Naos2w/PikminBee/issues/17): device-authorised still-image selection, manual anchor taps/calibration, Android 14+/HyperOS projection consent, protected-content fail-safe, accessibility and accuracy evidence.
+- [ ] **U4 · Legacy flower data preservation / retirement** — [Issue #17](https://github.com/Naos2w/PikminBee/issues/17): ensure the retired capture UI is unreachable, saved flower locations and historical flower routes survive version upgrades without data loss, existing GPX formats can be imported as ordinary routes, and stored exports remain available until the user deliberately clears them. No longer test real-game flower-detection accuracy.
 - [ ] **U5 · Dark/light/screen usability** — [Issue #26](https://github.com/Naos2w/PikminBee/issues/26): confirm prior Compose colour-scheme fix, readable text/chips and small-screen map controls with actual POCO screenshots/observations.
 - [ ] **U6 · Stable APK update** — [Issue #29](https://github.com/Naos2w/PikminBee/issues/29): check signer certificate and monotonic `versionCode` against the installed device; older debug APK signatures were inconsistent. Preserve user's data and **export any valuable local routes/flowers before considering uninstall**. Do not mark issue solved without verified upgrade on POCO.
-- [ ] **U7 · Consolidated release gate:** only after a separately approved `develop → staging` PR / fixed-signer UAT workflow, install and verify the combined build. Signed **UAT 0.19.1** in staging predates PRs #106–#115; do not claim those newer source features are already in its APK. Never automatically deploy to `main`, install on POCO or declare production readiness.
+- [ ] **U7 · Consolidated release gate:** only after a separately approved `develop → staging` PR / fixed-signer UAT workflow, install and verify the combined build. Signed **UAT 0.20.1** in staging includes PRs #106–#118 but **does not include the 2026-11-24 seeking-mode retirement branch**; do not claim those new UI removals are installed on POCO. Never automatically deploy to `main`, install on POCO or declare production readiness.
 
 ## 5. Conditional ideas / exclusions — **not active development**
+
+**LocWarp review (2026-11-24, reference only):** its relevant ideas for the remaining general-purpose GPS test app are (1) route-provider selection/fallback with explicit consent and **no automatic straight-line fallback**; (2) better classified, searchable favourite locations/routes and bulk GPX/JSON tools; (3) clearer segment/arrival progress and on-map direction indicators; and (4) optional manual navigation controls only if separately approved. PikminBee already has route previews, variable speeds, GPX and paired LAN web control; avoid building duplicate features. LocWarp's iOS USB/Wi-Fi stack is not applicable to Android. Its mushroom/flower layer depends on third-party data/cookies and is explicitly **not** approved to be integrated. These are **research candidates, not active TODO work**; keep existing source licences and preserve owner consent.
 
 No user approval to add flower-farming circles/orbits, automatic rest modes, 60 km/h vehicle planting presets, unauthorised flower-source APIs, automated game input, bypasses for protected captures or automatic in-game planting-efficiency comparisons. Do not count these as outstanding features. **Optional** LAN HTTPS, Google Maps API/billing or future Android permission migrations must be individually justified and approved rather than silently expanded from historical notes.
 

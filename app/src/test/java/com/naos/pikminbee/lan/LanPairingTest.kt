@@ -61,7 +61,7 @@ class LanPairingTest {
         assertTrue(pairing.approve())
         val token = pairing.poll(ip, ticket).token
         assertTrue(pairing.authorised(token, ip))
-        time.addAndGet(30L * 60_000L + 1)
+        time.addAndGet(2L * 60L * 60_000L + 1)
         assertFalse(pairing.authorised(token, ip))
         val next = pairing.pair(ip, pairing.currentPin(), "tablet").pendingId
         assertTrue(pairing.approve())
@@ -84,9 +84,92 @@ class LanPairingTest {
         val tokenB = pair.poll(peerB, second).token!!
         assertEquals(tokenB, pair.activeSessionToken())
         assertFalse(pair.authorised(tokenA, peerA))
-        time.addAndGet(30L * 60_000L + 1)
+        time.addAndGet(2L * 60L * 60_000L + 1)
         assertNull(pair.activeSessionToken())
         assertFalse(pair.authorised(tokenB, peerB))
+    }
+
+    @Test fun sessionLastsTwoHoursWithoutSlidingOnFrequentStateChecks() {
+        val pair = pairer()
+        val ip = "192.168.1.20"
+        val ticket = pair.pair(ip, pair.currentPin(), "MSI").pendingId
+        assertTrue(pair.approve())
+        val token = pair.poll(ip, ticket).token
+        assertEquals(7_200, pair.sessionDurationSeconds)
+        assertEquals(7_200, pair.secondsRemaining(token, ip))
+        repeat(5) {
+            time.addAndGet(15L * 60_000L)
+            assertTrue(pair.authorised(token, ip))
+        }
+        assertEquals(2_700, pair.secondsRemaining(token, ip))
+        time.addAndGet(45L * 60_000L)
+        assertFalse(pair.authorised(token, ip))
+        assertEquals(0, pair.secondsRemaining(token, ip))
+    }
+
+    @Test fun renewalNeedsSamePeerAndPhoneApprovalThenRotatesToken() {
+        val pair = pairer()
+        val ip = "192.168.1.55"
+        val ticket = pair.pair(ip, pair.currentPin(), "PC").pendingId
+        assertTrue(pair.approve())
+        val token = pair.poll(ip, ticket).token!!
+        time.addAndGet(110L * 60_000L)
+        assertNull(pair.requestRenewal(token, "192.168.1.56").pendingId)
+        val renewal = pair.requestRenewal(token, ip).pendingId!!
+        assertEquals("pending", pair.pollRenewal(ip, renewal, token).state)
+        assertEquals("invalid", pair.pollRenewal("192.168.1.56", renewal, token).state)
+        assertEquals("invalid", pair.pollRenewal(ip, renewal, "wrong-token").state)
+        assertEquals("invalid", pair.poll(ip, renewal).state)
+        assertEquals(600, pair.secondsRemaining(token, ip)) // no auto-extension on polls
+        assertTrue(pair.approve())
+        val next = pair.pollRenewal(ip, renewal, token)
+        assertEquals("approved", next.state)
+        assertNotEquals(token, next.token)
+        assertFalse(pair.authorised(token, ip))
+        assertTrue(pair.authorised(next.token, ip))
+        assertEquals(7_200, pair.secondsRemaining(next.token, ip))
+        assertEquals("invalid", pair.pollRenewal(ip, renewal, token).state)
+    }
+
+    @Test fun deniedExpiredAndRestartedRenewalsNeverGrantAccess() {
+        val pair = pairer()
+        val ip = "10.1.1.5"
+        val first = pair.pair(ip, pair.currentPin(), "MSI").pendingId
+        assertTrue(pair.approve())
+        val token = pair.poll(ip, first).token!!
+        val denied = pair.requestRenewal(token, ip).pendingId!!
+        pair.deny()
+        assertEquals("invalid", pair.pollRenewal(ip, denied, token).state)
+        val timedOut = pair.requestRenewal(token, ip).pendingId!!
+        time.addAndGet(91_000)
+        assertEquals("invalid", pair.pollRenewal(ip, timedOut, token).state)
+        time.addAndGet(2L * 60L * 60_000L - 91_000L - 30_000L)
+        val expired = pair.requestRenewal(token, ip).pendingId!!
+        time.addAndGet(31_000L) // request is fresh but the old session has expired
+        assertTrue(pair.approve())
+        assertEquals("invalid", pair.pollRenewal(ip, expired, token).state)
+        assertNull(pair.activeSessionToken())
+        val rePair = pair.pair(ip, pair.currentPin(), "MSI").pendingId!!
+        assertTrue(pair.approve())
+        val fresh = pair.poll(ip, rePair).token!!
+        val afterRestart = pair.requestRenewal(fresh, ip).pendingId!!
+        pair.rotate()
+        assertEquals("invalid", pair.pollRenewal(ip, afterRestart, fresh).state)
+        assertFalse(pair.authorised(fresh, ip))
+    }
+
+    @Test fun pendingRenewalBlocksOtherPairingUntilResolved() {
+        val pair = pairer()
+        val peer = "192.168.0.12"
+        val first = pair.pair(peer, pair.currentPin(), "MSI").pendingId
+        assertTrue(pair.approve())
+        val token = pair.poll(peer, first).token!!
+        val renewal = pair.requestRenewal(token, peer).pendingId!!
+        assertTrue(pair.pair("192.168.0.99", pair.currentPin(), "Other").locked)
+        assertTrue(pair.requestRenewal(token, peer).locked)
+        assertEquals("pending", pair.pollRenewal(peer, renewal, token).state)
+        pair.deny()
+        assertTrue(pair.authorised(token, peer))
     }
 
     @Test fun rateLimiterBlocksFloodAndResetsNextWindow() {
