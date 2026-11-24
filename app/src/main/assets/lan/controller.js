@@ -1,3 +1,4 @@
+import { BRIGHT_STYLE_URL, samePosition, currentPosition, createCameraFocus } from "/map-ui-policy.mjs";
 const $ = id => document.getElementById(id);
 let token = null;
 let sessionDeadlineMs = 0;
@@ -20,6 +21,9 @@ let positionMarker = null, realMarker = null, originMarker = null, selectionMark
 let routeMarkers = [];
 let lastStopsKey = "", lastLineKey = "", lastDraftKey = "", lastOrderKey = "";
 let focusRealWhenReady = false;
+const cameraFocus = createCameraFocus();
+let teleportBusy = false, pendingTeleportConfirmation = null;
+let brightDarkPalette = null, originalBrightPaint = new Map();
 const loops = {ROUTE: false};
 const setMessage = value => { $("message").textContent = value; };
 const setPairMessage = value => { $("pairmessage").textContent = value; };
@@ -36,11 +40,12 @@ function updateSessionExpiry() {
   $("session-expiry").textContent = remaining === 0
     ? "控制授權時間已到，請重新配對"
     : "控制授權剩餘 " + hours + ":" + minutes + ":" + seconds +
-      (remaining <= 600 ? " · 即將到期，請在手機核准續期" : "");
+      (remaining <= 600 ? " · 即將到期" : "");
   $("session-panel").classList.toggle("is-urgent", remaining <= 600);
   $("session-renew").disabled = renewingSession || remaining <= 0;
   $("session-renew").textContent = renewingSession
-    ? "等待手機核准…" : "從手機核准延長 2 小時";
+    ? "等待核准…" : "續期";
+  $("session-renew").title = "從手機核准延長 2 小時";
 }
 
 async function call(path, method = "GET", body = null, useToken = true) {
@@ -66,6 +71,10 @@ async function call(path, method = "GET", body = null, useToken = true) {
     remoteLinkHealthy = false;
     latest = null; // clear any in-memory sensitive physical snapshot on revocation
     current = null;
+    cameraFocus.clear();
+    pendingTeleportConfirmation = null;
+    focusRealWhenReady = false;
+    $("app-version").textContent = "版本待確認";
     updateSessionExpiry();
     updateCompactWalkControls();
     document.body.classList.remove("remote-active");
@@ -144,6 +153,9 @@ $("session-renew").addEventListener("click", async () => {
       // A renewed token must not inherit the previous precise GPS sharing grant.
       latest = null;
       current = null;
+      cameraFocus.clear();
+      pendingTeleportConfirmation = null;
+      focusRealWhenReady = false;
       connected = true;
       remoteLinkHealthy = true;
       updateCompactWalkControls();
@@ -229,7 +241,9 @@ function deviceKind() {
   // Use the design-approved 690×920 portrait tablet layout without
   // forcing ordinary narrower handsets (or short 700px phones) into a drawer.
   const w = window.innerWidth, h = window.innerHeight;
-  if (w <= 600 || (w <= 760 && h <= 800)) return "mobile";
+  if (w <= 600 || (w <= 760 && h <= 800 && h > w)) return "mobile";
+  // A wide, short landscape phone needs the split workspace, not a sheet
+  // that consumes its entire visible map height.
   if (w <= 1060) return "tablet";
   return "desktop";
 }
@@ -242,7 +256,7 @@ function setSheetState(next) {
     ({TELEPORT:"瞬移",ROUTE:"路徑"}[mode] || "瞬移")) +
     (next === "collapsed" ? " · 向上展開" : " · 向下收合");
   updateCompactWalkControls();
-  requestAnimationFrame(() => map?.resize());
+  requestAnimationFrame(() => { map?.resize(); flushMapFocus(); });
 }
 function setSidePanel(open, userAction = false) {
   sideOpen = !!open;
@@ -251,7 +265,7 @@ function setSidePanel(open, userAction = false) {
   $("panel-toggle").setAttribute("aria-expanded", String(sideOpen));
   $("panel-toggle").textContent = sideOpen ? "❯" : "❮";
   $("panel-toggle").title = sideOpen ? "收合控制面板" : "展開控制面板";
-  requestAnimationFrame(() => map?.resize());
+  requestAnimationFrame(() => { map?.resize(); flushMapFocus(); });
 }
 function applyResponsiveLayout() {
   const kind = deviceKind();
@@ -265,7 +279,7 @@ function applyResponsiveLayout() {
     setSidePanel(!portrait);
   }
   lastDevice = kind;
-  requestAnimationFrame(() => map?.resize());
+  requestAnimationFrame(() => { map?.resize(); flushMapFocus(); });
 }
 function selectMode(next, userAction = true) {
   if (!["TELEPORT","ROUTE"].includes(next)) return;
@@ -349,6 +363,34 @@ $("loop").addEventListener("change", () => {
 });
 $("confirm-snap").addEventListener("change", updateRouteControls);
 
+function flushMapFocus() {
+  try { return cameraFocus.flush(map); }
+  catch (_) { return false; }
+}
+function focusMapPosition(point, zoom = 15, collapse = true) {
+  if (!point || !Number.isFinite(point.lat) || !Number.isFinite(point.lon)) return false;
+  // The grid lays out the actual unobstructed map. On mobile collapse the
+  // workspace after an explicit focus so an expanded sheet cannot shrink it.
+  $("map-locations").open = false;
+  if (collapse && deviceKind() === "mobile") setSheetState("collapsed");
+  cameraFocus.request(point, zoom);
+  return flushMapFocus();
+}
+function reconcileTeleport(state) {
+  const expected = pendingTeleportConfirmation;
+  if (!expected) return;
+  if (expected.session !== token) {
+    pendingTeleportConfirmation = null;
+    return;
+  }
+  if (state?.mockActive && samePosition(state.position,expected.point,8)) {
+    pendingTeleportConfirmation = null;
+    setMessage("已確認手機瞬移至目標位置");
+  } else if (Date.now() >= expected.deadline) {
+    pendingTeleportConfirmation = null;
+    setMessage("地圖已移至目標，但手機尚未確認定位變更；請檢查手機狀態");
+  }
+}
 async function act(path, body, note = "") {
   try {
     const reply = await call(path, "POST", body);
@@ -365,6 +407,9 @@ async function act(path, body, note = "") {
   }
 }
 $("teleport").addEventListener("click", async () => {
+  if (teleportBusy) return;
+  teleportBusy = true;
+  $("teleport").disabled = true;
   try {
     if (latest?.phase === "MOVING" || latest?.phase === "PAUSED") {
       if (!confirm("目前路線尚未停止，先停止行走才能瞬移。")) return;
@@ -383,13 +428,34 @@ $("teleport").addEventListener("click", async () => {
     }
     if (!confirm("確定將手機模擬位置瞬移到所選座標？")) return;
     const destination = readCoordinate();
-    if (!await act("/api/teleport", destination)) return;
-    // The phone accepted the request; centre the *map camera* immediately.
-    // The mock-location service still confirms the actual position separately.
-    map?.jumpTo({center:[destination.lon,destination.lat],
-      zoom:Math.max(15, map.getZoom())});
-    setMessage("已送出瞬移指令，地圖已移至目標；請以手機回報的位置為準");
-  } catch (error) { setMessage(error.message); }
+    const session = token;
+    // Do not use act() here: it awaits a state refresh after HTTP acceptance.
+    // Move the camera synchronously after the accepted command, not after polling.
+    await call("/api/teleport","POST",destination);
+    if (!token || token !== session) return;
+    pendingTeleportConfirmation = {point:destination,session,deadline:Date.now()+15000};
+    const acceptedAt = performance.now();
+    setMessage("瞬移指令已接受；等待手機確認 GPS 位置");
+    if (focusMapPosition(destination,15)) {
+      // Local-only performance measurements, not analytics or telemetry.
+      performance.clearMeasures("pikminbee-teleport-camera");
+      performance.measure("pikminbee-teleport-camera",{start:acceptedAt,end:performance.now()});
+      requestAnimationFrame(() => {
+        performance.clearMeasures("pikminbee-teleport-camera-frame");
+        performance.measure("pikminbee-teleport-camera-frame",{start:acceptedAt,end:performance.now()});
+      });
+    }
+    void refresh();
+  } catch (error) {
+    if ((error.message || "").includes("無法連接手機")) {
+      remoteLinkHealthy = false;
+      updateCompactWalkControls();
+    }
+    setMessage(error.message || "瞬移指令失敗");
+  } finally {
+    teleportBusy = false;
+    updateRouteControls();
+  }
 });
 $("set-origin").addEventListener("click", async () => {
   try { await act("/api/origin", readCoordinate()); }
@@ -495,12 +561,12 @@ $("real").addEventListener("click", async () => {
       latest = await call("/api/state");
       if (!latest.mockActive && latest.position == null) {
         updateStatus(); renderMap();
-        setMessage("已切回真實 GPS 模式；若已在手機允許分享，可按「查看最後真實位置」明確要求取得定位。");
+        setMessage("已切回真實 GPS 模式；若已在手機允許分享，可按「真實位置」取得定位。");
         return;
       }
     } catch (error) { setMessage(error.message || "無法讀取恢復狀態"); return; }
   }
-  setMessage("已送出恢復指令，但手機尚未確認關閉模擬定位；請稍後按「查看手機真實 GPS」。");
+  setMessage("已送出恢復指令，但手機尚未確認關閉模擬定位；請稍後按「真實位置」。");
 });
 
 const darkQuery = matchMedia("(prefers-color-scheme: dark)");
@@ -513,35 +579,30 @@ function webThemeIsDark() {
   const chosenTheme = $("web-appearance").value;
   return chosenTheme === "dark" || (chosenTheme === "auto" && darkQuery.matches);
 }
-const styles = ["auto","positron","bright","dark"];
-const storeKey = "pikminbee-map-appearance";
-const savedStyle = localStorage.getItem(storeKey) || "auto";
-// Migrate the retired Liberty option without fetching it again.
-$("theme").value = savedStyle === "liberty" ? "positron" :
-  (styles.includes(savedStyle) ? savedStyle : "auto");
-$("theme-settings").value = $("theme").value;
-function styleUrl() {
-  const choice = $("theme").value;
-  const name = choice === "auto" ? (webThemeIsDark() ? "dark" : "positron") :
-    (styles.includes(choice) ? choice : "positron");
-  return "https://tiles.openfreemap.org/styles/" + name;
+// The retired individual basemap preferences are no longer needed.
+localStorage.removeItem("pikminbee-map-appearance");
+function styleUrl() { return BRIGHT_STYLE_URL; }
+async function loadBrightPalette() {
+  if (brightDarkPalette) return;
+  const response = await fetch("/bright-dark-palette.json",{cache:"no-store"});
+  if (!response.ok) throw Error("無法載入地圖明暗配色");
+  brightDarkPalette = await response.json();
 }
-
-/** OpenFreeMap Dark uses near-black minor roads on a near-black background.
- *  Brighten known road paint layers only; keep tiles, labels and palette intact.
- *  Ignore missing layers if the provider changes its published style. */
-function improveDarkRoadLegibility() {
-  if (!map || !styleUrl().endsWith("/dark")) return;
-  const roadColours = {
-    highway_path: "#475762",
-    highway_minor: "#394852",
-    highway_major_inner: "#536572",
-    highway_major_subtle: "#3D4E5A",
-    highway_motorway_inner: "#637784",
-    highway_motorway_subtle: "#445662"
-  };
-  for (const [id, colour] of Object.entries(roadColours)) {
-    if (map.getLayer(id)) map.setPaintProperty(id, "line-color", colour);
+function applyBrightPalette() {
+  if (!map || !mapStyleReady || !brightDarkPalette) return;
+  const dark = webThemeIsDark();
+  // Recolour only original Bright paint; preserve layout/filters/zoom/source.
+  // Capture the original values once so a light/dark switch does not reload tiles.
+  for (const group of brightDarkPalette) {
+    for (const id of group.layers) {
+      if (!map.getLayer(id)) continue;
+      const key = id + "|" + group.property;
+      if (!originalBrightPaint.has(key))
+        originalBrightPaint.set(key,map.getPaintProperty(id,group.property));
+      const value = dark ? group.value : originalBrightPaint.get(key);
+      if (value !== undefined || dark) map.setPaintProperty(id,group.property,value);
+      else map.setPaintProperty(id,group.property,null);
+    }
   }
 }
 /** Trust only the phone-authorised, time-bounded physical snapshot. The
@@ -598,38 +659,22 @@ function reloadMap() {
   initialiseMap();
 }
 $("retry-map").addEventListener("click", reloadMap);
-function chooseMapStyle(choice = $("theme").value) {
-  const selectedStyle = styles.includes(choice) ? choice : "auto";
-  $("theme").value = selectedStyle;
-  $("theme-settings").value = selectedStyle;
-  localStorage.setItem(storeKey, selectedStyle);
-  if (map) {
-    armMapWait();
-    mapStyleReady = false;
-    lastLineKey = ""; lastDraftKey = "";
-    try { map.setStyle(styleUrl()); map.resize(); }
-    catch (error) { setMapStatus("error", "無法切換地圖底圖，請按重新載入地圖。"); }
-  }
-}
 function chooseWebAppearance() {
   const choice = $("web-appearance").value;
   const selectedTheme = webThemes.includes(choice) ? choice : "auto";
   document.documentElement.dataset.webTheme = selectedTheme;
   localStorage.setItem(webThemeStoreKey, selectedTheme);
-  if ($("theme").value === "auto") chooseMapStyle("auto");
+  applyBrightPalette();
 }
-$("theme").addEventListener("change", () => chooseMapStyle($("theme").value));
-$("theme-settings").addEventListener("change", () =>
-  chooseMapStyle($("theme-settings").value));
 $("web-appearance").addEventListener("change", chooseWebAppearance);
 darkQuery.addEventListener?.("change", () => {
-  if ($("web-appearance").value === "auto" && $("theme").value === "auto" && map)
-    chooseMapStyle("auto");
+  if ($("web-appearance").value === "auto") applyBrightPalette();
 });
 async function initialiseMap() {
   if (map) return;
   armMapWait();
   try {
+    await loadBrightPalette();
     maplibre = await import("/vendor/maplibre-gl.mjs");
     // Use the packaged MapLibre 6.18.0 worker. Auto-detection otherwise
     // requests a missing /vendor/maplibre-gl-worker.mjs?v=6.18.0 file.
@@ -642,15 +687,18 @@ async function initialiseMap() {
       maxTileCacheSize: 45
     });
     map.addControl(new maplibre.NavigationControl({showCompass:false}),"top-right");
+    map.on("dragstart", () => cameraFocus.clear());
     map.on("click", e => {
       showCoordinate({lat:e.lngLat.lat,lon:e.lngLat.lng});
       renderMap();
     });
     map.on("style.load", () => {
       mapStyleReady = true;
-      improveDarkRoadLegibility();
+      originalBrightPaint = new Map();
+      applyBrightPalette();
       lastLineKey = ""; lastDraftKey = "";
       renderMap();
+      flushMapFocus();
     });
     map.on("error", event => {
       const message = String(event?.error?.message || event?.message || "");
@@ -665,6 +713,7 @@ async function initialiseMap() {
       // Changing display:none to a grid/flex layout may require recalculation.
       map.resize();
       renderMap();
+      flushMapFocus();
       if (!mapLastError) { clearMapWait(); setMapStatus("ready"); }
     });
     map.on("idle", () => {
@@ -677,10 +726,12 @@ async function initialiseMap() {
       setMapStatus("error", "瀏覽器地圖繪圖中斷，請按重新載入地圖。");
     });
     if ("ResizeObserver" in window) {
-      mapResizeObserver = new ResizeObserver(() => { if (map) map.resize(); });
+      mapResizeObserver = new ResizeObserver(() => {
+        if (map) { map.resize(); flushMapFocus(); }
+      });
       mapResizeObserver.observe($("map"));
     }
-    requestAnimationFrame(() => { if (map) map.resize(); });
+    requestAnimationFrame(() => { if (map) { map.resize(); flushMapFocus(); } });
   } catch (error) {
     clearMapWait();
     setMapStatus("error",
@@ -701,6 +752,8 @@ function ordinalPin(label, variant = "") {
 function currentPositionDot(simulated) {
   const pin = document.createElement("div");
   pin.className = "position-dot " + (simulated ? "virtual" : "real");
+  // Preserve MapLibre's absolute positioning (never put markers in normal flow).
+  pin.style.position = "absolute";
   pin.setAttribute("role", "img");
   pin.setAttribute("aria-label", simulated
     ? "手機目前模擬 GPS 位置" : "手機最後驗證的真實 GPS 位置（非即時）");
@@ -715,14 +768,11 @@ function routeOriginPin() {
   return pin;
 }
 
-function nearSameCoordinate(a, b) {
-  return !!(a && b && Math.abs(a.lat - b.lat) < 0.000015 &&
-    Math.abs(a.lon - b.lon) < 0.000015);
-}
 function renderMap() {
   if (!map) return;
-  if (latest?.position) {
-    const p = latest.position;
+  const virtual = latest?.mockActive ? latest.position : null;
+  if (virtual) {
+    const p = virtual;
     if (!positionMarker) positionMarker = new maplibre.Marker({
       element:currentPositionDot(true),anchor:"center"
     }).setLngLat([p.lon,p.lat])
@@ -731,10 +781,11 @@ function renderMap() {
   } else if (positionMarker) { positionMarker.remove(); positionMarker = null; }
   // Physical and virtual phone locations must never share a marker or source.
   const physical = trustedRealPosition();
-  if (physical) {
+  if (physical && !samePosition(physical,virtual)) {
     const when = new Date(physical.capturedAtMillis).toLocaleTimeString("zh-TW",
       {hour:"2-digit",minute:"2-digit"});
-    const label = "最後驗證的真實 GPS（非即時） · " + when;
+    const historical = !!physical.historical || !!latest?.mockActive;
+    const label = (historical ? "最後真實 GPS（歷史快照） · " : "最近真實 GPS · ") + when;
     if (!realMarker) realMarker = new maplibre.Marker({
       element:currentPositionDot(false),anchor:"center"
     }).setLngLat([physical.lon,physical.lat])
@@ -743,11 +794,13 @@ function renderMap() {
       realMarker.setLngLat([physical.lon,physical.lat]);
       realMarker.getPopup()?.setText(label);
     }
+    realMarker.getElement().dataset.historical = String(historical);
+    realMarker.getElement().setAttribute("aria-label",label);
   } else if (realMarker) { realMarker.remove(); realMarker = null; }
   const origin = latest?.origin;
   // Do not pile an origin icon on top of the actual current-position dot.
-  const showOrigin = origin && !nearSameCoordinate(origin,latest?.position) &&
-    !nearSameCoordinate(origin,physical);
+  const showOrigin = origin && !samePosition(origin,virtual) &&
+    !samePosition(origin,physical);
   if (showOrigin) {
     if (!originMarker) originMarker = new maplibre.Marker({
       element:routeOriginPin(),anchor:"center"
@@ -755,7 +808,7 @@ function renderMap() {
       .setPopup(new maplibre.Popup().setText("路線起點")).addTo(map);
     else originMarker.setLngLat([origin.lon,origin.lat]);
   } else if (originMarker) { originMarker.remove(); originMarker = null; }
-  if (chosen) {
+  if (chosen && !samePosition(chosen,virtual) && !samePosition(chosen,physical)) {
     if (!selectionMarker) selectionMarker = new maplibre.Marker({color:"#527887"})
       .setLngLat([chosen.lon,chosen.lat])
       .setPopup(new maplibre.Popup().setText("目前選取位置")).addTo(map);
@@ -873,7 +926,7 @@ function renderRouteOrder() {
       view.textContent = "查看";
       view.setAttribute("aria-label", "在地圖查看" + (index < 0 ? "路線起點" : label + " " + (index + 1)));
       view.addEventListener("click", () => {
-        map?.flyTo({center:[point.lon,point.lat],zoom:16});
+        focusMapPosition(point,16);
       });
       li.append(view);
     }
@@ -934,7 +987,7 @@ function updateRouteControls() {
   $("pause").disabled = !moving;
   $("resume").disabled = !paused;
   $("stop").disabled = !moving && !paused;
-  $("teleport").disabled = moving || paused;
+  $("teleport").disabled = teleportBusy || !connected || !remoteLinkHealthy || moving || paused;
 }
 function updateCompactWalkControls() {
   const phase = latest?.phase || "IDLE";
@@ -975,9 +1028,7 @@ function updateStatus() {
       formatDistance(progress.totalMetres) + " · " +
       Math.round((progress.fraction||0)*100) + "%" : "");
   $("progressbar").style.width = Math.round(Math.min(1, Math.max(0, progress.fraction || 0))*100) + "%";
-  $("status").textContent = (latest?.status || "尚未模擬定位") +
-    (latest?.position ? " · " + latest.position.lat.toFixed(5) +
-      ", " + latest.position.lon.toFixed(5) : "");
+  $("status").textContent = latest?.status || "待命";
   $("mobile-state").textContent = names[phase] || "手機待命";
   $("mobile-steps").textContent = "本次估算 " + count + " 步";
   const real = trustedRealPosition();
@@ -986,15 +1037,23 @@ function updateStatus() {
     "目前虛擬 GPS · " + latest.position.lat.toFixed(6) + ", " +
       latest.position.lon.toFixed(6) + "（模擬定位中）" :
     "虛擬 GPS 未啟用 · 不代表已有真實衛星定位";
-  $("location-toggle-label").textContent = latest?.mockActive ?
-    "虛擬 GPS 使用中 · 查看位置資訊" : "真實 GPS 模式 · 查看位置資訊";
+  const activePosition = currentPosition(latest,real);
+  $("current-position-icon").dataset.mode = !activePosition || !remoteLinkHealthy ? "unknown" :
+    activePosition.simulated ? "mock" : "real";
+  $("current-location-label").textContent = !remoteLinkHealthy ? "連線中斷" :
+    !activePosition ? (latest?.mockActive ? "模擬位置待確認" : "真實位置待確認") :
+    activePosition.simulated ? "目前模擬位置" :
+      activePosition.historical ? "最後真實位置（歷史）" : "最近真實位置";
+  $("current-coordinate").textContent = activePosition && remoteLinkHealthy ?
+    activePosition.point.lat.toFixed(6) + ", " + activePosition.point.lon.toFixed(6) : "—";
   const locationStatus = $("real-location-status");
   locationStatus.dataset.state = real ? "ready" :
     gpsState === "unavailable" ? "error" : gpsState;
   if (real) {
     const captured = new Date(real.capturedAtMillis).toLocaleTimeString("zh-TW",
       {hour:"2-digit",minute:"2-digit"});
-    locationStatus.textContent = "最後真實位置（非即時） · " +
+    locationStatus.textContent = (real.historical ? "最後真實位置（歷史快照） · " :
+      "最近真實位置（手機授權） · ") +
       real.lat.toFixed(6) + ", " + real.lon.toFixed(6) +
       " · " + captured + " 取得" +
       (Number.isFinite(real.accuracy) ?
@@ -1011,8 +1070,12 @@ function updateStatus() {
     locationStatus.textContent =
       "真實 GPS 尚無有效快照或已逾 30 分鐘；請返回真實模式重新取得";
   }
-  $("find-real").disabled = !latest?.realLocationSharingApproved;
-  $("follow").disabled = !latest?.position;
+  // Keep these tools discoverable even before sharing/locating. The handlers
+  // explain the required permission, and never alter the device GPS themselves.
+  $("find-real").disabled = !connected || !remoteLinkHealthy;
+  $("follow").disabled = !connected || !remoteLinkHealthy;
+  $("find-real").title = latest?.realLocationSharingApproved ?
+    "查看手機授權的真實位置（不停止模擬）" : "請先於手機 Wi-Fi 設定授權真實位置分享";
   const activeWalk = phase === "MOVING" || phase === "PAUSED";
   $("motion-controls").classList.toggle("is-active", activeWalk);
   document.body.classList.toggle("has-active-controls", activeWalk);
@@ -1035,7 +1098,11 @@ async function refresh() {
       Math.max(0, Number(latest.sessionExpiresInSeconds) || 0) * 1000;
     updateSessionExpiry();
     $("connection").textContent = "已連結手機";
-    current = latest.position;
+    current = latest.mockActive ? latest.position : null;
+    $("app-version").textContent = typeof latest.appVersionDisplay === "string" ?
+      latest.appVersionDisplay : "版本待確認";
+    $("app-version").title = latest.appVersionCode != null ?
+      "手機 App 版本碼：" + latest.appVersionCode : "手機 App 版本";
     if (!speedEditing) {
       const profile = latest.speedMode || "PRESET";
       $("speed").value = profile === "FIXED" || profile === "RANGE"
@@ -1057,11 +1124,13 @@ async function refresh() {
     updateStatus();
     updateRouteControls();
     renderMap();
+    reconcileTeleport(latest);
     refreshSavedClocks();
     if (focusRealWhenReady && trustedRealPosition()) {
       const p = trustedRealPosition();
       focusRealWhenReady = false;
-      map?.flyTo({center:[p.lon,p.lat],zoom:16});
+      setMessage("已移至手機授權的最近真實位置，沒有變更 GPS");
+      focusMapPosition(p,16);
     }
     if (focusRealWhenReady && ["unavailable","mock","locked"].includes(latest?.realGpsState))
       focusRealWhenReady = false;
@@ -1070,6 +1139,8 @@ async function refresh() {
       if (renewingSession && error.message === "等待續期完成，忽略舊狀態")
         return;
       remoteLinkHealthy = false;
+      cameraFocus.clear();
+      focusRealWhenReady = false;
       $("connection").textContent = "手機連線中斷";
       // Never continue to show previously received precise physical coordinates
       // after the authorised session or network connection is lost.
@@ -1084,27 +1155,38 @@ async function refresh() {
     }
   } finally { refreshing = false; }
 }
-$("find-real").addEventListener("click", async () => {
+async function focusTrustedReal() {
+  if (!connected || !remoteLinkHealthy || !token) {
+    setMessage("手機未連線，無法取得位置");
+    return;
+  }
+  if (!latest?.realLocationSharingApproved) {
+    setMessage("請先在手機 Wi-Fi 控制設定核准此瀏覽器的真實 GPS 分享");
+    return;
+  }
   const cached = trustedRealPosition();
   if (cached) {
-    map?.flyTo({center:[cached.lon,cached.lat],zoom:16});
-    setMessage("正在查看最後真實 GPS 快照（非即時），沒有變更手機定位");
+    setMessage(cached.historical ?
+      "查看最後真實位置（歷史快照），沒有變更手機 GPS" :
+      "查看手機最近真實位置，沒有變更 GPS");
+    focusMapPosition(cached,16);
     return;
   }
   if (latest?.mockActive) {
-    setMessage("目前是虛擬 GPS，沒有可顯示的歷史真實座標；請先切回真實定位取得");
+    setMessage("模擬定位中，沒有有效的真實位置快照；可手動恢復真實 GPS 後再取得");
     return;
   }
   focusRealWhenReady = true;
   if (!await act("/api/location/real",{})) focusRealWhenReady = false;
-});
-$("follow").addEventListener("click", () => {
-  if (!current) {
-    setMessage("手機尚未啟動模擬定位；可先在地圖選起點，或輸入經緯度。");
-    return;
+}
+$("find-real").addEventListener("click", focusTrustedReal);
+$("follow").addEventListener("click", async () => {
+  if (latest?.mockActive && latest.position && remoteLinkHealthy) {
+    setMessage("已回到目前模擬位置，沒有瞬移");
+    focusMapPosition(latest.position,15);
+  } else {
+    await focusTrustedReal();
   }
-  if (map) map.flyTo({center:[current.lon,current.lat],zoom:15});
-  else setMessage("地圖未載入，仍可使用手機提供的座標或外部地圖。");
 });
 
 function zoneParts(zone, date = new Date()) {
@@ -1212,7 +1294,7 @@ function renderSaved() {
     view.addEventListener("click",()=>{
       showCoordinate(place.position);selectMode("TELEPORT");
       $("saved-dialog").close();
-      map?.flyTo({center:[place.position.lon,place.position.lat],zoom:15});
+      focusMapPosition(place.position,15);
       setMessage("已選取收藏位置；沒有自動瞬移");
     });
     const rename=document.createElement("button");rename.type="button";

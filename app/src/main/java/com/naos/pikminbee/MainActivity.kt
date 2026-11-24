@@ -83,7 +83,6 @@ import com.naos.pikminbee.flower.FlowerCatalogStore
 import com.naos.pikminbee.flower.FlowerJsonCodec
 import com.naos.pikminbee.data.MapAppearance
 import com.naos.pikminbee.data.MapProvider
-import com.naos.pikminbee.data.FreeMapStyle
 import com.naos.pikminbee.data.MapBasemapPolicy
 import com.naos.pikminbee.data.RouteDraftState
 import com.naos.pikminbee.data.PreparedRouteState
@@ -115,6 +114,7 @@ import com.naos.pikminbee.ui.LocationMap
 import com.naos.pikminbee.ui.VerifiedPhysicalFixState
 import com.naos.pikminbee.ui.rememberDeviceLocation
 import com.naos.pikminbee.ui.MapCameraRequest
+import com.naos.pikminbee.ui.MapViewport
 import com.naos.pikminbee.ui.JourneyControls
 import com.naos.pikminbee.ui.RouteLibraryPanel
 import com.naos.pikminbee.ui.FavouritesPanel
@@ -191,7 +191,6 @@ private fun PikminBeeScreen() {
     val checkpoint by CheckpointStatus.last.collectAsState()
     val systemDark = androidx.compose.foundation.isSystemInDarkTheme()
     var provider by remember { mutableStateOf(prefs.provider()) }
-    var freeMapStyle by remember { mutableStateOf(prefs.freeMapStyle()) }
     var appearance by remember { mutableStateOf(prefs.appearance()) }
     val naosFamily = NaosThemeFamily.MINERAL
     val naosMaterial = NaosGlassMaterial.REGULAR
@@ -214,6 +213,7 @@ private fun PikminBeeScreen() {
     var mapExplore by remember { mutableStateOf(false) }
     var cameraSerial by remember { mutableIntStateOf(0) }
     var cameraRequest by remember { mutableStateOf<MapCameraRequest?>(null) }
+    var mapViewport by remember { mutableStateOf<MapViewport?>(null) }
     var initiallyFocusedOnPhone by remember { mutableStateOf(false) }
     val controlsScroll = rememberScrollState()
     var latitudeText by remember { mutableStateOf(selected.latitude.toString()) }
@@ -869,7 +869,6 @@ private fun PikminBeeScreen() {
             BeePage.SETTINGS -> BeeSettingsScreen(
                 dark = dark,
                 provider = provider,
-                freeMapStyle = freeMapStyle,
                 appearance = appearance,
                 defaultSpeed = defaultSpeedPreset,
                 virtualStrideMetres = virtualStrideMetres,
@@ -881,10 +880,6 @@ private fun PikminBeeScreen() {
                 onProvider = {
                     provider = it
                     prefs.setProvider(it)
-                },
-                onFreeMapStyle = {
-                    freeMapStyle = it
-                    prefs.setFreeMapStyle(it)
                 },
                 onAppearance = {
                     appearance = it
@@ -1003,8 +998,12 @@ private fun PikminBeeScreen() {
                 stops = if (tab == ToolTab.ROUTE) roadStops else emptyList(),
                 road = displayedRoad,
                 previewRoad = tab == ToolTab.ROUTE && !activeRouteWalk && routePreviewReady,
-                freeMapStyle = freeMapStyle,
                 cameraRequest = cameraRequest,
+                viewport = mapViewport,
+                onViewport = { mapViewport = it },
+                onCameraApplied = { id ->
+                    if (cameraRequest?.id == id) cameraRequest = null
+                },
                 mapExplore = mapExplore,
                 onCameraFailure = { message = it },
                 flowerSpots = emptyList(),

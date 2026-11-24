@@ -1,0 +1,391 @@
+[
+  {
+    "property": "background-color",
+    "value": "#172127",
+    "layers": [
+      "background"
+    ]
+  },
+  {
+    "property": "fill-color",
+    "value": "#a6b2ba",
+    "layers": [
+      "landcover-glacier",
+      "landcover-ice-shelf"
+    ]
+  },
+  {
+    "property": "fill-color",
+    "value": [
+      "interpolate",
+      [
+        "linear"
+      ],
+      [
+        "zoom"
+      ],
+      12,
+      "rgba(38,52,61,0.4)",
+      16,
+      "rgba(38,52,61,0.2)"
+    ],
+    "layers": [
+      "landuse-residential"
+    ]
+  },
+  {
+    "property": "fill-color",
+    "value": [
+      "interpolate",
+      [
+        "linear"
+      ],
+      [
+        "zoom"
+      ],
+      8,
+      "rgba(38,52,61,0.4)",
+      10,
+      "rgba(38,52,61,0.0)"
+    ],
+    "layers": [
+      "landuse-suburb"
+    ]
+  },
+  {
+    "property": "fill-color",
+    "value": "rgba(66,55,62,0.35)",
+    "layers": [
+      "landuse-commercial"
+    ]
+  },
+  {
+    "property": "fill-color",
+    "value": "rgba(55,54,46,0.48)",
+    "layers": [
+      "landuse-industrial"
+    ]
+  },
+  {
+    "property": "fill-color",
+    "value": "#304139",
+    "layers": [
+      "landuse-cemetery"
+    ]
+  },
+  {
+    "property": "fill-color",
+    "value": "#3d3039",
+    "layers": [
+      "landuse-hospital"
+    ]
+  },
+  {
+    "property": "fill-color",
+    "value": "#343645",
+    "layers": [
+      "landuse-school"
+    ]
+  },
+  {
+    "property": "fill-color",
+    "value": "rgba(55,62,68,0.4)",
+    "layers": [
+      "landuse-railway"
+    ]
+  },
+  {
+    "property": "fill-color",
+    "value": "#283d35",
+    "layers": [
+      "park",
+      "landcover-wood",
+      "landcover-grass",
+      "landcover-grass-park"
+    ]
+  },
+  {
+    "property": "fill-outline-color",
+    "value": "rgba(112,138,125,0.12)",
+    "layers": [
+      "landcover-wood"
+    ]
+  },
+  {
+    "property": "line-color",
+    "value": "#41616e",
+    "layers": [
+      "waterway_tunnel",
+      "waterway-other",
+      "waterway-other-intermittent",
+      "waterway-stream-canal",
+      "waterway-stream-canal-intermittent",
+      "waterway-river",
+      "waterway-river-intermittent"
+    ]
+  },
+  {
+    "property": "fill-color",
+    "value": "#233b46",
+    "layers": [
+      "water",
+      "water-intermittent"
+    ]
+  },
+  {
+    "property": "fill-color",
+    "value": "#3b3b34",
+    "layers": [
+      "landcover-sand"
+    ]
+  },
+  {
+    "property": "fill-color",
+    "value": [
+      "interpolate",
+      [
+        "linear"
+      ],
+      [
+        "zoom"
+      ],
+      15.5,
+      "#26343d",
+      16,
+      "#2e3c45"
+    ],
+    "layers": [
+      "building"
+    ]
+  },
+  {
+    "property": "fill-color",
+    "value": "#293740",
+    "layers": [
+      "building-top"
+    ]
+  },
+  {
+    "property": "fill-outline-color",
+    "value": "#3a4851",
+    "layers": [
+      "building-top"
+    ]
+  },
+  {
+    "property": "line-color",
+    "value": "#27333b",
+    "layers": [
+      "tunnel-service-track-casing",
+      "tunnel-minor-casing",
+      "highway-minor-casing",
+      "bridge-minor-casing",
+      "bridge-path-casing"
+    ]
+  },
+  {
+    "property": "line-color",
+    "value": "#34424a",
+    "layers": [
+      "tunnel-motorway-link-casing",
+      "tunnel-link-casing",
+      "tunnel-secondary-tertiary-casing",
+      "tunnel-trunk-primary-casing",
+      "tunnel-motorway-casing",
+      "highway-motorway-link-casing",
+      "highway-link-casing",
+      "highway-secondary-tertiary-casing",
+      "highway-primary-casing",
+      "highway-trunk-casing",
+      "highway-motorway-casing",
+      "bridge-motorway-link-casing",
+      "bridge-link-casing",
+      "bridge-secondary-tertiary-casing",
+      "bridge-trunk-primary-casing",
+      "bridge-motorway-casing"
+    ]
+  },
+  {
+    "property": "line-color",
+    "value": "#50616a",
+    "layers": [
+      "tunnel-path",
+      "highway-path",
+      "bridge-path"
+    ]
+  },
+  {
+    "property": "line-color",
+    "value": "#46555f",
+    "layers": [
+      "tunnel-service-track",
+      "tunnel-minor",
+      "highway-minor",
+      "bridge-minor"
+    ]
+  },
+  {
+    "property": "line-color",
+    "value": "#64747d",
+    "layers": [
+      "tunnel-motorway-link",
+      "tunnel-link",
+      "tunnel-secondary-tertiary",
+      "tunnel-trunk-primary",
+      "highway-motorway-link",
+      "highway-link",
+      "highway-secondary-tertiary",
+      "highway-primary",
+      "highway-trunk",
+      "bridge-motorway-link",
+      "bridge-link",
+      "bridge-secondary-tertiary",
+      "bridge-trunk-primary"
+    ]
+  },
+  {
+    "property": "line-color",
+    "value": "#75828b",
+    "layers": [
+      "tunnel-motorway",
+      "highway-motorway",
+      "bridge-motorway"
+    ]
+  },
+  {
+    "property": "line-color",
+    "value": "#6b7580",
+    "layers": [
+      "tunnel-railway",
+      "railway-transit",
+      "railway-transit-hatching",
+      "railway-service",
+      "railway-service-hatching",
+      "railway",
+      "railway-hatching",
+      "bridge-railway",
+      "bridge-railway-hatching",
+      "cablecar",
+      "cablecar-dash"
+    ]
+  },
+  {
+    "property": "line-color",
+    "value": "#7695a3",
+    "layers": [
+      "ferry"
+    ]
+  },
+  {
+    "property": "line-color",
+    "value": "#3b4851",
+    "layers": [
+      "aeroway-taxiway-casing",
+      "aeroway-runway-casing"
+    ]
+  },
+  {
+    "property": "line-color",
+    "value": "#64747d",
+    "layers": [
+      "aeroway-taxiway",
+      "aeroway-runway"
+    ]
+  },
+  {
+    "property": "fill-color",
+    "value": "#35434c",
+    "layers": [
+      "aeroway-area",
+      "highway-area",
+      "road_area_pier"
+    ]
+  },
+  {
+    "property": "fill-outline-color",
+    "value": "#48565f",
+    "layers": [
+      "highway-area"
+    ]
+  },
+  {
+    "property": "line-color",
+    "value": "#43515a",
+    "layers": [
+      "road_pier"
+    ]
+  },
+  {
+    "property": "line-color",
+    "value": "#7c8790",
+    "layers": [
+      "boundary_3",
+      "boundary_2",
+      "boundary_disputed"
+    ]
+  },
+  {
+    "property": "text-color",
+    "value": "#91b6c5",
+    "layers": [
+      "waterway_line_label",
+      "water_name_point_label",
+      "water_name_line_label"
+    ]
+  },
+  {
+    "property": "text-color",
+    "value": "#b5c3cb",
+    "layers": [
+      "poi_r20",
+      "poi_r7",
+      "poi_r1",
+      "poi_transit",
+      "highway-name-path",
+      "highway-name-minor",
+      "highway-name-major",
+      "airport"
+    ]
+  },
+  {
+    "property": "text-color",
+    "value": "#d6e0e5",
+    "layers": [
+      "label_other",
+      "label_village",
+      "label_town",
+      "label_state",
+      "label_city",
+      "label_city_capital",
+      "label_country_3",
+      "label_country_2",
+      "label_country_1"
+    ]
+  },
+  {
+    "property": "text-halo-color",
+    "value": "#172127",
+    "layers": [
+      "waterway_line_label",
+      "water_name_point_label",
+      "water_name_line_label",
+      "poi_r20",
+      "poi_r7",
+      "poi_r1",
+      "poi_transit",
+      "highway-name-path",
+      "highway-name-minor",
+      "highway-name-major",
+      "airport",
+      "label_other",
+      "label_village",
+      "label_town",
+      "label_state",
+      "label_city",
+      "label_city_capital",
+      "label_country_3",
+      "label_country_2",
+      "label_country_1"
+    ]
+  }
+]

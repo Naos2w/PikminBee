@@ -19,6 +19,7 @@ import com.naos.pikminbee.domain.WalkPhase
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import com.naos.pikminbee.data.AppPreferences
+import com.naos.pikminbee.data.InstalledAppVersion
 import com.naos.pikminbee.data.PlaceLookup
 import com.naos.pikminbee.data.PlaceSuggestion
 import com.naos.pikminbee.data.PlaceSuggestionPolicy
@@ -79,6 +80,7 @@ object LanWifiAddress {
  */
 class LanController(private val context: Context) {
     private val prefs = AppPreferences(context)
+    private val installedVersion = InstalledAppVersion.read(context)
     private val placeLookup = PlaceLookup(context)
     private val pairing = LanPairing()
     private val rateLimiter = LanRateLimiter()
@@ -242,6 +244,12 @@ class LanController(private val context: Context) {
         }
         if (req.method == "GET" && req.path == "/controller.js") {
             return asset("lan/controller.js", "application/javascript; charset=utf-8")
+        }
+        if (req.method == "GET" && req.path == "/bright-dark-palette.json") {
+            return asset("lan/bright-dark-palette.json", "application/json; charset=utf-8")
+        }
+        if (req.method == "GET" && req.path == "/map-ui-policy.mjs") {
+            return asset("lan/map-ui-policy.mjs", "application/javascript; charset=utf-8")
         }
         if (req.method == "GET" && req.path == "/vendor/maplibre-gl.mjs") {
             return asset("lan/vendor/maplibre-gl/maplibre-gl.mjs", "application/javascript; charset=utf-8")
@@ -851,6 +859,10 @@ class LanController(private val context: Context) {
             ?.takeIf { it.freshId(now) != null }
         return JSONObject()
             .put("sessionExpiresInSeconds", pairing.secondsRemaining(requesterToken, requesterPeer))
+            .put("appVersionName", installedVersion.name ?: JSONObject.NULL)
+            .put("appVersionCode", installedVersion.code ?: JSONObject.NULL)
+            .put("appEnvironment", installedVersion.environment)
+            .put("appVersionDisplay", installedVersion.displayName)
             .put("status", LocationStatus.display.value)
             .put("note", LanStatus.display.value.note)
             .put("position", position?.let { JSONObject().put("lat", it.latitude).put("lon", it.longitude) })
