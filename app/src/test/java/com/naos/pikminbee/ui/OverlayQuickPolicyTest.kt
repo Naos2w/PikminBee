@@ -26,7 +26,7 @@ class OverlayQuickPolicyTest {
                 OverlayQuickAction.CLOSE),
             OverlayQuickPolicy.bottomRow,
         )
-        assertFalse(OverlayQuickPolicy.bottomRow.contains(OverlayQuickAction.FLOWER_VISION))
+        assertFalse(OverlayQuickAction.entries.any { it.name == "FLOWER_VISION" })
         assertEquals(7, (OverlayQuickPolicy.topRow + OverlayQuickPolicy.bottomRow).distinct().size)
     }
 

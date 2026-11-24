@@ -5,7 +5,7 @@ import com.naos.pikminbee.domain.WalkSpeedPreset
 
 /** First-level controls never edit routes or silently restart movement. */
 enum class OverlayQuickAction {
-    PRIMARY, STOP, REAL_GPS, VIRTUAL_GPS, FLOWER_VISION, SPEED, MAP, CLOSE
+    PRIMARY, STOP, REAL_GPS, VIRTUAL_GPS, SPEED, MAP, CLOSE
 }
 
 enum class OverlayPrimaryState { START, PAUSE, RESUME }

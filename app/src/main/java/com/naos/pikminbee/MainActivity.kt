@@ -79,10 +79,7 @@ import com.naos.pikminbee.data.PlaceSuggestionPolicy
 import com.naos.pikminbee.data.SavedPlaceMetadataPolicy
 import com.naos.pikminbee.data.VerifiedRealTimeZone
 import com.naos.pikminbee.flower.FlowerCatalogStore
-import com.naos.pikminbee.flower.FlowerCatalogState
-import com.naos.pikminbee.flower.FlowerFinder
 import com.naos.pikminbee.flower.FlowerJsonCodec
-import com.naos.pikminbee.flower.FlowerImport
 import com.naos.pikminbee.data.MapAppearance
 import com.naos.pikminbee.data.MapProvider
 import com.naos.pikminbee.data.FreeMapStyle
@@ -101,7 +98,6 @@ import com.naos.pikminbee.domain.Coordinate
 import com.naos.pikminbee.domain.MapCameraGeometry
 import com.naos.pikminbee.domain.RoutePointDraft
 import com.naos.pikminbee.domain.PreparedWalkingRoute
-import com.naos.pikminbee.domain.FlowerMapDraft
 import com.naos.pikminbee.domain.WalkMode
 import com.naos.pikminbee.domain.WalkPhase
 import com.naos.pikminbee.domain.WalkingGeometry
@@ -121,10 +117,6 @@ import com.naos.pikminbee.ui.MapCameraRequest
 import com.naos.pikminbee.ui.JourneyControls
 import com.naos.pikminbee.ui.RouteLibraryPanel
 import com.naos.pikminbee.ui.FavouritesPanel
-import com.naos.pikminbee.ui.FlowerCatalogPanel
-import com.naos.pikminbee.ui.FlowerMapControls
-import com.naos.pikminbee.ui.FlowerMapPick
-import com.naos.pikminbee.ui.FlowerVisionPanel
 import com.naos.pikminbee.ui.WifiControlPanel
 import com.naos.pikminbee.ui.BackgroundSessionPanel
 import com.naos.pikminbee.ui.MapFirstShell
@@ -151,10 +143,8 @@ private val darkGlass = Color(0xFF1E2B3C).copy(alpha = 0.985f)
 class MainActivity : ComponentActivity() {
     companion object {
         const val EXTRA_OPEN_SETTINGS = "com.naos.pikminbee.OPEN_SETTINGS"
-        const val EXTRA_OPEN_FLOWER_VISION = "com.naos.pikminbee.OPEN_FLOWER_VISION"
         const val EXTRA_OPEN_MODE = "com.naos.pikminbee.OPEN_MODE"
         val settingsRequests = MutableStateFlow(0L)
-        val flowerVisionRequests = MutableStateFlow(0L)
         val mapModeRequests = MutableStateFlow(-1)
     }
     override fun onNewIntent(intent: Intent) {
@@ -162,9 +152,6 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         if (intent.getBooleanExtra(EXTRA_OPEN_SETTINGS, false))
             settingsRequests.value++
-        // Legacy requests may still arrive from an older overlay; do not reopen Seeking Flowers.
-        if (intent.getBooleanExtra(EXTRA_OPEN_FLOWER_VISION, false))
-            flowerVisionRequests.value++
         val selectedMode = intent.getIntExtra(EXTRA_OPEN_MODE, -1)
         if (selectedMode in 0..3) mapModeRequests.value = selectedMode
     }
@@ -177,7 +164,7 @@ class MainActivity : ComponentActivity() {
 private enum class BeePage { MAP, SETTINGS, PERMISSIONS }
 
 private enum class ToolTab(val label: String) {
-    TELEPORT("瞬移"), ROUTE("路徑"), FLOWERS("尋花"), SAVED("收藏")
+    TELEPORT("瞬移"), ROUTE("路徑")
 }
 
 @Composable
@@ -198,7 +185,6 @@ private fun PikminBeeScreen() {
     val prefs = remember(context) { AppPreferences(context) }
     val placeLookup = remember(context) { PlaceLookup(context) }
     val flowerCatalog = remember(context) { FlowerCatalogStore(context) }
-    val allFlowers by FlowerCatalogState.spots.collectAsState()
     remember(context) { SessionJournal(context).also { it.read() } }
     val checkpoint by CheckpointStatus.last.collectAsState()
     val systemDark = androidx.compose.foundation.isSystemInDarkTheme()
@@ -218,14 +204,8 @@ private fun PikminBeeScreen() {
 
     var selected by remember { mutableStateOf(Coordinate(25.0330, 121.5654)) }
     var selectionExplicit by remember { mutableStateOf(false) }
-    var flowerPick by remember { mutableStateOf<FlowerMapPick?>(null) }
-    var editingFlowerStopIndex by remember { mutableStateOf<Int?>(null) }
-    // A recorded flower is never silently treated as the route's starting point.
-    var flowerStart by remember { mutableStateOf<Coordinate?>(null) }
     val preparedRoute by PreparedRouteState.route.collectAsState()
-    val preparedFlowers by PreparedRouteState.flowers.collectAsState()
     val routeRoadPreview = preparedRoute?.geometry.orEmpty()
-    val flowerRoadPreview = preparedFlowers?.geometry.orEmpty()
     var routeEditingStopIndex by remember { mutableStateOf<Int?>(null) }
     var routeStopActionIndex by remember { mutableStateOf<Int?>(null) }
     var pendingTeleport by remember { mutableStateOf<Coordinate?>(null) }
@@ -243,9 +223,6 @@ private fun PikminBeeScreen() {
             when {
                 requestedMode in 0..1 -> ToolTab.entries[requestedMode]
                 requestedMode == 2 -> ToolTab.ROUTE
-                (context as? MainActivity)?.intent
-                    ?.getBooleanExtra(MainActivity.EXTRA_OPEN_FLOWER_VISION, false) == true ->
-                    ToolTab.ROUTE
                 else -> ToolTab.TELEPORT
             },
         )
@@ -263,7 +240,6 @@ private fun PikminBeeScreen() {
     var lookingUpPlace by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("地圖點一下就能選擇位置") }
     val roadStops by RouteDraftState.routeStops.collectAsState()
-    val flowerStops by RouteDraftState.flowerStops.collectAsState()
     val savedRoutes by SavedRouteState.routes.collectAsState()
     var planning by remember { mutableStateOf(false) }
     val speedPreset by WalkSpeedState.selected.collectAsState()
@@ -271,7 +247,6 @@ private fun PikminBeeScreen() {
     val defaultSpeedPreset by WalkSpeedState.preferred.collectAsState()
     var mockGpsJitterLevel by remember { mutableStateOf(prefs.mockGpsJitterLevel()) }
     var virtualStrideMetres by remember { mutableStateOf(prefs.virtualStrideMetres()) }
-    var flowerLoop by remember { mutableStateOf(true) }
     val work = rememberCoroutineScope()
     LaunchedEffect(showFavourites) {
         if (!showFavourites) return@LaunchedEffect
@@ -290,19 +265,8 @@ private fun PikminBeeScreen() {
     val walkingProgress by LocationStatus.progress.collectAsState()
     val walkEstimatedSteps by LocationStatus.walkEstimatedSteps.collectAsState()
     val overlayVisible by LocationStatus.overlayVisible.collectAsState()
-    // Only actual edits or loop changes clear a preview; GPS jitter is harmless.
-    LaunchedEffect(flowerStops, flowerStart, flowerLoop) {
-        PreparedRouteState.flowers.value = null
-    }
+    // Draft edits invalidate their previous preview.
     LaunchedEffect(roadStops) { PreparedRouteState.route.value = null }
-    LaunchedEffect(flowerStops) {
-        // Any draft mutation invalidates the previous marker index.
-        editingFlowerStopIndex = null
-    }
-    LaunchedEffect(flowerPick, editingFlowerStopIndex, tab) {
-        if (tab == ToolTab.FLOWERS &&
-            (flowerPick != null || editingFlowerStopIndex != null)) controlsScroll.animateScrollTo(0)
-    }
 
     var phoneLocationRefresh by remember { mutableIntStateOf(0) }
     val requestLocation = rememberLauncherForActivityResult(
@@ -366,7 +330,6 @@ private fun PikminBeeScreen() {
     var importMode by remember { mutableStateOf(WalkMode.ROUTE) }
     var exportRouteId by remember { mutableStateOf<String?>(null) }
     var pendingSimplifiedGpx by remember { mutableStateOf<GpxImport?>(null) }
-    var pendingFlowerImport by remember { mutableStateOf<FlowerImport?>(null) }
 
     fun acceptImportedGpx(imported: GpxImport) {
         runCatching {
@@ -418,22 +381,6 @@ private fun PikminBeeScreen() {
                 }
             }
             exportRouteId = null
-        }
-    }
-
-    val importFlowers = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) work.launch {
-            try {
-                val result = withContext(Dispatchers.IO) {
-                    val source = context.contentResolver.openInputStream(uri)
-                        ?: throw IllegalArgumentException("無法讀取選擇的花點檔案")
-                    source.use { FlowerJsonCodec.decode(it) }
-                }
-                pendingFlowerImport = result
-                message = "檢查匯入來源與花點數量，再選擇是否加入"
-            } catch (e: Exception) {
-                message = "花點匯入失敗：" + (e.message ?: "檔案無效")
-            }
         }
     }
 
@@ -493,23 +440,15 @@ private fun PikminBeeScreen() {
         longitudeText = selected.longitude.toString()
     }
 
-    val activeFlowerWalk = walkMode == WalkMode.FLOWERS &&
-        walkPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)
     val activeRouteWalk = walkMode == WalkMode.ROUTE &&
         walkPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)
     val routePreviewReady = preparedRoute?.isCurrent(
         mockPosition ?: phonePosition, roadStops
     ) == true
-    val flowerPreviewReady = preparedFlowers?.isCurrent(
-        mockPosition ?: flowerStart, flowerStops, flowerLoop
-    ) == true
-    val displayedRoad = when (tab) {
-        ToolTab.FLOWERS -> if (activeFlowerWalk) roadLine
-            else if (flowerPreviewReady) flowerRoadPreview else emptyList()
-        ToolTab.ROUTE -> if (activeRouteWalk) roadLine
-            else if (routePreviewReady) routeRoadPreview else emptyList()
-        else -> emptyList()
-    }
+    val displayedRoad = if (tab == ToolTab.ROUTE) {
+        if (activeRouteWalk) roadLine
+        else if (routePreviewReady) routeRoadPreview else emptyList()
+    } else emptyList()
     fun chooseSpeedProfile(next: WalkSpeedProfile) {
         prefs.setWalkSpeedProfile(next)
         val moving = mockPosition != null &&
@@ -554,15 +493,9 @@ private fun PikminBeeScreen() {
         }
     }
     fun fitCurrentRoute() {
-        val target = when (tab) {
-            ToolTab.FLOWERS -> MapCameraGeometry.forRoute(
-                mockPosition ?: flowerStart, flowerStops, displayedRoad,
-            )
-            ToolTab.ROUTE -> MapCameraGeometry.forRoute(
-                mockPosition ?: phonePosition, roadStops, displayedRoad,
-            )
-            else -> MapCameraGeometry.fitPoints(listOf(selected))
-        }
+        val target = if (tab == ToolTab.ROUTE)
+            MapCameraGeometry.forRoute(mockPosition ?: phonePosition, roadStops, displayedRoad)
+        else MapCameraGeometry.fitPoints(listOf(selected))
         mapExplore = true
         moveMapCamera(if (target.hasAny) target
             else MapCameraGeometry.fitPoints(listOf(selected)))
@@ -580,7 +513,6 @@ private fun PikminBeeScreen() {
             else if (prefs.setupCompleted()) BeePage.MAP else BeePage.PERMISSIONS)
     }
     val settingsRequest by MainActivity.settingsRequests.collectAsState()
-    val visionRequest by MainActivity.flowerVisionRequests.collectAsState()
     val modeRequest by MainActivity.mapModeRequests.collectAsState()
     var showOverlayGuide by remember { mutableStateOf(false) }
     var showOverlayAfterGuide by remember { mutableStateOf(false) }
@@ -606,11 +538,14 @@ private fun PikminBeeScreen() {
     var confirmStartMode by remember { mutableStateOf<WalkMode?>(null) }
 
     fun startPreparedWalk(mode: WalkMode) {
-        val ready = PreparedRouteState.get(mode)
-        val start = if (mode == WalkMode.FLOWERS) mockPosition ?: flowerStart
-            else mockPosition ?: phonePosition
-        val stops = if (mode == WalkMode.FLOWERS) flowerStops else roadStops
-        val loop = mode == WalkMode.FLOWERS && flowerLoop
+        if (mode != WalkMode.ROUTE) {
+            message = "尋花模式已移除；請使用一般路徑"
+            return
+        }
+        val ready = PreparedRouteState.get(WalkMode.ROUTE)
+        val start = mockPosition ?: phonePosition
+        val stops = roadStops
+        val loop = false
         if (ready == null || !ready.isCurrent(start, stops, loop)) {
             message = "路點或起點已變更，請先重新規劃"
             return
@@ -628,7 +563,7 @@ private fun PikminBeeScreen() {
                     MockLocationService.routeIntent(context, ready.geometry,
                         WalkSpeedState.profile.value.nominalMps, mode, loop))
             }.onSuccess {
-                message = "已使用預覽道路開始${if (mode == WalkMode.FLOWERS) "尋花" else "路徑"}行走"
+                message = "已使用預覽道路開始路徑行走"
             }.onFailure {
                 message = "無法開始行走：" + (it.message ?: "請檢查系統權限")
             }
@@ -646,18 +581,14 @@ private fun PikminBeeScreen() {
             }.onFailure { message = "無法切換行走狀態：${it.message}" }
             return
         }
-        val mode = when (tab) {
-            ToolTab.ROUTE -> WalkMode.ROUTE
-            ToolTab.FLOWERS -> WalkMode.FLOWERS
-            else -> {
-                message = "請先切換到路徑或尋花模式"
-                return
-            }
+        if (tab != ToolTab.ROUTE) {
+            message = "請先切換到路徑模式"
+            return
         }
-        val origin = if (mode == WalkMode.FLOWERS) mockPosition ?: flowerStart
-            else mockPosition ?: phonePosition
-        val stops = if (mode == WalkMode.FLOWERS) flowerStops else roadStops
-        val loop = mode == WalkMode.FLOWERS && flowerLoop
+        val mode = WalkMode.ROUTE
+        val origin = mockPosition ?: phonePosition
+        val stops = roadStops
+        val loop = false
         val ready = PreparedRouteState.get(mode)
         when {
             planning -> Unit
@@ -675,15 +606,9 @@ private fun PikminBeeScreen() {
                 message = "正在規劃可步行道路…"
                 work.launch {
                     try {
-                        val points = if (mode == WalkMode.FLOWERS) {
-                            FlowerMapDraft.routePoints(capturedOrigin, capturedStops, capturedLoop)
-                        } else listOf(capturedOrigin) + capturedStops
-                        val plan = ValhallaPlanner.planDetailed(points)
-                        val currentStops = if (mode == WalkMode.FLOWERS) flowerStops else roadStops
-                        val currentOrigin = if (mode == WalkMode.FLOWERS)
-                            mockPosition ?: flowerStart else mockPosition ?: phonePosition
-                        if (currentOrigin == null || currentStops != capturedStops ||
-                            (mode == WalkMode.FLOWERS && flowerLoop != capturedLoop) ||
+                        val plan = ValhallaPlanner.planDetailed(listOf(capturedOrigin) + capturedStops)
+                        val currentOrigin = mockPosition ?: phonePosition
+                        if (currentOrigin == null || roadStops != capturedStops ||
                             WalkingGeometry.distanceMeters(capturedOrigin, currentOrigin) > 30.0) {
                             message = "規劃期間路點或起點已變更，請重新規劃"
                         } else {
@@ -714,14 +639,6 @@ private fun PikminBeeScreen() {
 
     LaunchedEffect(settingsRequest) {
         if (settingsRequest > 0L) activePage = BeePage.SETTINGS
-    }
-    LaunchedEffect(visionRequest) {
-        if (visionRequest > 0L) {
-            // Backward-compatible action from an older overlay never starts capture.
-            tab = ToolTab.ROUTE
-            activePage = BeePage.MAP
-            message = "尋花與畫面辨識已停用；請使用一般路徑"
-        }
     }
     LaunchedEffect(modeRequest) {
         if (modeRequest == 3) {
@@ -1014,28 +931,20 @@ private fun PikminBeeScreen() {
                 mapExplore = mapExplore,
                 onCloseExplore = { mapExplore = false },
                 routeStopsCount = roadStops.size,
-                flowerStopsCount = flowerStops.size,
-                flowerActive = walkMode == WalkMode.FLOWERS &&
-                    walkPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED),
                 walkingProgress = walkingProgress,
                 walkEstimatedSteps = walkEstimatedSteps,
                 walkStopped = walkPhase == WalkPhase.PARKED &&
-                    ((tab == ToolTab.ROUTE && walkMode == WalkMode.ROUTE) ||
-                     (tab == ToolTab.FLOWERS && walkMode == WalkMode.FLOWERS)),
+                    tab == ToolTab.ROUTE && walkMode == WalkMode.ROUTE,
                 routeSpeedKmh = speedPreset.kilometresPerHour,
                 routeActive = walkMode == WalkMode.ROUTE &&
                     walkPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED),
                 routePaused = walkPhase == WalkPhase.PAUSED,
-                routePreviewReady = if (tab == ToolTab.FLOWERS)
-                    flowerPreviewReady else routePreviewReady,
-                routeSnapMetres = if (tab == ToolTab.FLOWERS)
-                    preparedFlowers?.maxSnapMetres ?: 0.0
-                    else preparedRoute?.maxSnapMetres ?: 0.0,
+                routePreviewReady = routePreviewReady,
+                routeSnapMetres = preparedRoute?.maxSnapMetres ?: 0.0,
                 routePlanning = planning,
                 onRouteUndo = {
                     if (walkPhase !in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)) {
                         when (tab) {
-                            ToolTab.FLOWERS -> prefs.saveFlowerDraft(flowerStops.dropLast(1))
                             ToolTab.ROUTE -> {
                                 prefs.saveRouteDraft(RoutePointDraft.undo(roadStops))
                                 routeEditingStopIndex = null
@@ -1059,25 +968,15 @@ private fun PikminBeeScreen() {
                 selectionActive = selectionExplicit,
                 current = mockPosition ?: phonePosition,
                 currentIsMock = mockPosition != null,
-                start = if (tab == ToolTab.FLOWERS) mockPosition ?: flowerStart else null,
-                stops = when (tab) {
-                    ToolTab.ROUTE -> roadStops
-                    ToolTab.FLOWERS -> flowerStops
-                    else -> emptyList()
-                },
+                start = null,
+                stops = if (tab == ToolTab.ROUTE) roadStops else emptyList(),
                 road = displayedRoad,
-                previewRoad = when (tab) {
-                    ToolTab.FLOWERS -> !activeFlowerWalk && flowerPreviewReady
-                    ToolTab.ROUTE -> !activeRouteWalk && routePreviewReady
-                    else -> false
-                },
+                previewRoad = tab == ToolTab.ROUTE && !activeRouteWalk && routePreviewReady,
                 freeMapStyle = freeMapStyle,
                 cameraRequest = cameraRequest,
                 mapExplore = mapExplore,
                 onCameraFailure = { message = it },
-                flowerSpots = if (tab == ToolTab.FLOWERS) FlowerFinder.nearby(
-                    selected, allFlowers, 5000.0, maxCount = 100
-                ) else emptyList(),
+                flowerSpots = emptyList(),
                 onPick = { point ->
                     coordinateInputDismissToken++
                     selectionExplicit = true
@@ -1115,45 +1014,19 @@ private fun PikminBeeScreen() {
                                 }
                             }
                         }
-                        ToolTab.FLOWERS -> {
-                            selected = point
-                            flowerPick = FlowerMapPick(point)
-                            message = editingFlowerStopIndex?.let {
-                                "已選新位置，請確認是否替換第 ${it + 1} 個路點"
-                            } ?: "已選擇地圖位置，請確認加入路線或設為起點"
-                        }
                         else -> {
                             selected = point
                             message = "已選位置：${point.label()}"
                         }
                     }
                 },
-                onFlowerPick = { flower ->
-                    coordinateInputDismissToken++
-                    selectionExplicit = true
-                    if (mapExplore) mapExplore = false
-                    selected = flower.coordinate
-                    flowerPick = FlowerMapPick(flower.coordinate, flower)
-                    message = editingFlowerStopIndex?.let {
-                        "已選擇「${flower.name}」，可確認是否替換第 ${it + 1} 個路點"
-                    } ?: "已選擇「${flower.name}」，可確認是否加入尋花路線"
-                },
+                onFlowerPick = { _ -> Unit },
                 onStopPick = when (tab) {
                     ToolTab.ROUTE -> { index: Int ->
                         coordinateInputDismissToken++
                         if (index in roadStops.indices) {
                             routeStopActionIndex = index
                             message = "已點選第 ${index + 1} 點，可刪除或重新選位置"
-                        }
-                    }
-                    ToolTab.FLOWERS -> { index: Int ->
-                        coordinateInputDismissToken++
-                        flowerStops.getOrNull(index)?.let { stop ->
-                            if (mapExplore) mapExplore = false
-                            selected = stop
-                            flowerPick = null
-                            editingFlowerStopIndex = index
-                            message = "已選擇第 ${index + 1} 個路點；點地圖挑選新位置或直接移除"
                         }
                     }
                     else -> null
@@ -1259,60 +1132,6 @@ private fun PikminBeeScreen() {
                                     }
                                 }
                             }
-                            ToolTab.SAVED -> {
-                                Text("收藏地點", fontWeight = FontWeight.Bold, color = foreground)
-                                if (places.isEmpty()) {
-                                    Text("從地圖選擇位置後，到「瞬移」儲存收藏。", color = muted)
-                                }
-                                Column(
-                                    Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState()),
-                                    verticalArrangement = Arrangement.spacedBy(3.dp)
-                                ) {
-                                    places.forEach { place ->
-                                        Row(
-                                            Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            TextButton(onClick = {
-                                                selected = place.coordinate
-                                                tab = ToolTab.TELEPORT
-                                            }) {
-                                                Text("${place.name} · ${place.coordinate.label()}", fontSize = 12.sp)
-                                            }
-                                            TextButton(onClick = {
-                                                prefs.removePlace(place.id)
-                                                places = prefs.places()
-                                            }) { Text("刪除", fontSize = 12.sp) }
-                                        }
-                                    }
-                                }
-                                Text("收藏的路線", fontWeight = FontWeight.SemiBold, color = foreground)
-                                listOf(WalkMode.ROUTE, WalkMode.FLOWERS).forEach { kind ->
-                                    RouteLibraryPanel(
-                                        mode = kind,
-                                        draft = if (kind == WalkMode.FLOWERS) flowerStops else roadStops,
-                                        routes = savedRoutes.filter { it.mode == kind },
-                                        foreground = foreground, muted = muted,
-                                        onSave = { name ->
-                                            saveRoute(name, kind,
-                                                if (kind == WalkMode.FLOWERS) flowerStops else roadStops)
-                                        },
-                                        onRename = ::renameRoute,
-                                        onLoad = ::loadRoute,
-                                        onExport = { route ->
-                                            exportRouteId = route.id
-                                            exportGpx.launch(route.fileName())
-                                        },
-                                        onDelete = ::deleteRoute,
-                                        onImport = {
-                                            importMode = kind
-                                            importGpx.launch(arrayOf(
-                                                "application/gpx+xml", "application/xml", "text/xml", "*/*"))
-                                        },
-                                    )
-                                }
-                            }
                             ToolTab.ROUTE -> {
                                 JourneyControls(
                                     mode = WalkMode.ROUTE,
@@ -1345,216 +1164,6 @@ private fun PikminBeeScreen() {
                                     onRoutePrimary = { handleJourneyPrimary() },
                                     onRouteStop = { context.startService(MockLocationService.command(
                                         context, MockLocationService.ACTION_STOP_ROUTE)) },
-                                )
-                            }
-                            ToolTab.FLOWERS -> {
-                                FlowerMapControls(
-                                    start = mockPosition ?: flowerStart,
-                                    usingMockStart = mockPosition != null,
-                                    selected = flowerPick,
-                                    editingStopIndex = editingFlowerStopIndex,
-                                    stops = flowerStops,
-                                    canEdit = walkPhase !in listOf(WalkPhase.MOVING, WalkPhase.PAUSED) &&
-                                        !planning,
-                                    foreground = foreground, muted = muted,
-                                    onAddSelected = {
-                                        val chosen = flowerPick
-                                        val start = mockPosition ?: flowerStart
-                                        when {
-                                            chosen == null -> message = "請先在地圖選擇花點"
-                                            start == null -> message = "請先在地圖設定規劃起點"
-                                            flowerStops.size > FlowerMapDraft.MAX_STOPS ->
-                                                message = "舊版路點超過 14 個，請先移除部分路點"
-                                            else -> {
-                                                val update = FlowerMapDraft.add(
-                                                    flowerStops, start, chosen.coordinate
-                                                )
-                                                message = when (update.result) {
-                                                    FlowerMapDraft.AddResult.ADDED -> {
-                                                        prefs.saveFlowerDraft(update.stops)
-                                                        "已加入第 ${update.stops.size} 個尋花路點"
-                                                    }
-                                                    FlowerMapDraft.AddResult.DUPLICATE ->
-                                                        "附近已有路點，請勿重複加入"
-                                                    FlowerMapDraft.AddResult.AT_START ->
-                                                        "此位置太接近起點，請選擇其他花點"
-                                                    FlowerMapDraft.AddResult.FULL ->
-                                                        "最多只能加入 14 個尋花路點"
-                                                }
-                                            }
-                                        }
-                                    },
-                                    onReplaceStop = {
-                                        val index = editingFlowerStopIndex
-                                        val chosen = flowerPick
-                                        val start = mockPosition ?: flowerStart
-                                        when {
-                                            index == null -> message = "請先選擇要編輯的路點"
-                                            chosen == null -> message = "請先點地圖選擇新位置"
-                                            start == null -> message = "請先設定路線起點"
-                                            else -> {
-                                                val update = FlowerMapDraft.replace(
-                                                    flowerStops, start, index, chosen.coordinate,
-                                                )
-                                                message = when (update.result) {
-                                                    FlowerMapDraft.ReplaceResult.REPLACED -> {
-                                                        prefs.saveFlowerDraft(update.stops)
-                                                        editingFlowerStopIndex = null
-                                                        flowerPick = null
-                                                        "已更新第 ${index + 1} 個路點；請重新預覽道路"
-                                                    }
-                                                    FlowerMapDraft.ReplaceResult.UNCHANGED ->
-                                                        "與原路點位置相同，未進行修改"
-                                                    FlowerMapDraft.ReplaceResult.DUPLICATE ->
-                                                        "新位置太靠近其他路點，未進行修改"
-                                                    FlowerMapDraft.ReplaceResult.AT_START ->
-                                                        "新位置太靠近起點，未進行修改"
-                                                    FlowerMapDraft.ReplaceResult.OUT_OF_RANGE ->
-                                                        "路點已變動，請重新選擇要編輯的路點"
-                                                }
-                                            }
-                                        }
-                                    },
-                                    onSelectStop = { index ->
-                                        flowerStops.getOrNull(index)?.let { stop ->
-                                            selected = stop
-                                            flowerPick = null
-                                            editingFlowerStopIndex = index
-                                            message = "已選中第 ${index + 1} 個路點，可在地圖上重新指定位置"
-                                        }
-                                    },
-                                    onCancelStopEdit = {
-                                        editingFlowerStopIndex = null
-                                        flowerPick = null
-                                    },
-                                    onUseAsStart = {
-                                        flowerPick?.let {
-                                            flowerStart = it.coordinate
-                                            message = "已設定規劃起點：${it.coordinate.label()}"
-                                        }
-                                    },
-                                    onDismissSelected = { flowerPick = null },
-                                    onMoveStop = { index, direction ->
-                                        prefs.saveFlowerDraft(
-                                            FlowerMapDraft.move(flowerStops, index, direction)
-                                        )
-                                    },
-                                    onRemoveStop = { index ->
-                                        val updated = FlowerMapDraft.remove(flowerStops, index)
-                                        if (updated != flowerStops) {
-                                            prefs.saveFlowerDraft(updated)
-                                            editingFlowerStopIndex = null
-                                            flowerPick = null
-                                            message = "已移除第 ${index + 1} 個路點；請重新預覽道路"
-                                        }
-                                    },
-                                )
-                                JourneyControls(
-                                    mode = WalkMode.FLOWERS,
-                                    stops = flowerStops,
-                                    origin = mockPosition ?: flowerStart,
-                                    activeMode = walkMode,
-                                    phase = walkPhase,
-                                    walkEstimatedSteps = walkEstimatedSteps,
-                                    speedPreset = speedPreset,
-                                    speedProfile = speedProfile,
-                                    onSpeedSelected = ::chooseSpeedProfile,
-                                    foreground = foreground, muted = muted,
-                                    onUndo = { prefs.saveFlowerDraft(flowerStops.dropLast(1)) },
-                                    onClear = { prefs.saveFlowerDraft(emptyList()) },
-                                    onMessage = { message = it },
-                                    preparedRoad = if (flowerPreviewReady) flowerRoadPreview else emptyList(),
-                                    routePlanning = planning,
-                                    snapMetres = preparedFlowers?.maxSnapMetres ?: 0.0,
-                                    loop = flowerLoop,
-                                    onLoopChange = { flowerLoop = it },
-                                    onRoutePrimary = { handleJourneyPrimary() },
-                                    onRouteStop = { context.startService(MockLocationService.command(
-                                        context, MockLocationService.ACTION_STOP_ROUTE)) },
-                                )
-                                FlowerCatalogPanel(
-                                    spots = allFlowers,
-                                    origin = mockPosition ?: flowerStart ?: selected,
-                                    selected = selected,
-                                    draft = flowerStops,
-                                    canAddToRoute = mockPosition != null || flowerStart != null,
-                                    foreground = foreground, muted = muted,
-                                    onRecord = { name, point ->
-                                        runCatching { flowerCatalog.addManual(name, point) }
-                                            .onSuccess { message = "已記錄／本人確認「" + it.name + "」" }
-                                            .onFailure { message = "無法記錄花點：" + it.message }
-                                    },
-                                    onMarkChecked = { flower ->
-                                        if (flowerCatalog.markChecked(flower.id)) {
-                                            message = "已將「" + flower.name + "」標為本人確認"
-                                        }
-                                    },
-                                    onRemove = { flower ->
-                                        if (flowerCatalog.remove(flower.id)) {
-                                            message = "已移除花點「" + flower.name + "」"
-                                        }
-                                    },
-                                    onAddStop = { flower ->
-                                        val start = mockPosition ?: flowerStart
-                                        if (start == null) message = "請先在地圖設定規劃起點"
-                                        else if (flowerStops.size > 14) message = "請先移除超出的舊版路點"
-                                        else {
-                                            val candidate = FlowerFinder.appendToDraft(
-                                                start, flowerStops, listOf(flower), 14
-                                            )
-                                            if (candidate.size == flowerStops.size) {
-                                                message = "此花點已在路線內，或已達花點數量上限"
-                                            } else {
-                                                prefs.saveFlowerDraft(candidate)
-                                                message = "已將「" + flower.name + "」加入尋花路線"
-                                            }
-                                        }
-                                    },
-                                    onAppendNearby = { candidates ->
-                                        val start = mockPosition ?: flowerStart
-                                        if (start == null) message = "請先在地圖設定規劃起點"
-                                        else if (flowerStops.size > 14) message = "請先移除超出的舊版路點"
-                                        else {
-                                            val added = FlowerFinder.appendToDraft(
-                                                start, flowerStops, candidates, 14
-                                            )
-                                            if (added.size == flowerStops.size) {
-                                                message = "附近沒有可加入的新花點"
-                                            } else {
-                                                prefs.saveFlowerDraft(added)
-                                                message = "已新增 " + (added.size - flowerStops.size) +
-                                                    " 個候選花點；請先預覽道路"
-                                            }
-                                        }
-                                    },
-                                    onImport = {
-                                        importFlowers.launch(arrayOf("application/json", "application/geo+json", "*/*"))
-                                    },
-                                    onExport = {
-                                        exportFlowers.launch("PikminBee-flowers.geojson")
-                                    },
-                                )
-                                FlowerVisionPanel(
-                                    foreground = foreground,
-                                    muted = muted,
-                                    onMessage = { message = it },
-                                    onSaveCandidate = { point ->
-                                        val candidateName = "影像候選 " +
-                                            System.currentTimeMillis().toString().takeLast(6)
-                                        runCatching {
-                                            flowerCatalog.addUnverifiedCandidate(candidateName, point)
-                                        }.onSuccess { added ->
-                                            message = if (added)
-                                                "已儲存待確認花點；請到花點資料庫本人確認後再加入路線"
-                                            else "附近已存在花點或資料庫已滿；沒有重複保存"
-                                        }.onFailure {
-                                            message = "候選花點無法儲存：" + (it.message ?: "未知錯誤")
-                                        }
-                                    },
-                                    openRequest = if (visionRequest > 0L) visionRequest else
-                                        if ((context as? MainActivity)?.intent
-                                                ?.getBooleanExtra(MainActivity.EXTRA_OPEN_FLOWER_VISION, false)
-                                            == true) 1L else 0L,
                                 )
                             }
                         }
@@ -1686,35 +1295,34 @@ private fun PikminBeeScreen() {
                         }
                     },
                     routeContent = { query ->
-                        listOf(WalkMode.ROUTE, WalkMode.FLOWERS).forEach { kind ->
-                            RouteLibraryPanel(
-                                mode = kind,
-                                draft = if (kind == WalkMode.FLOWERS) flowerStops else roadStops,
-                                routes = savedRoutes.filter {
-                                    it.mode == kind && (query.isBlank() ||
-                                        it.name.contains(query, ignoreCase = true))
-                                },
-                                foreground = foreground, muted = muted,
-                                onSave = { name ->
-                                    saveRoute(name, kind,
-                                        if (kind == WalkMode.FLOWERS) flowerStops else roadStops)
-                                },
-                                onRename = ::renameRoute,
-                                onLoad = { route ->
-                                    loadRoute(route)
-                                    showFavourites = false
-                                },
-                                onExport = { route ->
-                                    exportRouteId = route.id
-                                    exportGpx.launch(route.fileName())
-                                },
-                                onDelete = ::deleteRoute,
-                                onImport = {
-                                    importMode = kind
-                                    importGpx.launch(arrayOf(
-                                        "application/gpx+xml", "application/xml", "text/xml", "*/*"))
-                                },
-                            )
+                        RouteLibraryPanel(
+                            mode = WalkMode.ROUTE,
+                            draft = roadStops,
+                            routes = savedRoutes.filter {
+                                query.isBlank() || it.name.contains(query, ignoreCase = true)
+                            },
+                            foreground = foreground, muted = muted,
+                            onSave = { name -> saveRoute(name, WalkMode.ROUTE, roadStops) },
+                            onRename = ::renameRoute,
+                            onLoad = { route ->
+                                loadRoute(route)
+                                showFavourites = false
+                            },
+                            onExport = { route ->
+                                exportRouteId = route.id
+                                exportGpx.launch(route.fileName())
+                            },
+                            onDelete = ::deleteRoute,
+                            onImport = {
+                                importMode = WalkMode.ROUTE
+                                importGpx.launch(arrayOf(
+                                    "application/gpx+xml", "application/xml", "text/xml", "*/*"))
+                            },
+                        )
+                        TextButton(onClick = {
+                            exportFlowers.launch("PikminBee-legacy-flowers.geojson")
+                        }) {
+                            Text("匯出舊花點資料（GeoJSON）", fontSize = 12.sp)
                         }
                     },
                 )
@@ -1741,38 +1349,6 @@ private fun PikminBeeScreen() {
                     TextButton(onClick = {
                         pendingSimplifiedGpx = null
                         message = "已取消匯入，原有收藏與路點不變"
-                    }) { Text("取消") }
-                },
-            )
-        }
-        pendingFlowerImport?.let { candidate ->
-            AlertDialog(
-                onDismissRequest = { pendingFlowerImport = null },
-                title = { Text("匯入使用者提供的花點？") },
-                text = {
-                    Text(
-                        "檔案格式：" + candidate.source +
-                            "。標記花點 " + candidate.spots.size + " 筆，略過非花點 " +
-                            candidate.ignored + " 筆。匯入資料全部標示「待確認」，" +
-                            "不會當成 Pikmin Bloom 官方即時大花，也不會自動開始行走。"
-                    )
-                },
-                confirmButton = {
-                    TextButton(onClick = {
-                        runCatching { flowerCatalog.importCandidates(candidate) }
-                            .onSuccess { result ->
-                                message = "花點匯入完成：新增 " + result.added +
-                                    " 筆，略過近距離重複 " + result.duplicates + " 筆"
-                            }.onFailure {
-                                message = "花點匯入失敗：" + (it.message ?: "無法保存")
-                            }
-                        pendingFlowerImport = null
-                    }) { Text("確認匯入") }
-                },
-                dismissButton = {
-                    TextButton(onClick = {
-                        pendingFlowerImport = null
-                        message = "已取消花點匯入，原有資料不變"
                     }) { Text("取消") }
                 },
             )

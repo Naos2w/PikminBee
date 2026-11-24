@@ -86,7 +86,6 @@ class MockLocationService : Service() {
         const val ACTION_RESUME_ROUTE = "com.naos.pikminbee.action.RESUME_ROUTE"
         const val ACTION_STOP_ROUTE = "com.naos.pikminbee.action.STOP_ROUTE"
         const val ACTION_CLEAR_ROUTE = "com.naos.pikminbee.action.CLEAR_ROUTE"
-        const val ACTION_START_FLOWERS = "com.naos.pikminbee.action.START_FLOWER_DRAFT"
         const val ACTION_START_DRAFT_ROUTE = "com.naos.pikminbee.action.START_ROUTE_DRAFT"
         const val ACTION_SET_SPEED = "com.naos.pikminbee.action.SET_WALK_SPEED"
         const val ACTION_SHOW_OVERLAY = "com.naos.pikminbee.action.SHOW_OVERLAY"
@@ -372,7 +371,6 @@ class MockLocationService : Service() {
                                     FloatingControls.PAUSE -> ACTION_PAUSE_ROUTE
                                     FloatingControls.RESUME -> ACTION_RESUME_ROUTE
                                     FloatingControls.STOP_WALK -> ACTION_STOP_ROUTE
-                                    FloatingControls.START_FLOWERS -> ACTION_START_FLOWERS
                                     FloatingControls.RESTORE_REAL -> ACTION_REAL_GPS_OVERLAY
                                     FloatingControls.RESTORE_VIRTUAL -> ACTION_VIRTUAL_GPS_OVERLAY
                                     else -> ACTION_HIDE_OVERLAY
@@ -408,11 +406,7 @@ class MockLocationService : Service() {
                                 startActivity(Intent(this, MainActivity::class.java)
                                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
                             },
-                            onFlowerVision = {
-                                startActivity(Intent(this, MainActivity::class.java)
-                                    .putExtra(MainActivity.EXTRA_OPEN_FLOWER_VISION, true)
-                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
-                            })
+                            )
                     }
                     floatingControls?.show()
                     updateOverlay()
@@ -466,10 +460,8 @@ class MockLocationService : Service() {
                 updateOverlay()
                 return if (providerActive) START_STICKY else START_NOT_STICKY
             }
-            ACTION_START_FLOWERS, ACTION_START_DRAFT_ROUTE -> {
-                return startFloatingDraft(
-                    if (intent.action == ACTION_START_FLOWERS) WalkMode.FLOWERS else WalkMode.ROUTE
-                )
+            ACTION_START_DRAFT_ROUTE -> {
+                return startFloatingDraft(WalkMode.ROUTE)
             }
             ACTION_HIDE_OVERLAY -> {
                 floatingControls?.dismiss()
@@ -664,6 +656,12 @@ class MockLocationService : Service() {
                 val routeMode = runCatching {
                     WalkMode.valueOf(intent.getStringExtra(EXTRA_MODE) ?: "")
                 }.getOrDefault(WalkMode.ROUTE)
+                if (routeMode != WalkMode.ROUTE) {
+                    // Preserve legacy FLOWERS for saved records/GPX only: never
+                    // initiate a retired mode, including through stale intents.
+                    LocationStatus.display.value = "巡花模式已移除；請使用一般路徑"
+                    return if (providerActive) START_STICKY else START_NOT_STICKY
+                }
                 cancelFlowerPlanning()
                 return if (activateRoute(
                         planned,
