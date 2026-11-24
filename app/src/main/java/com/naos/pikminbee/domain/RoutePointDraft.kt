@@ -6,7 +6,7 @@ package com.naos.pikminbee.domain
  * A destination is never silently treated as the walk origin.
  */
 object RoutePointDraft {
-    const val MAX_STOPS = 14
+    const val MAX_STOPS = 15
     private const val NEARBY_METRES = 2.0
 
     enum class Outcome { ADDED, REPLACED, TOO_CLOSE_TO_ORIGIN, DUPLICATE, FULL, INVALID_INDEX }

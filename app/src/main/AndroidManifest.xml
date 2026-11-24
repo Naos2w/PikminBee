@@ -9,7 +9,6 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <!-- Normal permission prerequisite for a user-started, Wi-Fi connected-device FGS. -->
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_HEALTH" />
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
     <uses-feature android:name="android.hardware.sensor.stepcounter" android:required="false" />
@@ -69,10 +68,5 @@
             android:exported="false"
             android:stopWithTask="false"
             android:foregroundServiceType="location" />
-        <service
-            android:name=".vision.BloomCaptureService"
-            android:exported="false"
-            android:stopWithTask="false"
-            android:foregroundServiceType="mediaProjection" />
     </application>
 </manifest>

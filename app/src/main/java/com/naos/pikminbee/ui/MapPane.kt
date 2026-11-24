@@ -37,6 +37,8 @@ import org.maplibre.android.MapLibre
 import org.maplibre.android.maps.MapView as LibreMapView
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.Style
+import org.maplibre.android.style.layers.LineLayer
+import org.maplibre.android.style.layers.PropertyFactory
 import org.maplibre.android.camera.CameraPosition as LibreCameraPosition
 import org.maplibre.android.geometry.LatLng as LibreLatLng
 import org.maplibre.android.annotations.IconFactory as LibreIconFactory
@@ -44,6 +46,24 @@ import org.maplibre.android.annotations.MarkerOptions as LibreMarkerOptions
 import org.maplibre.android.annotations.PolylineOptions as LibrePolylineOptions
 import org.maplibre.android.geometry.LatLngBounds as LibreLatLngBounds
 import org.maplibre.android.camera.CameraUpdateFactory as LibreCameraUpdateFactory
+
+/** OpenFreeMap Dark has near-black roads on near-black terrain.
+ *  Raise contrast only for known road layers, without touching the route polyline
+ *  or making a new tile/network request. Missing provider layers are harmless. */
+private fun improveDarkRoadLegibility(style: Style) {
+    val roadColours = mapOf(
+        "highway_path" to "#475762",
+        "highway_minor" to "#394852",
+        "highway_major_inner" to "#536572",
+        "highway_major_subtle" to "#3D4E5A",
+        "highway_motorway_inner" to "#637784",
+        "highway_motorway_subtle" to "#445662",
+    )
+    roadColours.forEach { (id, colour) ->
+        (style.getLayer(id) as? LineLayer)?.setProperties(
+            PropertyFactory.lineColor(android.graphics.Color.parseColor(colour)))
+    }
+}
 
 /** An explicit, one-shot camera instruction. Live GPS updates never move the camera. */
 data class MapCameraRequest(
@@ -184,9 +204,9 @@ private fun OpenFreeMapPane(
     }
     LaunchedEffect(map, dark, freeMapStyle) {
         val loadedMap = map ?: return@LaunchedEffect
-        loadedMap.setStyle(Style.Builder().fromUri(
-            MapBasemapPolicy.openFreeMapStyleUrl(freeMapStyle, dark)
-        )) {
+        val styleUrl = MapBasemapPolicy.openFreeMapStyleUrl(freeMapStyle, dark)
+        loadedMap.setStyle(Style.Builder().fromUri(styleUrl)) { loadedStyle ->
+            if (styleUrl.endsWith("/dark")) improveDarkRoadLegibility(loadedStyle)
             styleVersion++
         }
     }
@@ -237,7 +257,7 @@ private fun OpenFreeMapPane(
             if (startMarker == null || startStyleVersion != styleVersion) {
                 startMarker?.let { m.removeMarker(it) }
                 startMarker = m.addMarker(LibreMarkerOptions()
-                    .position(position).title("📍 尋花起點"))
+                    .position(position).title("路線起點"))
                 startStyleVersion = styleVersion
             } else startMarker?.position = position
         }

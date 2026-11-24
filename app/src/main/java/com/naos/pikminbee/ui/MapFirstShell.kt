@@ -84,8 +84,6 @@ fun MapFirstShell(
     modeContent: @Composable () -> Unit,
     backdrop: Bitmap? = null,
     routeStopsCount: Int = 0,
-    flowerStopsCount: Int = 0,
-    flowerActive: Boolean = false,
     walkingProgress: WalkingProgressSnapshot = WalkingProgressSnapshot(),
     walkEstimatedSteps: Long = 0L,
     walkStopped: Boolean = false,
@@ -114,10 +112,9 @@ fun MapFirstShell(
     }
     val p = NaosDesignSystem.palette(LocalNaosVisualState.current.family, dark)
     val heightDp = LocalConfiguration.current.screenHeightDp
-    val active = modeIndex.coerceIn(0, 2)
+    val active = modeIndex.coerceIn(0, 1)
     // Ongoing walking must remain controllable even after changing map tabs.
-    val showQuick = (modeIndex == 1 && routeStopsCount > 0) ||
-        (modeIndex == 2 && flowerStopsCount > 0) || routeActive || flowerActive
+    val showQuick = (modeIndex == 1 && routeStopsCount > 0) || routeActive
 
     Box(Modifier.fillMaxSize().background(p.bg)) {
         mapContent()
@@ -166,13 +163,8 @@ fun MapFirstShell(
         }
 
         if (showQuick) {
-            val activeWalking = routeActive || flowerActive
-            val modeStopsCount = when {
-                flowerActive -> flowerStopsCount
-                routeActive -> routeStopsCount
-                modeIndex == 2 -> flowerStopsCount
-                else -> routeStopsCount
-            }
+            val activeWalking = routeActive
+            val modeStopsCount = routeStopsCount
             MapGlass(
                 dark,
                 Modifier.align(Alignment.BottomCenter).navigationBarsPadding()
@@ -190,7 +182,7 @@ fun MapFirstShell(
                         Text(
                             when {
                                 activeWalking && routePaused -> "已暫停 · 本次估算"
-                                activeWalking -> (if (flowerActive) "尋花中" else "行走中") + " · 本次估算"
+                                activeWalking -> "行走中 · 本次估算"
                                 walkStopped -> "已結束 · 本次估算"
                                 else -> "下一個路點"
                             },
@@ -286,20 +278,17 @@ fun MapFirstShell(
                 if (activeWalking && walkingProgress.totalMetres > 0.0) {
                     val total = walkingProgress.totalMetres / 1000.0
                     val done = walkingProgress.travelledMetres / 1000.0
-                    val progressText = buildString {
-                        append("路段 ")
-                        append(walkingProgress.activeLegLabel)
-                        append(" · 共 ")
-                        append(walkingProgress.waypointCount.coerceAtLeast(modeStopsCount))
-                        append(" 點 · ")
-                        append(String.format(Locale.US, "%.2f / %.2f km", done, total))
-                        append(" · ")
-                        append(routeSpeedKmh)
-                        append(" km/h · ")
-                        append(walkingProgress.remainingSeconds / 60)
-                        append(" 分")
-                    }
-                    Text(progressText, color = p.muted, fontSize = 10.sp, maxLines = 1)
+                    Text(
+                        "路段 ${walkingProgress.activeLegLabel} · " +
+                            String.format(Locale.US, "%.2f / %.2f km", done, total),
+                        color = p.ink, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 2,
+                    )
+                    Text(
+                        "${walkingProgress.waypointCount.coerceAtLeast(modeStopsCount)} 點 · " +
+                            String.format(Locale.US, "%.1f km/h", routeSpeedKmh) +
+                            " · 剩餘約 ${(walkingProgress.remainingSeconds + 59L) / 60L} 分鐘",
+                        color = p.muted, fontSize = 11.sp, lineHeight = 15.sp, maxLines = 2,
+                    )
                     Box(Modifier.fillMaxWidth().height(4.dp)
                         .background(p.soft, RoundedCornerShape(4.dp))) {
                         Box(Modifier.fillMaxWidth(walkingProgress.fraction).height(4.dp)
