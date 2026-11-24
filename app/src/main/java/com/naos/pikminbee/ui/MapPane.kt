@@ -31,14 +31,14 @@ import com.naos.pikminbee.data.MapProvider
 import com.naos.pikminbee.data.FreeMapStyle
 import com.naos.pikminbee.data.MapBasemapPolicy
 import com.naos.pikminbee.domain.Coordinate
+import com.naos.pikminbee.domain.WalkingGeometry
 import com.naos.pikminbee.flower.FlowerSpot
 import com.naos.pikminbee.flower.FlowerEvidence
 import org.maplibre.android.MapLibre
 import org.maplibre.android.maps.MapView as LibreMapView
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.Style
-import org.maplibre.android.style.layers.LineLayer
-import org.maplibre.android.style.layers.PropertyFactory
+import com.naos.pikminbee.data.BrightMapPalette
 import org.maplibre.android.camera.CameraPosition as LibreCameraPosition
 import org.maplibre.android.geometry.LatLng as LibreLatLng
 import org.maplibre.android.annotations.IconFactory as LibreIconFactory
@@ -47,29 +47,17 @@ import org.maplibre.android.annotations.PolylineOptions as LibrePolylineOptions
 import org.maplibre.android.geometry.LatLngBounds as LibreLatLngBounds
 import org.maplibre.android.camera.CameraUpdateFactory as LibreCameraUpdateFactory
 
-/** OpenFreeMap Dark has near-black roads on near-black terrain.
- *  Raise contrast only for known road layers, without touching the route polyline
- *  or making a new tile/network request. Missing provider layers are harmless. */
-private fun improveDarkRoadLegibility(style: Style) {
-    val roadColours = mapOf(
-        "highway_path" to "#475762",
-        "highway_minor" to "#394852",
-        "highway_major_inner" to "#536572",
-        "highway_major_subtle" to "#3D4E5A",
-        "highway_motorway_inner" to "#637784",
-        "highway_motorway_subtle" to "#445662",
-    )
-    roadColours.forEach { (id, colour) ->
-        (style.getLayer(id) as? LineLayer)?.setProperties(
-            PropertyFactory.lineColor(android.graphics.Color.parseColor(colour)))
-    }
-}
-
 /** An explicit, one-shot camera instruction. Live GPS updates never move the camera. */
 data class MapCameraRequest(
     val id: Int,
     val target: MapCameraGeometry.ViewTarget,
 )
+
+/** Retain the camera independently of selected/GPS coordinates during settings changes. */
+data class MapViewport(val point: Coordinate, val zoom: Double, val bearing: Double, val tilt: Double)
+
+private fun overlapsCurrent(point: Coordinate?, current: Coordinate?): Boolean =
+    point != null && current != null && WalkingGeometry.distanceMeters(point,current) <= 3.0
 
 /** Both native providers consume precisely the same picked stops and real road geometry. */
 @Composable
@@ -85,8 +73,10 @@ fun LocationMap(
     road: List<Coordinate>,
     previewRoad: Boolean,
     flowerSpots: List<FlowerSpot>,
-    freeMapStyle: FreeMapStyle = FreeMapStyle.AUTO,
     cameraRequest: MapCameraRequest? = null,
+    viewport: MapViewport? = null,
+    onViewport: (MapViewport) -> Unit = {},
+    onCameraApplied: (Int) -> Unit = {},
     mapExplore: Boolean = false,
     onCameraFailure: (String) -> Unit = {},
     onPick: (Coordinate) -> Unit,
@@ -96,14 +86,14 @@ fun LocationMap(
 ) {
     when (provider) {
         MapProvider.OPEN_FREE_MAP -> OpenFreeMapPane(dark, selected, selectionActive, current, currentIsMock, start, stops, road, previewRoad, flowerSpots,
-            freeMapStyle, cameraRequest, mapExplore, onCameraFailure,
+            cameraRequest, viewport, onViewport, onCameraApplied, mapExplore, onCameraFailure,
             onPick, onFlowerPick, onStopPick, modifier)
         MapProvider.GOOGLE_MAPS -> if (BuildConfig.HAS_GOOGLE_MAPS_KEY) {
             GoogleMapsPane(dark, selected, selectionActive, current, currentIsMock, start, stops, road, previewRoad, flowerSpots,
-                cameraRequest, mapExplore, onCameraFailure, onPick, onFlowerPick, onStopPick, modifier)
+                cameraRequest, viewport, onViewport, onCameraApplied, mapExplore, onCameraFailure, onPick, onFlowerPick, onStopPick, modifier)
         } else {
             OpenFreeMapPane(dark, selected, selectionActive, current, currentIsMock, start, stops, road, previewRoad, flowerSpots,
-                freeMapStyle, cameraRequest, mapExplore, onCameraFailure,
+                cameraRequest, viewport, onViewport, onCameraApplied, mapExplore, onCameraFailure,
                 onPick, onFlowerPick, onStopPick, modifier)
         }
     }
@@ -115,7 +105,8 @@ private fun OpenFreeMapPane(
     current: Coordinate?, currentIsMock: Boolean,
     start: Coordinate?, stops: List<Coordinate>,
     road: List<Coordinate>, previewRoad: Boolean, flowerSpots: List<FlowerSpot>,
-    freeMapStyle: FreeMapStyle, cameraRequest: MapCameraRequest?, mapExplore: Boolean,
+    cameraRequest: MapCameraRequest?, viewport: MapViewport?,
+    onViewport: (MapViewport) -> Unit, onCameraApplied: (Int) -> Unit, mapExplore: Boolean,
     onCameraFailure: (String) -> Unit,
     onPick: (Coordinate) -> Unit, onFlowerPick: (FlowerSpot) -> Unit,
     onStopPick: ((Int) -> Unit)?,
@@ -128,6 +119,13 @@ private fun OpenFreeMapPane(
     val latestOnStopPick by rememberUpdatedState(onStopPick)
     val latestStops by rememberUpdatedState(stops)
     val latestOnCameraFailure by rememberUpdatedState(onCameraFailure)
+    val latestViewport by rememberUpdatedState(viewport)
+    val latestOnViewport by rememberUpdatedState(onViewport)
+    val latestCameraRequest by rememberUpdatedState(cameraRequest)
+    val latestOnCameraApplied by rememberUpdatedState(onCameraApplied)
+    val showSelection = selectionActive && !overlapsCurrent(selected,current)
+    val showStart = start != null && !overlapsCurrent(start,current)
+    val obscuredStops = stops.indices.filter { overlapsCurrent(stops[it],current) }
     val view = remember(context) {
         MapLibre.getInstance(context)
         LibreMapView(context).apply { onCreate(null) }
@@ -141,7 +139,7 @@ private fun OpenFreeMapPane(
     var liveWasMock by remember { mutableStateOf(false) }
     var startMarker by remember { mutableStateOf<org.maplibre.android.annotations.Marker?>(null) }
     var startStyleVersion by remember { mutableIntStateOf(-1) }
-    var stopMarkers by remember { mutableStateOf(emptyList<org.maplibre.android.annotations.Marker>()) }
+    var stopMarkers by remember { mutableStateOf(emptyList<Pair<Int, org.maplibre.android.annotations.Marker>>()) }
     var flowerMarkers by remember { mutableStateOf(emptyList<org.maplibre.android.annotations.Marker>()) }
     var shownFlowers by remember { mutableStateOf(emptyList<FlowerSpot>()) }
     var line by remember { mutableStateOf<org.maplibre.android.annotations.Polyline?>(null) }
@@ -170,7 +168,7 @@ private fun OpenFreeMapPane(
                 true
             }
             ready.setOnMarkerClickListener { tapped ->
-                val stopIndex = stopMarkers.indexOfFirst { it.id == tapped.id }
+                val stopIndex = stopMarkers.firstOrNull { it.second.id == tapped.id }?.first ?: -1
                 val stopCallback = latestOnStopPick
                 if (stopIndex >= 0 && stopCallback != null) {
                     stopCallback(stopIndex)
@@ -188,10 +186,25 @@ private fun OpenFreeMapPane(
                     } else false
                 }
             }
-            ready.moveCamera(org.maplibre.android.camera.CameraUpdateFactory.newCameraPosition(
+            val pose = latestViewport
+            val target = pose?.point ?: selected
+            ready.moveCamera(LibreCameraUpdateFactory.newCameraPosition(
                 LibreCameraPosition.Builder()
-                    .target(LibreLatLng(selected.latitude, selected.longitude)).zoom(14.5).build()
+                    .target(LibreLatLng(target.latitude,target.longitude))
+                    .zoom(pose?.zoom ?: 14.5)
+                    .bearing(pose?.bearing ?: 0.0)
+                    .tilt(pose?.tilt ?: 0.0).build()
             ))
+            ready.addOnCameraIdleListener {
+                if (!disposed) {
+                    val camera = ready.cameraPosition
+                    camera.target?.let {
+                        runCatching { Coordinate(it.latitude,it.longitude) }.onSuccess { point ->
+                            latestOnViewport(MapViewport(point,camera.zoom,camera.bearing,camera.tilt))
+                        }
+                    }
+                }
+            }
         }
         onDispose {
             disposed = true
@@ -202,19 +215,20 @@ private fun OpenFreeMapPane(
             view.onDestroy()
         }
     }
-    LaunchedEffect(map, dark, freeMapStyle) {
+    LaunchedEffect(map, dark) {
         val loadedMap = map ?: return@LaunchedEffect
-        val styleUrl = MapBasemapPolicy.openFreeMapStyleUrl(freeMapStyle, dark)
+        val styleUrl = MapBasemapPolicy.openFreeMapStyleUrl(FreeMapStyle.BRIGHT, dark)
         loadedMap.setStyle(Style.Builder().fromUri(styleUrl)) { loadedStyle ->
-            if (styleUrl.endsWith("/dark")) improveDarkRoadLegibility(loadedStyle)
+            if (dark) runCatching { BrightMapPalette.applyDark(context, loadedStyle) }
+                .onFailure { latestOnCameraFailure("無法完整套用深色地圖，請重試") }
             styleVersion++
         }
     }
     // The moving position is updated in place. Do not recreate the whole route every second.
-    LaunchedEffect(map, styleVersion, selected, selectionActive) {
+    LaunchedEffect(map, styleVersion, selected, showSelection) {
         val m = map ?: return@LaunchedEffect
         if (styleVersion == 0) return@LaunchedEffect
-        if (!selectionActive) {
+        if (!showSelection) {
             currentMarker?.let { m.removeMarker(it) }
             currentMarker = null
         } else {
@@ -240,16 +254,16 @@ private fun OpenFreeMapPane(
                 val bitmap = RoutePinBitmap.current(context, currentIsMock)
                 liveMarker = m.addMarker(LibreMarkerOptions().position(coordinate)
                     .icon(LibreIconFactory.getInstance(context).fromBitmap(bitmap))
-                    .title(if (currentIsMock) "🐝 目前模擬位置" else "手機目前位置"))
+                    .title(if (currentIsMock) "目前模擬位置" else "手機目前位置"))
                 liveStyleVersion = styleVersion
                 liveWasMock = currentIsMock
             } else liveMarker?.position = coordinate
         }
     }
-    LaunchedEffect(map, styleVersion, start) {
+    LaunchedEffect(map, styleVersion, start, showStart) {
         val m = map ?: return@LaunchedEffect
         if (styleVersion == 0) return@LaunchedEffect
-        if (start == null) {
+        if (!showStart || start == null) {
             startMarker?.let { m.removeMarker(it) }
             startMarker = null
         } else {
@@ -262,13 +276,14 @@ private fun OpenFreeMapPane(
             } else startMarker?.position = position
         }
     }
-    LaunchedEffect(map, styleVersion, stops, road, previewRoad) {
+    LaunchedEffect(map, styleVersion, stops, road, previewRoad, obscuredStops) {
         val m = map ?: return@LaunchedEffect
         if (styleVersion == 0) return@LaunchedEffect
-        stopMarkers.forEach { m.removeMarker(it) }
+        stopMarkers.forEach { m.removeMarker(it.second) }
         line?.let { m.removePolyline(it) }
-        stopMarkers = stops.mapIndexed { index, coordinate ->
-            m.addMarker(LibreMarkerOptions()
+        stopMarkers = stops.mapIndexedNotNull { index, coordinate ->
+            if (index in obscuredStops) return@mapIndexedNotNull null
+            index to m.addMarker(LibreMarkerOptions()
                 .position(LibreLatLng(coordinate.latitude, coordinate.longitude))
                 .icon(LibreIconFactory.getInstance(context).fromBitmap(
                     RoutePinBitmap.create(context, index, stops.size)))
@@ -299,14 +314,16 @@ private fun OpenFreeMapPane(
         val request = cameraRequest?.takeIf { it.target.hasAny } ?: return@LaunchedEffect
         if (styleVersion == 0) return@LaunchedEffect
         view.post {
-            if (!view.isAttachedToWindow || view.width <= 0 || view.height <= 0 || map !== m)
+            if (!view.isAttachedToWindow || view.width <= 0 || view.height <= 0 ||
+                map !== m || latestCameraRequest?.id != request.id)
                 return@post
             runCatching {
                 val targets = request.target.points
                 if (targets.size == 1) {
                     val only = targets.first()
-                    m.animateCamera(LibreCameraUpdateFactory.newLatLngZoom(
-                        LibreLatLng(only.latitude, only.longitude), 15.0,
+                    m.cancelTransitions()
+                    m.moveCamera(LibreCameraUpdateFactory.newLatLngZoom(
+                        LibreLatLng(only.latitude, only.longitude), maxOf(15.0, m.cameraPosition.zoom),
                     ))
                 } else {
                     val bounds = LibreLatLngBounds.Builder().includes(
@@ -320,7 +337,7 @@ private fun OpenFreeMapPane(
                         bounds, side, top, side, bottom,
                     ))
                 }
-            }.onFailure {
+            }.onSuccess { latestOnCameraApplied(request.id) }.onFailure {
                 latestOnCameraFailure("地圖無法調整顯示範圍，請手動移動或縮放")
             }
         }
@@ -334,7 +351,8 @@ private fun GoogleMapsPane(
     current: Coordinate?, currentIsMock: Boolean,
     start: Coordinate?, stops: List<Coordinate>,
     road: List<Coordinate>, previewRoad: Boolean, flowerSpots: List<FlowerSpot>,
-    cameraRequest: MapCameraRequest?, mapExplore: Boolean,
+    cameraRequest: MapCameraRequest?, viewport: MapViewport?,
+    onViewport: (MapViewport) -> Unit, onCameraApplied: (Int) -> Unit, mapExplore: Boolean,
     onCameraFailure: (String) -> Unit,
     onPick: (Coordinate) -> Unit, onFlowerPick: (FlowerSpot) -> Unit,
     onStopPick: ((Int) -> Unit)?,
@@ -347,13 +365,20 @@ private fun GoogleMapsPane(
     val latestOnStopPick by rememberUpdatedState(onStopPick)
     val latestStops by rememberUpdatedState(stops)
     val latestOnCameraFailure by rememberUpdatedState(onCameraFailure)
+    val latestViewport by rememberUpdatedState(viewport)
+    val latestOnViewport by rememberUpdatedState(onViewport)
+    val latestCameraRequest by rememberUpdatedState(cameraRequest)
+    val latestOnCameraApplied by rememberUpdatedState(onCameraApplied)
+    val showSelection = selectionActive && !overlapsCurrent(selected,current)
+    val showStart = start != null && !overlapsCurrent(start,current)
+    val obscuredStops = stops.indices.filter { overlapsCurrent(stops[it],current) }
     val view = remember(context) { GoogleMapView(context).apply { onCreate(null) } }
     var map by remember { mutableStateOf<GoogleMap?>(null) }
     var currentMarker by remember { mutableStateOf<com.google.android.gms.maps.model.Marker?>(null) }
     var liveMarker by remember { mutableStateOf<com.google.android.gms.maps.model.Marker?>(null) }
     var liveWasMock by remember { mutableStateOf(false) }
     var startMarker by remember { mutableStateOf<com.google.android.gms.maps.model.Marker?>(null) }
-    var stopMarkers by remember { mutableStateOf(emptyList<com.google.android.gms.maps.model.Marker>()) }
+    var stopMarkers by remember { mutableStateOf(emptyList<Pair<Int, com.google.android.gms.maps.model.Marker>>()) }
     var flowerMarkers by remember { mutableStateOf(emptyList<com.google.android.gms.maps.model.Marker>()) }
     var shownFlowers by remember { mutableStateOf(emptyList<FlowerSpot>()) }
     var line by remember { mutableStateOf<com.google.android.gms.maps.model.Polyline?>(null) }
@@ -380,7 +405,7 @@ private fun GoogleMapsPane(
                 latestOnPick(Coordinate(point.latitude, point.longitude))
             }
             ready.setOnMarkerClickListener { tapped ->
-                val stopIndex = stopMarkers.indexOfFirst { it.id == tapped.id }
+                val stopIndex = stopMarkers.firstOrNull { it.second.id == tapped.id }?.first ?: -1
                 val stopCallback = latestOnStopPick
                 if (stopIndex >= 0 && stopCallback != null) {
                     stopCallback(stopIndex)
@@ -398,8 +423,24 @@ private fun GoogleMapsPane(
                     } else false
                 }
             }
-            ready.moveCamera(CameraUpdateFactory.newLatLngZoom(
-                GoogleLatLng(selected.latitude, selected.longitude), 14.5f))
+            val pose = latestViewport
+            val target = pose?.point ?: selected
+            ready.moveCamera(CameraUpdateFactory.newCameraPosition(
+                com.google.android.gms.maps.model.CameraPosition.Builder()
+                    .target(GoogleLatLng(target.latitude,target.longitude))
+                    .zoom(pose?.zoom?.toFloat() ?: 14.5f)
+                    .bearing(pose?.bearing?.toFloat() ?: 0f)
+                    .tilt(pose?.tilt?.toFloat() ?: 0f).build()
+            ))
+            ready.setOnCameraIdleListener {
+                if (!disposed) {
+                    val camera = ready.cameraPosition
+                    runCatching { Coordinate(camera.target.latitude,camera.target.longitude) }.onSuccess { point ->
+                        latestOnViewport(MapViewport(point,camera.zoom.toDouble(),
+                            camera.bearing.toDouble(),camera.tilt.toDouble()))
+                    }
+                }
+            }
         }
         onDispose {
             disposed = true
@@ -413,9 +454,9 @@ private fun GoogleMapsPane(
     LaunchedEffect(map, dark) {
         map?.setMapStyle(if (dark) MapStyleOptions(GOOGLE_DARK_STYLE) else null)
     }
-    LaunchedEffect(map, selected, selectionActive) {
+    LaunchedEffect(map, selected, showSelection) {
         val m = map ?: return@LaunchedEffect
-        if (!selectionActive) {
+        if (!showSelection) {
             currentMarker?.remove()
             currentMarker = null
         } else {
@@ -436,17 +477,17 @@ private fun GoogleMapsPane(
             if (liveMarker == null || liveWasMock != currentIsMock) {
                 liveMarker?.remove()
                 liveMarker = m.addMarker(GoogleMarkerOptions().position(coordinate)
-                    .anchor(.5f, .5f).icon(
+                    .anchor(.5f, .5f).zIndex(10f).icon(
                         com.google.android.gms.maps.model.BitmapDescriptorFactory.fromBitmap(
                             RoutePinBitmap.current(context, currentIsMock)))
-                    .title(if (currentIsMock) "🐝 目前模擬位置" else "手機目前位置"))
+                    .title(if (currentIsMock) "目前模擬位置" else "手機目前位置"))
                 liveWasMock = currentIsMock
             } else liveMarker?.position = coordinate
         }
     }
-    LaunchedEffect(map, start) {
+    LaunchedEffect(map, start, showStart) {
         val m = map ?: return@LaunchedEffect
-        if (start == null) {
+        if (!showStart || start == null) {
             startMarker?.remove()
             startMarker = null
         } else {
@@ -459,18 +500,19 @@ private fun GoogleMapsPane(
             } else startMarker?.position = position
         }
     }
-    LaunchedEffect(map, stops, road, previewRoad) {
+    LaunchedEffect(map, stops, road, previewRoad, obscuredStops) {
         val m = map ?: return@LaunchedEffect
-        stopMarkers.forEach { it.remove() }
+        stopMarkers.forEach { it.second.remove() }
         line?.remove()
         stopMarkers = stops.mapIndexedNotNull { index, coordinate ->
+            if (index in obscuredStops) return@mapIndexedNotNull null
             m.addMarker(GoogleMarkerOptions()
                 .position(GoogleLatLng(coordinate.latitude, coordinate.longitude))
                 .anchor(.5f, .5f)
                 .icon(com.google.android.gms.maps.model.BitmapDescriptorFactory.fromBitmap(
                     RoutePinBitmap.create(context, index, stops.size)))
                 .title("第 ${index + 1} 個目的地" +
-                    if (index == stops.lastIndex) " · 終點" else " · 途經點"))
+                    if (index == stops.lastIndex) " · 終點" else " · 途經點"))?.let { index to it }
         }
         line = if (road.size >= 2) m.addPolyline(GooglePolylineOptions()
             .addAll(road.map { GoogleLatLng(it.latitude, it.longitude) })
@@ -512,14 +554,16 @@ private fun GoogleMapsPane(
         val m = map ?: return@LaunchedEffect
         val request = cameraRequest?.takeIf { it.target.hasAny } ?: return@LaunchedEffect
         view.post {
-            if (!view.isAttachedToWindow || view.width <= 0 || view.height <= 0 || map !== m)
+            if (!view.isAttachedToWindow || view.width <= 0 || view.height <= 0 ||
+                map !== m || latestCameraRequest?.id != request.id)
                 return@post
             runCatching {
                 val targets = request.target.points
                 if (targets.size == 1) {
                     val only = targets.first()
-                    m.animateCamera(CameraUpdateFactory.newLatLngZoom(
-                        GoogleLatLng(only.latitude, only.longitude), 15f,
+                    m.stopAnimation()
+                    m.moveCamera(CameraUpdateFactory.newLatLngZoom(
+                        GoogleLatLng(only.latitude, only.longitude), maxOf(15f,m.cameraPosition.zoom),
                     ))
                 } else {
                     val builder = GoogleLatLngBounds.Builder()
@@ -527,7 +571,7 @@ private fun GoogleMapsPane(
                     val padding = (34f * view.resources.displayMetrics.density).toInt()
                     m.animateCamera(CameraUpdateFactory.newLatLngBounds(builder.build(), padding))
                 }
-            }.onFailure {
+            }.onSuccess { latestOnCameraApplied(request.id) }.onFailure {
                 latestOnCameraFailure("地圖無法調整顯示範圍，請手動移動或縮放")
             }
         }
