@@ -18,6 +18,15 @@ class PlaceSuggestionPolicyTest {
             listOf(far,context)).displayName)
     }
 
+    @Test fun photonUsesSupportedOsmNativeLanguageInsteadOfUnsupportedZh() {
+        val url = PhotonReverseRequest.url(Coordinate(25.033, 121.5654))
+        assertTrue(url.startsWith("https://photon.komoot.io/reverse?"))
+        assertTrue(url.contains("lat=25.033000"))
+        assertTrue(url.contains("lon=121.565400"))
+        assertTrue(url.endsWith("&lang=default"))
+        assertFalse(url.contains("lang=zh"))
+    }
+
     @Test fun streetThenDistrictThenCityThenCoordinateFallback() {
         val street = GeocodeCandidate(null,point,"highway","Marunouchi 1", "Tokyo",null,"JP","Japan")
         assertEquals("Marunouchi 1", PlaceSuggestionPolicy.nameFor(point,listOf(street)).displayName)

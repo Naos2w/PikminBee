@@ -180,8 +180,7 @@ class AppPreferences(private val context: Context) {
         MapAppearancePolicy.fromStored(prefs.getString("appearance", null))
 
     fun freeMapStyle(): FreeMapStyle =
-        enumValues<FreeMapStyle>().firstOrNull { it.name == prefs.getString("free_map_style", "") }
-            ?: FreeMapStyle.AUTO
+        MapBasemapPolicy.fromStored(prefs.getString("free_map_style", ""))
 
     fun setFreeMapStyle(style: FreeMapStyle) {
         prefs.edit().putString("free_map_style", style.name).apply()
@@ -263,7 +262,7 @@ class AppPreferences(private val context: Context) {
         var id = System.currentTimeMillis()
         while (list.any { it.id == id }) id++
         val saved = SavedPlace(
-            id, name.trim().take(60).ifBlank { "收藏地點" }, coordinate,
+            id, name.trim().take(80).ifBlank { "收藏地點" }, coordinate,
             countryCode?.takeIf { it.length == 2 }?.uppercase(java.util.Locale.ROOT),
             countryName?.take(100), city?.take(100),
             timeZoneId?.takeIf { SavedPlaceTimePolicy.validatedZone(it) != null },

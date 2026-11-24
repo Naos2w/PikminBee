@@ -16,8 +16,9 @@
   --accent:#e8b76c;--accent-ink:#221b10;--accent-soft:rgba(232,183,108,.15);
   --button:#446a79;--danger:#aa4351;--shadow:0 2px 8px rgba(0,0,0,.10);
 }
+/* A user-selected Web theme overrides the OS. "auto" keeps the OS preference. */
 @media (prefers-color-scheme:light) {
-  :root {
+  :root:not([data-web-theme="dark"]) {
     color-scheme:light;
     --bg:#e9eff0;--text:#20313a;--sub:#4f626a;--subtle:#5e727a;
     --surface:#ffffff;--solid:#fff;--soft:rgba(81,123,137,.09);
@@ -25,6 +26,14 @@
     --accent:#8a5715;--accent-ink:#fff;--accent-soft:rgba(174,122,45,.12);
     --button:#d6e6ea;--danger:#b34551;--shadow:0 2px 8px rgba(40,64,74,.08);
   }
+}
+:root[data-web-theme="light"] {
+  color-scheme:light;
+  --bg:#e9eff0;--text:#20313a;--sub:#4f626a;--subtle:#5e727a;
+  --surface:#ffffff;--solid:#fff;--soft:rgba(81,123,137,.09);
+  --line:rgba(53,91,104,.16);--rim:rgba(255,255,255,.85);
+  --accent:#8a5715;--accent-ink:#fff;--accent-soft:rgba(174,122,45,.12);
+  --button:#d6e6ea;--danger:#b34551;--shadow:0 2px 8px rgba(40,64,74,.08);
 }
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
@@ -55,7 +64,10 @@ input,select,button{font:inherit}
 input,select{width:100%;padding:11px;border:1px solid var(--line);border-radius:12px;background:var(--soft);color:var(--text);min-height:48px}
 /* Native Windows/Edge popups may otherwise show light items with white text. */
 select option{background-color:#1b2a33;color:#eaf2f2}
-@media(prefers-color-scheme:light){select option{background-color:#fff;color:#20313a}}
+@media(prefers-color-scheme:light){
+  :root:not([data-web-theme="dark"]) select option{background-color:#fff;color:#20313a}
+}
+:root[data-web-theme="light"] select option{background-color:#fff;color:#20313a}
 button{padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:var(--soft);color:var(--text);cursor:pointer;min-height:48px}
 button:hover:not(:disabled){border-color:var(--subtle);background:var(--accent-soft)}
 button:active:not(:disabled){border-color:var(--accent)}
@@ -190,6 +202,9 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
 .bookmark-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:7px 10px;min-height:42px;white-space:nowrap}
 .bookmark-btn svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8}
 #web-settings{border:1px solid var(--line);background:var(--soft);padding:12px;border-radius:14px}
+.web-setting-row{display:grid;grid-template-columns:1fr 1fr;align-items:center;gap:10px;margin:12px 0}
+.web-setting-row label{font-size:13px;color:var(--text);margin:0}
+.map-style-label{font-size:12px!important;margin:0!important;font-weight:650;flex:none!important}
 #web-settings h2{font-size:16px}
 .saved-dialog{width:min(530px,calc(100vw - 24px));max-height:min(86svh,900px);border:1px solid var(--rim);border-radius:20px;padding:17px;background:var(--surface);color:var(--text);box-shadow:var(--shadow);overflow:hidden}
 .saved-dialog::backdrop{background:rgba(0,0,0,.55)}
@@ -199,6 +214,8 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
 .saved-dialog .saved-header button{flex:0 0 auto;min-width:43px;min-height:43px}
 .saved-scroll{min-height:0;max-height:65svh;overflow:auto;display:grid;gap:9px;padding:3px}
 .saved-card{border-radius:12px;border:1px solid var(--line);padding:11px;display:grid;gap:5px;background:var(--soft)}
+.saved-country-row{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--sub)}
+.saved-country-flag{font-size:23px;line-height:1.25;flex-shrink:0}
 .saved-card .row{margin:0}
 .saved-card small{color:var(--sub);font-size:12px}
 .saved-card button{min-height:42px}
@@ -443,10 +460,12 @@ body.remote-active #control-panel .row>*{min-width:0}
  <div class="inline map-header" style="margin-bottom:9px"><strong>控制地圖</strong>
   <span id="map-status" data-state="loading" role="status" aria-live="polite">載入中</span>
   <button type="button" class="bookmark-btn" id="show-saved" aria-label="開啟收藏地點與路線"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 4h12v17l-6-4-6 4z"/></svg><span>收藏</span></button>
-  <select id="theme" style="max-width:170px" aria-label="地圖樣式">
-   <option value="auto">跟隨系統</option><option value="liberty">Liberty</option>
-   <option value="bright">Bright</option><option value="positron">Positron</option>
-   <option value="dark">Dark</option>
+  <label class="map-style-label" for="theme">底圖</label>
+  <select id="theme" style="max-width:170px" aria-label="地圖底圖">
+   <option value="auto">跟隨網站主題</option>
+   <option value="positron">Positron（簡潔）</option>
+   <option value="bright">Bright（街道）</option>
+   <option value="dark">Dark（深色）</option>
   </select>
  </div>
  <div id="mobile-overview" class="mobile-overview" aria-live="polite">
@@ -551,7 +570,24 @@ body.remote-active #control-panel .row>*{min-width:0}
  </div>
  <section id="web-settings" class="hidden" aria-label="Web 控制設定">
    <h2>Web 控制設定</h2>
-   <p class="muted">地圖底圖可由上方樣式選單切換。行走速度及循環設定在路徑模式內調整，手機權限與區網配對仍需在 Android App 管理。</p>
+   <div class="web-setting-row">
+    <label for="web-appearance">網站介面主題</label>
+    <select id="web-appearance" aria-label="網站介面主題">
+     <option value="auto">跟隨系統</option>
+     <option value="light">淺色</option>
+     <option value="dark">深色</option>
+    </select>
+   </div>
+   <div class="web-setting-row">
+    <label for="theme-settings">地圖底圖</label>
+    <select id="theme-settings" aria-label="設定地圖底圖">
+     <option value="auto">跟隨網站主題</option>
+     <option value="positron">Positron（簡潔）</option>
+     <option value="bright">Bright（街道）</option>
+     <option value="dark">Dark（深色）</option>
+    </select>
+   </div>
+   <p class="muted">網站主題與地圖底圖可分別設定；跟隨網站主題時，淺色採 Positron、深色採 Dark。設定會保存在本機瀏覽器，不影響 Android App 外觀。手機權限與區網配對仍由 Android App 管理。</p>
    <p class="muted">真實 GPS 必須先在手機 Wi-Fi 控制設定中為目前配對瀏覽器同意分享。只有可信、非模擬的最近 30 分鐘快照會顯示；HTTP 私人區網尚未加密。</p>
    <button type="button" id="web-settings-close">返回控制</button>
  </section>
@@ -576,17 +612,17 @@ body.remote-active #control-panel .row>*{min-width:0}
 <dialog id="saved-dialog" class="saved-dialog" aria-labelledby="saved-heading">
  <div class="saved-header"><h2 id="saved-heading">收藏地點與路線</h2><button id="close-saved" type="button" aria-label="關閉收藏清單">✕</button></div>
  <div class="row">
-  <button type="button" id="saved-add-button">收藏地圖所選位置</button>
-  <button type="button" id="saved-enrich-button">補齊舊收藏資訊</button>
+  <button type="button" id="saved-add-button">收藏所選位置（自動命名）</button>
+  <button type="button" id="saved-enrich-button">補齊舊收藏地名／國旗／時區</button>
  </div>
  <div id="saved-editor" class="saved-card hidden" aria-label="新增收藏">
-  <strong>新增收藏地點</strong>
+  <strong>無法自動取得地名，改用座標收藏</strong>
   <small id="saved-new-position">請先選擇地圖位置</small>
-  <label for="saved-new-name">建議地名（可自行修改）</label>
+  <label for="saved-new-name">收藏名稱（可手動修改）</label>
   <input id="saved-new-name" maxlength="80" autocomplete="off">
   <small id="saved-new-status" role="status" aria-live="polite"></small>
-  <small>只有點擊收藏才將選定座標送至 Photon／TimeAPI；不會移動手機 GPS。</small>
-  <div class="row"><button type="button" id="saved-save" class="primary">確認儲存</button>
+  <small>地名查詢失敗時才需要手動儲存。僅在你明確點擊收藏時，向 Photon／TimeAPI 查詢所選座標；不會移動手機 GPS。</small>
+  <div class="row"><button type="button" id="saved-save" class="primary">用目前名稱儲存</button>
    <button type="button" id="saved-cancel">取消</button></div>
  </div>
  <p class="muted" id="saved-enrich-status" role="status" aria-live="polite"></p>
@@ -595,7 +631,7 @@ body.remote-active #control-panel .row>*{min-width:0}
  <div id="saved-list" class="saved-scroll" aria-live="polite">正在讀取收藏…</div>
  <p class="muted">點收藏僅選取地圖，不會瞬移。時差以近期真實 GPS 時區為基準，無資料則待確認。</p>
  <details class="help-details"><summary>收藏資料與位置隱私說明</summary>
- <p>按新增／補齊才會將選取的收藏座標傳給 Photon／TimeAPI 查詢地標、國家與時區；不會覆寫自訂名稱。開啟收藏時，若手機已有最近 30 分鐘內驗證的非模擬 GPS 定位，可能向 TimeAPI 解析該真實位置的時區。Web 不會取得作為時區參考的精確真實座標，失效時不會以虛擬 GPS 或固定臺灣時區替代。</p>
+ <p>按一鍵收藏／補齊才會將選取的收藏座標傳給 Photon／TimeAPI 查詢地標、國家與時區；查詢成功自動命名，舊收藏只會替換系統自動產生的座標名稱，不覆寫自訂名稱。開啟收藏時，若手機已有最近 30 分鐘內驗證的非模擬 GPS 定位，可能向 TimeAPI 解析該真實位置的時區。Web 不會取得作為時區參考的精確真實座標，失效時不會以虛擬 GPS 或固定臺灣時區替代。</p>
  </details>
 </dialog>
 </main>

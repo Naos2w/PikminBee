@@ -1,12 +1,21 @@
 # PikminBee TODO — current, actionable backlog
 
+## 0d. 收藏 2.0 基礎與 Web 網站主題（2026-11-24，獨立開發）
+
+- [x] **FAV-1 · 根因修復**：確認 Photon 公開反向地理服務對 `lang=zh` 實際回 HTTP 400；以支援的 `lang=default` 查詢同一臺北測試座標回 200、OSM 中文地名、`TW` 國家代碼與 `臺北市`，時區 TimeAPI 則回 `Asia/Taipei`。修正單一共用 Android `PlaceLookup`，Web 由 Android API 查詢，不將使用者 GPS 透過網頁瀏覽器送往 Photon。
+- [x] **FAV-2 · 一鍵自動命名（來源）**：APP 選取地圖位置後點「一鍵收藏」即由手機查詢地標、保存名稱／國家／城市／時區，失敗才退回座標名稱；Wi-Fi 網頁點「收藏所選位置」自動查詢、儲存，查詢失敗提供手動備援。可於收藏清單事後改名，不因地圖拖曳或 GPS 輪詢自動送出座標。
+- [x] **FAV-3 · 國旗／當地時間／舊資料**：APP、Web 均由驗證的 ISO 國家代碼顯示國旗 emoji；國家城市與當地時間依查詢 metadata 顯示，沒有真實 GPS 時區證據則明示時差待確認。舊收藏由使用者按「補齊」後最多每次 5 筆、限制 API 次數；僅可自動替換與公式完全吻合的座標預設名稱，其他手動名稱不得覆寫。既有 ID、座標、建立日期保留。
+- [x] **THEME-1 · Liberty 退場與設定分離**：Android 與 Web 移除 Liberty 地圖選項，從舊版設定遷移到 AUTO；淺色 AUTO 使用 Positron，深色使用 Dark。Web 設定新增獨立網站介面「跟隨系統／淺色／深色」與地圖底圖選項，右上仍有可見底圖快捷選單；兩種選擇分開保存在目前瀏覽器。
+- [ ] **FAV-4 · 收藏管理 2.0 下一階段**：分類與國家分組、排序、批次管理及匯入／匯出，需另行規劃及獨立測試；不宣稱本輪已完成全部管理功能。
+- [ ] **FAV-5 · 驗收／發佈**：完成 MSI Kotlin/JVM、Lint、Node.js、GitHub CI，並透過 POCO 與 MSI Edge 真實查詢多國座標、原收藏補齊、翻譯來源失效、時區、國旗顯示、Web 主題保持、Android 舊 Liberty 設定遷移。此分支仍未合併，已簽的 UAT 0.22.1 **不含此功能**。不可清除手機資料、變更 main 或逕自宣稱真實裝置驗收完成。
+
 ## 0c. Wi-Fi Web 地圖可用性（2026-11-24，獨立修復）
 
 - [x] **WEB-1 · 瞬移後定位鏡頭（原始碼）**：經確認、且手機 HTTP 控制器接受瞬移指令後，Web 地圖立即用 `jumpTo` 移至目標座標並保持可用縮放；拒絕的操作不會移動鏡頭。若正行走，先明確確認停止並等待手機回報已停止；**鏡頭移動不等於手機已完成位置變更**。
 - [x] **WEB-2 · 地圖圓點與 APP 一致（原始碼）**：已驗證真實 GPS 藍色圓點、模擬 GPS 橘色圓點，與 Android `RoutePinBitmap.current` 的 24dp 白環／柔和光暈一致，不使用「真／模」國字；路線起點改圖示，重疊位置避免雙層覆蓋；第一個目的地綠、中途藍、最後紅。
 - [x] **WEB-3 · 可見性及大量路點（原始碼）**：桌面／平板的頂部收藏與底圖工具避開右側抽屜，抽屜標題捲動時維持可見；長路點清單獨立捲動，行走中不顯示無法操作的排列／刪除按鈕，明示路線只讀。手機面板維持優先顯示地圖。
 - [x] **WEB-4 · 本機瀏覽器視覺測試**：在 MSI 上使用獨立的 `127.0.0.1` 模擬 API（**不連 POCO、不變更手機 GPS**），檢查 1600×900、1280×800、830×650、690×920、390×844；無水平溢出或頂部工具與側欄重疊。另實際確認已接受的模擬瞬移會將地圖跳至另一個地點。TreeLazy 風格以現有 Positron 底圖作為可選參考，不新增未授權的專有圖資。
-- [ ] **WEB-5 · 交付與設備驗收**：MSI Kotlin/JVM、Lint、Node.js、GitHub CI 以及 POCO＋MSI Edge 的真實瞬移、拒絕、行走中停止、平板／手機版面和既有資料安全需驗證；已簽的 UAT 0.21.1 **不包含本次未合併修正**。打包與安裝均不得清除手機 App 資料。
+- [ ] **WEB-5 · 設備驗收**：PR #126 已合併、PR #127/#128 版本晉升後已正式簽署 UAT 0.22.1（GitHub run 45323013631）。POCO＋MSI Edge 的真實瞬移、拒絕、行走中停止、平板／手機版面和既有資料安全仍需驗證；打包與安裝均不得清除手機 App 資料。
 
 ## 0a. Wi-Fi 會話改善／PR #121（2026-11-24，整合分支）
 
@@ -14,7 +23,7 @@
 - [x] **L2 · 手機核准續期**：原 IP／有效舊 Token 需在網頁提出續期，90 秒內手機明確核准才更新；更換 Token、撤銷舊 Token 與真實 GPS 分享權限。拒絕、過期、不同 IP 或系統重啟均不續期。
 - [x] **L3 · UI 整合**：倒數時間、到期前提示、手機核准按鈕與 PR #122 的固定行走控制列、斷線提示及巡花移除內容並存。不得重新啟用舊模式或背景自動續期。
 - [ ] **L4 · 來源及裝置驗收**：MSI 最終 Kotlin/JVM、Android Lint、Node.js 與 GitHub CI 必須通過；另以 POCO + MSI Edge 實際測試配對、續期倒數、拒絕、原 Token 作廢、60/120 分鐘邊界、Web 重整、短暫斷線、Wi-Fi 切換、背景服務及真實 GPS 權限。不具設備證據時，不可宣稱完成 UAT。
-- [x] **L5 · 原始碼與 UAT 包裝**：PR #123 已合併，經 #124 版本更新與 #125 正式晉升，從 staging 已簽章打包 UAT 0.21.1（GitHub run 45319250307）；沒有變更 main 或自動安裝 POCO。後續版本仍須獨立檢查、不能卸載或清除 App 資料。現有 `.worktrees/` 不清除。
+- [x] **L5 · 原始碼與 UAT 包裝**：PR #123 已合併，經 #124/#125 打包 UAT 0.21.1，經 #126/#127/#128 更新 UAT 0.22.1（GitHub run 45323013631）；沒有變更 main 或自動安裝 POCO。後續版本仍須獨立檢查、不能卸載或清除 App 資料。現有 `.worktrees/` 不清除。
 
 > **2026-11-24 owner decision:** Retire the user-facing `尋花` mode and live flower-screen recognition. **PR #120 has already merged** the Android, floating and LAN retirement to `develop` at `7f712df`; durable saved flower locations, legacy route labels and GPX compatibility remain. **This is source-only, not an installed APK or completed POCO acceptance.** F1–F4 below are historical and cancelled. Do not resume automatic flower recognition, harvesting or flower-farming modes. **Git revert restores source, not app data lost through uninstall or clear-storage. Do not uninstall.**
 
