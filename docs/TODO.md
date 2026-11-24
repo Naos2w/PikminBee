@@ -1,12 +1,20 @@
 # PikminBee TODO — current, actionable backlog
 
+## 0c. Wi-Fi Web 地圖可用性（2026-11-24，獨立修復）
+
+- [x] **WEB-1 · 瞬移後定位鏡頭（原始碼）**：經確認、且手機 HTTP 控制器接受瞬移指令後，Web 地圖立即用 `jumpTo` 移至目標座標並保持可用縮放；拒絕的操作不會移動鏡頭。若正行走，先明確確認停止並等待手機回報已停止；**鏡頭移動不等於手機已完成位置變更**。
+- [x] **WEB-2 · 地圖圓點與 APP 一致（原始碼）**：已驗證真實 GPS 藍色圓點、模擬 GPS 橘色圓點，與 Android `RoutePinBitmap.current` 的 24dp 白環／柔和光暈一致，不使用「真／模」國字；路線起點改圖示，重疊位置避免雙層覆蓋；第一個目的地綠、中途藍、最後紅。
+- [x] **WEB-3 · 可見性及大量路點（原始碼）**：桌面／平板的頂部收藏與底圖工具避開右側抽屜，抽屜標題捲動時維持可見；長路點清單獨立捲動，行走中不顯示無法操作的排列／刪除按鈕，明示路線只讀。手機面板維持優先顯示地圖。
+- [x] **WEB-4 · 本機瀏覽器視覺測試**：在 MSI 上使用獨立的 `127.0.0.1` 模擬 API（**不連 POCO、不變更手機 GPS**），檢查 1600×900、1280×800、830×650、690×920、390×844；無水平溢出或頂部工具與側欄重疊。另實際確認已接受的模擬瞬移會將地圖跳至另一個地點。TreeLazy 風格以現有 Positron 底圖作為可選參考，不新增未授權的專有圖資。
+- [ ] **WEB-5 · 交付與設備驗收**：MSI Kotlin/JVM、Lint、Node.js、GitHub CI 以及 POCO＋MSI Edge 的真實瞬移、拒絕、行走中停止、平板／手機版面和既有資料安全需驗證；已簽的 UAT 0.21.1 **不包含本次未合併修正**。打包與安裝均不得清除手機 App 資料。
+
 ## 0a. Wi-Fi 會話改善／PR #121（2026-11-24，整合分支）
 
 - [x] **L1 · 固定 2 小時**：私人 Wi-Fi 配對後會話 120 分鐘，固定到期，不因每 2 秒輪詢延長；真實 GPS 歷史快照仍獨立最多 30 分鐘。
 - [x] **L2 · 手機核准續期**：原 IP／有效舊 Token 需在網頁提出續期，90 秒內手機明確核准才更新；更換 Token、撤銷舊 Token 與真實 GPS 分享權限。拒絕、過期、不同 IP 或系統重啟均不續期。
 - [x] **L3 · UI 整合**：倒數時間、到期前提示、手機核准按鈕與 PR #122 的固定行走控制列、斷線提示及巡花移除內容並存。不得重新啟用舊模式或背景自動續期。
 - [ ] **L4 · 來源及裝置驗收**：MSI 最終 Kotlin/JVM、Android Lint、Node.js 與 GitHub CI 必須通過；另以 POCO + MSI Edge 實際測試配對、續期倒數、拒絕、原 Token 作廢、60/120 分鐘邊界、Web 重整、短暫斷線、Wi-Fi 切換、背景服務及真實 GPS 權限。不具設備證據時，不可宣稱完成 UAT。
-- [ ] **L5 · 發佈**：遵守 `feature → develop`（PR + Squash）且不改 `staging`／`main`，未取得獨立安裝同意不可更新或卸載 POCO APK。現有工作區 `.worktrees/` 不清除。
+- [x] **L5 · 原始碼與 UAT 包裝**：PR #123 已合併，經 #124 版本更新與 #125 正式晉升，從 staging 已簽章打包 UAT 0.21.1（GitHub run 45319250307）；沒有變更 main 或自動安裝 POCO。後續版本仍須獨立檢查、不能卸載或清除 App 資料。現有 `.worktrees/` 不清除。
 
 > **2026-11-24 owner decision:** Retire the user-facing `尋花` mode and live flower-screen recognition. **PR #120 has already merged** the Android, floating and LAN retirement to `develop` at `7f712df`; durable saved flower locations, legacy route labels and GPX compatibility remain. **This is source-only, not an installed APK or completed POCO acceptance.** F1–F4 below are historical and cancelled. Do not resume automatic flower recognition, harvesting or flower-farming modes. **Git revert restores source, not app data lost through uninstall or clear-storage. Do not uninstall.**
 
@@ -24,7 +32,7 @@
 - [x] **UX-2 · 路點上限一致（原始碼）**：Android 一般道路草稿從 14 調到 **15**（非循環），與 Wi-Fi Web、GPX 和收藏上限一致；回到起點的循環道路保留 **14** 路點限制，以符合 16 個路線錨點上限。保留既有收藏資料與路線預覽確認。
 - [x] **UX-3 · 視覺與文案（原始碼）**：Android 行走進度拆成兩行並提高字級；Web 手機底部三模式等寬、縮短收藏選取文字、舊巡花收藏標示為歷史資料；兩端 Dark OpenFreeMap 僅微調已存在的道路線條顏色以提高辨識度。
 - [ ] **UX-4 · 完整驗收**：MSI 最終來源已通過 **291 項 JVM 單元測試（0 失敗／0 跳過）、Android Lint、Node.js 語法及 Git 差異檢查**，PR #122 GitHub CI 已通過並合併 develop（c422978）；POCO 真實 Android 視覺／停止確認／深淺色／動態字級，以及 Edge/Android Chrome 的 360/390/690/830/1280 等斷點、面板開合、斷線與一鍵停止均需驗證。**本機瀏覽器模擬配對控制遭執行環境阻擋，且沒有連上的 Android ADB，尚不可宣稱設備 RWD／實機合格。**
-- [x] **UX-5 · 後續獨立整合（原始碼）**：Wi-Fi 2 小時會話與手機核准續期 PR #121 已在獨立分支接續已合併的 UI/UX PR #122；原始碼整合不等於 UAT，需另走 L4 實機驗收。
+- [x] **UX-5 · 已整合 develop**：Wi-Fi 2 小時會話與手機核准續期由 PR #123（取代不符合分支命名規則的 #121）合併；經 #124、#125 打包 UAT 0.21.1。程式碼整合和 APK 簽章不等於實機 UAT，L4／UX-4 仍待 POCO 驗證。
 
 > **Source of truth**. Initially consolidated on **2026-11-23** from `develop` at `4f4ec6107757f14810ef53e23ec1d5e9e3b3bb59` (PR #110); the **S5 closure source baseline is `712abdd7a8ad4f72761dd38465aaa800e332fe10` (PR #115)**. This list replaces repeated historical milestone checkboxes; it does **not** retroactively certify device behaviour. PRs, issues and the immutable [previous full TODO snapshot](https://github.com/Naos2w/PikminBee/blob/4f4ec6107757f14810ef53e23ec1d5e9e3b3bb59/docs/TODO.md) preserve the full audit trail. Do not create a second active task ledger.
 >

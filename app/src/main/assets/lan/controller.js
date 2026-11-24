@@ -369,9 +369,26 @@ $("teleport").addEventListener("click", async () => {
     if (latest?.phase === "MOVING" || latest?.phase === "PAUSED") {
       if (!confirm("目前路線尚未停止，先停止行走才能瞬移。")) return;
       if (!await act("/api/control",{action:"stop"})) return;
+      // Android applies Stop asynchronously. Do not send teleport while the
+      // route service still reports MOVING/PAUSED (the server will reject it).
+      for (let attempt = 0; attempt < 10 &&
+          ["MOVING","PAUSED"].includes(latest?.phase); attempt++) {
+        await pause(300);
+        await refresh();
+      }
+      if (["MOVING","PAUSED"].includes(latest?.phase)) {
+        setMessage("路線尚未停止，請確認停止後再瞬移");
+        return;
+      }
     }
     if (!confirm("確定將手機模擬位置瞬移到所選座標？")) return;
-    await act("/api/teleport", readCoordinate());
+    const destination = readCoordinate();
+    if (!await act("/api/teleport", destination)) return;
+    // The phone accepted the request; centre the *map camera* immediately.
+    // The mock-location service still confirms the actual position separately.
+    map?.jumpTo({center:[destination.lon,destination.lat],
+      zoom:Math.max(15, map.getZoom())});
+    setMessage("已送出瞬移指令，地圖已移至目標；請以手機回報的位置為準");
   } catch (error) { setMessage(error.message); }
 });
 $("set-origin").addEventListener("click", async () => {
@@ -649,16 +666,39 @@ function ordinalPin(label, variant = "") {
   const pin = document.createElement("div");
   pin.className = "ordinal-pin" + (variant ? " " + variant : "");
   pin.textContent = String(label);
-  const meaning = {start:"路線起點",real:"手機真實 GPS",virtual:"手機模擬 GPS"};
-  pin.setAttribute("aria-label", meaning[variant] || "路點 " + label);
+  pin.setAttribute("aria-label", "路點 " + label);
   return pin;
+}
+
+// Match the native RoutePinBitmap.current() dot: 24dp footprint, white ring,
+// blue real GPS / orange simulated GPS. Labels remain in accessible tooltips.
+function currentPositionDot(simulated) {
+  const pin = document.createElement("div");
+  pin.className = "position-dot " + (simulated ? "virtual" : "real");
+  pin.setAttribute("role", "img");
+  pin.setAttribute("aria-label", simulated
+    ? "手機目前模擬 GPS 位置" : "手機最後驗證的真實 GPS 位置（非即時）");
+  return pin;
+}
+
+function routeOriginPin() {
+  const pin = document.createElement("div");
+  pin.className = "route-origin-pin";
+  pin.setAttribute("role", "img");
+  pin.setAttribute("aria-label", "路線起點");
+  return pin;
+}
+
+function nearSameCoordinate(a, b) {
+  return !!(a && b && Math.abs(a.lat - b.lat) < 0.000015 &&
+    Math.abs(a.lon - b.lon) < 0.000015);
 }
 function renderMap() {
   if (!map) return;
   if (latest?.position) {
     const p = latest.position;
     if (!positionMarker) positionMarker = new maplibre.Marker({
-      element:ordinalPin("模","virtual"),anchor:"center"
+      element:currentPositionDot(true),anchor:"center"
     }).setLngLat([p.lon,p.lat])
       .setPopup(new maplibre.Popup().setText("手機模擬 GPS")).addTo(map);
     else positionMarker.setLngLat([p.lon,p.lat]);
@@ -670,7 +710,7 @@ function renderMap() {
       {hour:"2-digit",minute:"2-digit"});
     const label = "最後驗證的真實 GPS（非即時） · " + when;
     if (!realMarker) realMarker = new maplibre.Marker({
-      element:ordinalPin("真","real"),anchor:"center"
+      element:currentPositionDot(false),anchor:"center"
     }).setLngLat([physical.lon,physical.lat])
       .setPopup(new maplibre.Popup().setText(label)).addTo(map);
     else {
@@ -679,9 +719,14 @@ function renderMap() {
     }
   } else if (realMarker) { realMarker.remove(); realMarker = null; }
   const origin = latest?.origin;
-  if (origin) {
-    if (!originMarker) originMarker = new maplibre.Marker({element:ordinalPin("起", "start"),anchor:"center"})
-      .setLngLat([origin.lon,origin.lat]).setPopup(new maplibre.Popup().setText("路線起點")).addTo(map);
+  // Do not pile an origin icon on top of the actual current-position dot.
+  const showOrigin = origin && !nearSameCoordinate(origin,latest?.position) &&
+    !nearSameCoordinate(origin,physical);
+  if (showOrigin) {
+    if (!originMarker) originMarker = new maplibre.Marker({
+      element:routeOriginPin(),anchor:"center"
+    }).setLngLat([origin.lon,origin.lat])
+      .setPopup(new maplibre.Popup().setText("路線起點")).addTo(map);
     else originMarker.setLngLat([origin.lon,origin.lat]);
   } else if (originMarker) { originMarker.remove(); originMarker = null; }
   if (chosen) {
@@ -699,7 +744,8 @@ function renderMap() {
   if (key !== lastStopsKey) {
     routeMarkers.forEach(marker => marker.remove());
     routeMarkers = stops.map((item,i) =>
-      new maplibre.Marker({element:ordinalPin(i + 1, i === stops.length-1 ? "last" : ""),anchor:"center"})
+      new maplibre.Marker({element:ordinalPin(i + 1,
+        i === 0 ? "first" : i === stops.length - 1 ? "last" : "via"),anchor:"center"})
         .setLngLat([item.lon,item.lat])
         .setPopup(new maplibre.Popup().setText("路點 " + (i+1)))
         .addTo(map));
@@ -773,7 +819,7 @@ function renderRouteOrder() {
     small.textContent = point ? coordinates(point) : "尚未指定起點";
     details.append(strong, small);
     li.append(num, details);
-    if (index >= 0) {
+    if (index >= 0 && !busy) {
       const actions = document.createElement("div");
       actions.className = "stop-actions";
       for (const [caption,offset] of [["上移",-1],["下移",1]]) {
@@ -781,7 +827,7 @@ function renderRouteOrder() {
         btn.type = "button";
         btn.textContent = caption;
         btn.setAttribute("aria-label", label + " " + (index + 1) + caption);
-        btn.disabled = !!busy || index + offset < 0 || index + offset >= stops.length;
+        btn.disabled = index + offset < 0 || index + offset >= stops.length;
         btn.addEventListener("click", () =>
           act("/api/points/reorder",{mode,index,offset}));
         actions.appendChild(btn);
@@ -789,7 +835,6 @@ function renderRouteOrder() {
       const remove = document.createElement("button");
       remove.type = "button";
       remove.textContent = "刪除";
-      remove.disabled = !!busy;
       remove.setAttribute("aria-label", "刪除" + label + " " + (index + 1));
       remove.addEventListener("click", () =>
         act("/api/points/remove",{mode,index}));
@@ -850,11 +895,13 @@ function updateRouteControls() {
       formatDistance(prepared.distanceMetres) + " · 最大道路吸附 " +
       Math.round(prepared.maxSnapMetres) + " 公尺。請確認後再開始。";
   }
-  $("routehint").textContent = !hasOrigin ? "先在地圖選取起點，再按「設為起點」。" :
-    stops.length === 0 ? "加入目的地，規劃只會預覽不會移動 GPS。" :
-    latest?.planning ? "正在查詢步行道路，不會移動手機。" :
-    ready ? "路線已預覽。確認道路和起點後可開始。" :
-    "請先按「規劃並預覽道路」。";
+  $("routehint").textContent = moving || paused
+    ? "行走中路點暫時為唯讀；需修改請先確認停止路線。"
+    : !hasOrigin ? "先在地圖選取起點，再按「設為起點」。"
+    : stops.length === 0 ? "加入目的地，規劃只會預覽不會移動 GPS。"
+    : latest?.planning ? "正在查詢步行道路，不會移動手機。"
+    : ready ? "路線已預覽。確認道路和起點後可開始。"
+    : "請先按「規劃並預覽道路」。";
   if (navigating && !latest?.mockPermissionReady && ready) {
     $("routehint").textContent += " 開始前仍需在手機設定精確定位及模擬位置 App。";
   }
