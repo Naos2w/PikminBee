@@ -40,6 +40,17 @@ class RoutePointDraftTest {
             RoutePointDraft.select(emptyList(), origin, origin).outcome)
     }
 
+    @Test fun multiRowDragMovesOnceInEitherDirectionWithoutDroppingPoints() {
+        val stops = (1..15).map { Coordinate(25.0 + it * .001, 121.5 + it * .001) }
+        val moved = RoutePointDraft.moveTo(stops, 0, 14)
+        assertEquals(stops.drop(1) + stops.first(), moved)
+        assertEquals(stops, RoutePointDraft.moveTo(moved, 14, 0))
+        assertEquals(stops.toSet(), moved.toSet())
+        assertEquals(stops, RoutePointDraft.moveTo(stops, 0, 15))
+        assertEquals(stops, RoutePointDraft.moveTo(stops, -1, 1))
+        assertEquals(stops, RoutePointDraft.moveTo(stops, 4, 4))
+    }
+
     @Test fun maxFifteenDestinationsAndInvalidEditAreSafe() {
         val fourteen = (1..14).map { Coordinate(25.0 + it * .001, 121.5 + it * .001) }
         val last = Coordinate(25.080, 121.580)

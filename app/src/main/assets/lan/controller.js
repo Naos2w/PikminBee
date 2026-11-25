@@ -16,6 +16,8 @@ let connected = false;
 let remoteLinkHealthy = true;
 let refreshing = false;
 let routeMutationPending = false, routeStateVersion = 0;
+let routeDrag = null;
+let routeDragFrame = 0;
 let map = null, maplibre = null;
 let mapStyleReady = false, mapWatchdog = null, mapResizeObserver = null;
 let mapLastError = "";
@@ -307,7 +309,7 @@ $("web-settings-close").addEventListener("click", () => {
 });
 $("mode-help").addEventListener("click",()=>{
   $("mode-help-heading").textContent=settingsOpen?"設定說明":mode==="ROUTE"?"路徑操作說明":"瞬移操作說明";
-  $("mode-help-body").textContent=settingsOpen?"外觀設定只套用到目前瀏覽器。手機專屬設定在 Android App 管理；真實位置需手機明確同意，快照有效 30 分鐘。Wi-Fi 僅限可信私人網路，HTTP 未加密。":mode==="ROUTE"?"選取起點及路點，按加入、規劃並確認道路，再開始。最多 15 點，循環 14 點；行走中路點唯讀。⋯ 可移動、重選、刪除路點。":"地圖選點或貼上 DD、DMS、DDM 座標。選點只改變選取位置，確認後才瞬移；恢復真實 GPS 會停止模擬。";
+  $("mode-help-body").textContent=settingsOpen?"外觀設定只套用到目前瀏覽器。手機專屬設定在 Android App 管理；真實位置需手機明確同意，快照有效 30 分鐘。Wi-Fi 僅限可信私人網路，HTTP 未加密。":mode==="ROUTE"?"選取起點及路點，按加入、規劃並確認道路，再開始。最多 15 點，循環 14 點；行走中路點唯讀。按住路點左側手柄拖移；點座標查看、右側刪除；地圖路點可重新選擇。":"地圖選點或貼上 DD、DMS、DDM 座標。選點只改變選取位置，確認後才瞬移；恢復真實 GPS 會停止模擬。";
   $("mode-help-dialog").showModal();
 });
 $("close-mode-help").addEventListener("click",()=>$("mode-help-dialog").close());
@@ -490,13 +492,14 @@ $("set-origin").addEventListener("click", async () => {
   catch (error) { setMessage(error.message); }
 });
 $("add").addEventListener("click", async () => {
-  try { await act("/api/points/add", {mode,...readCoordinate()}); }
+  try { await act("/api/points/add", {mode,...readCoordinate(),expectedRevision:latest?.routeRevision}); }
   catch (error) { setMessage(error.message); }
 });
-$("undo").addEventListener("click", () => act("/api/points/undo",{mode}));
+$("undo").addEventListener("click", () => act("/api/points/undo",{mode,expectedRevision:latest?.routeRevision}));
 $("clear").addEventListener("click", async () => {
+  const expectedRevision=latest?.routeRevision;
   if (confirm("要清除全部路點嗎？此操作不會移動 GPS。"))
-    await act("/api/points/clear",{mode});
+    await act("/api/points/clear",{mode,expectedRevision});
 });
 function showSpeedFields() {
   const choice = $("speed").value;
@@ -863,14 +866,32 @@ function renderMap() {
   }
 
   const stops = mode === "ROUTE" ? (latest?.routeStops || []) : [];
-  const key = mode + "|" + JSON.stringify(stops);
+  const key = mode + "|" + JSON.stringify(stops) + "|" + latest?.routeRevision;
   if (key !== lastStopsKey) {
+    const revision=latest?.routeRevision;
+    function waypointPopup(index) {
+      const content=document.createElement("div");
+      const label=document.createElement("span");label.textContent="路點 "+(index+1);content.append(label);
+      const button=document.createElement("button");button.type="button";
+      button.className="waypoint-reselect";button.textContent="以選取位置重選";
+      button.addEventListener("click",async()=>{
+        if(routeEditingBusy() || revision!==latest?.routeRevision) {
+          setMessage("路點已變更或目前無法編輯，請重新確認");return;
+        }
+        try {
+          const target=readCoordinate();
+          if(confirm("以目前選取的座標重選第 "+(index+1)+" 點？"))
+            await act("/api/points/replace",{mode:"ROUTE",index,...target,expectedRevision:revision});
+        } catch(error){setMessage(error.message);}
+      });
+      content.append(button);return content;
+    }
     routeMarkers.forEach(marker => marker.remove());
     routeMarkers = stops.map((item,i) =>
       new maplibre.Marker({element:ordinalPin(i + 1,
         i === 0 ? "first" : i === stops.length - 1 ? "last" : "via"),anchor:"center"})
         .setLngLat([item.lon,item.lat])
-        .setPopup(new maplibre.Popup().setText("路點 " + (i+1)))
+        .setPopup(new maplibre.Popup().setDOMContent(waypointPopup(i)))
         .addTo(map));
     lastStopsKey = key;
   }
@@ -910,51 +931,170 @@ function formatDistance(metres) {
   return metres >= 1000 ? (metres/1000).toFixed(2) + " 公里" :
     Math.round(metres) + " 公尺";
 }
+function routeEditingBusy() {
+  return routeMutationPending || !!latest?.planning || ["MOVING","PAUSED"].includes(latest?.phase);
+}
+function routeIcon(name) {
+  const svg=document.createElementNS("http://www.w3.org/2000/svg","svg");
+  svg.setAttribute("viewBox","0 0 24 24");
+  svg.setAttribute("aria-hidden","true");
+  const path=document.createElementNS(svg.namespaceURI,"path");
+  path.setAttribute("d",{
+    grip:"M9 5h.01 M15 5h.01 M9 12h.01 M15 12h.01 M9 19h.01 M15 19h.01",
+    delete:"M4 6h16 M9 3h6 M6 6l1.5 14h9L18 6 M10 10v6 M14 10v6",
+    origin:"M12 21s-7-6.2-7-12a7 7 0 1114 0c0 5.8-7 12-7 12z M12 7a2 2 0 100 4 2 2 0 000-4z"
+  }[name]);
+  path.setAttribute("stroke-width",name==="grip"?"3":"1.8");
+  svg.append(path);
+  return svg;
+}
+function renderStopNumbers(rows) {
+  rows.forEach((row,i)=>{
+    const label="第 "+(i+1)+" 點";
+    const number=row.querySelector(".stop-number");
+    number.textContent=String(i+1);
+    number.className="stop-number "+(i===0?"first":i===rows.length-1?"last":"via");
+    number.setAttribute("aria-label",label);
+    const handle=row.querySelector(".stop-grip");
+    if(handle) {
+      handle.setAttribute("aria-label","拖移"+label+"；亦可使用上下方向鍵");
+      handle.title="拖移"+label;
+    }
+    const remove=row.querySelector(".stop-delete");
+    if(remove) {remove.title="刪除"+label;remove.setAttribute("aria-label","刪除"+label);}
+  });
+}
+function clearRouteDrag() {
+  const drag=routeDrag;
+  routeDrag=null;
+  cancelAnimationFrame(routeDragFrame);
+  routeDragFrame=0;
+  if(drag) {
+    drag.row.classList.remove("stop-dragging");
+    if(drag.list.hasPointerCapture(drag.pointerId)) drag.list.releasePointerCapture(drag.pointerId);
+  }
+  return drag;
+}
+function cancelRouteDrag() {
+  if(!clearRouteDrag()) return;
+  lastOrderKey="";
+  renderRouteOrder();
+}
+function updateRouteDrag() {
+  const drag=routeDrag;
+  if(!drag) return;
+  const rows=[...drag.list.querySelectorAll(".stop-item[data-index]")];
+  if(!rows.length) return;
+  let target=0, distance=Infinity;
+  for(let i=0;i<rows.length;i++) {
+    const bounds=rows[i].getBoundingClientRect();
+    const delta=Math.abs(drag.y-(bounds.top+bounds.height/2));
+    if(delta<distance){distance=delta;target=i;}
+  }
+  const current=rows.indexOf(drag.row);
+  if(current<0) return;
+  if(target!==current) {
+    if(target>current) rows[target].after(drag.row);
+    else rows[target].before(drag.row);
+    drag.to=target;
+    renderStopNumbers([...drag.list.querySelectorAll(".stop-item[data-index]")]);
+  }
+}
+function routeDragTick() {
+  const drag=routeDrag;
+  if(!drag) return;
+  const bounds=drag.list.getBoundingClientRect(), edge=32;
+  const dy=drag.y<bounds.top+edge?-8:drag.y>bounds.bottom-edge?8:0;
+  if(dy) {drag.list.scrollTop+=dy;updateRouteDrag();}
+  routeDragFrame=requestAnimationFrame(routeDragTick);
+}
+function beginRouteDrag(event,row,index,revision) {
+  if(routeDrag || routeEditingBusy() || !Number.isSafeInteger(revision) || event.button!==0) return;
+  if(latest?.routeRevision!==revision) return;
+  event.preventDefault();
+  const list=$("route-order");
+  routeDrag={row,list,from:index,to:index,revision,pointerId:event.pointerId,y:event.clientY};
+  row.classList.add("stop-dragging");
+  list.setPointerCapture(event.pointerId);
+  routeDragFrame=requestAnimationFrame(routeDragTick);
+}
+const routeList=$("route-order");
+routeList.addEventListener("pointermove",event=>{
+  if(routeDrag?.pointerId!==event.pointerId) return;
+  event.preventDefault();
+  routeDrag.y=event.clientY;
+  updateRouteDrag();
+});
+routeList.addEventListener("pointerup",event=>{
+  if(routeDrag?.pointerId!==event.pointerId) return;
+  const drag=clearRouteDrag();
+  lastOrderKey="";
+  if(drag.from!==drag.to && !routeEditingBusy() && latest?.routeRevision===drag.revision) {
+    void act("/api/points/reorder",{mode:"ROUTE",from:drag.from,to:drag.to,expectedRevision:drag.revision});
+  } else renderRouteOrder();
+});
+for(const type of ["pointercancel","lostpointercapture"]) routeList.addEventListener(type,event=>{
+  if(routeDrag?.pointerId===event.pointerId) cancelRouteDrag();
+});
+document.addEventListener("keydown",event=>{
+  if(event.key==="Escape"&&routeDrag){event.preventDefault();cancelRouteDrag();}
+});
+
 function renderRouteOrder() {
   const stops = mode === "ROUTE" ? (latest?.routeStops || []) : [];
   const origin = latest?.origin;
-  const busy = latest?.planning || latest?.phase === "MOVING" || latest?.phase === "PAUSED";
-  const key = mode + "|" + JSON.stringify(stops) + "|" + JSON.stringify(origin) + "|" + busy;
+  const revision = latest?.routeRevision;
+  const busy = routeEditingBusy() || !Number.isSafeInteger(revision);
+  const key = mode + "|" + JSON.stringify(stops) + "|" + JSON.stringify(origin) + "|" + busy + "|" + revision;
   if (key === lastOrderKey) return;
+  clearRouteDrag();
   lastOrderKey = key;
   const list = $("route-order");
   list.replaceChildren();
   if (mode !== "ROUTE") return;
   function iconButton(glyph, label, click) {
     const button=document.createElement("button");button.type="button";
-    button.className="stop-icon";button.textContent=glyph;button.title=label;
-    button.setAttribute("aria-label",label);button.addEventListener("click",click);return button;
+    button.className="stop-icon";button.append(routeIcon(glyph));button.title=label;
+    button.setAttribute("aria-label",label);if(click)button.addEventListener("click",click);return button;
   }
   function addRow(point,index) {
     const li=document.createElement("li");li.className="stop-item";
     const label=index<0?"路線起點":"第 "+(index+1)+" 點";
-    const num=document.createElement("span");num.className="stop-number"+(index<0?" is-origin":index===0?" first":index===stops.length-1?" last":" via");
-    num.textContent=index<0?"起":String(index+1);num.setAttribute("aria-label",label);
-    const detail=document.createElement("span");detail.className="stop-detail";
-    detail.textContent=point?point.lat.toFixed(6)+", "+point.lon.toFixed(6):"尚未指定起點";
-    li.append(num,detail);
-    if(point) li.append(iconButton("◎","在地圖查看"+label,()=>focusMapPosition(point,16)));
+    if(index>=0) li.dataset.index=String(index);
     if (index >= 0 && !busy) {
-      const menu=document.createElement("div");menu.className="stop-menu hidden";
-      const more=iconButton("⋯",label+"更多操作",()=>{
-        const open=menu.classList.contains("hidden");
-        list.querySelectorAll(".stop-menu").forEach(el=>el.classList.add("hidden"));
-        list.querySelectorAll(".stop-more").forEach(el=>el.setAttribute("aria-expanded","false"));
-        menu.classList.toggle("hidden",!open);more.setAttribute("aria-expanded",String(open));
+      const grip=iconButton("grip","拖移"+label);
+      grip.classList.add("stop-grip");
+      grip.addEventListener("pointerdown",event=>beginRouteDrag(event,li,index,revision));
+      grip.addEventListener("keydown",event=>{
+        if(!["ArrowUp","ArrowDown"].includes(event.key)||routeEditingBusy()) return;
+        event.preventDefault();
+        const to=index+(event.key==="ArrowUp"?-1:1);
+        if(to>=0&&to<stops.length) void act("/api/points/reorder",{
+          mode:"ROUTE",from:index,to,expectedRevision:revision
+        });
       });
-      more.classList.add("stop-more");more.setAttribute("aria-expanded","false");
-      for(const [glyph,caption,offset] of [["↑","上移",-1],["↓","下移",1]]) {
-        const btn=iconButton(glyph,caption+label,()=>act("/api/points/reorder",{mode,index,offset}));
-        btn.disabled=index+offset<0||index+offset>=stops.length;menu.append(btn);
-      }
-      menu.append(iconButton("✎","以目前選取位置重選"+label,async()=>{
-        try {
-          const target=readCoordinate();
-          if(confirm("以目前選取的座標重選"+label+"？"))
-            await act("/api/points/replace",{mode,index,...target});
-        }catch(error){setMessage(error.message);}
-      }),iconButton("−","刪除"+label,()=>act("/api/points/remove",{mode,index})));
-      li.append(more,menu);
+      li.append(grip);
+    } else {
+      const spacer=document.createElement("span");spacer.className="stop-spacer";li.append(spacer);
+    }
+    const num=document.createElement("span");
+    num.className="stop-number"+(index<0?" is-origin":index===0?" first":index===stops.length-1?" last":" via");
+    if(index<0)num.append(routeIcon("origin"));
+    else num.textContent=String(index+1);
+    num.setAttribute("aria-label",label);
+    const detail=document.createElement(point?"button":"span");detail.className="stop-detail";
+    detail.textContent=point?point.lat.toFixed(6)+", "+point.lon.toFixed(6):"尚未指定起點";
+    if(point) {
+      detail.type="button";detail.title="在地圖查看"+label;
+      detail.setAttribute("aria-label","在地圖查看"+label+" "+detail.textContent);
+      detail.addEventListener("click",()=>{if(!routeDrag)focusMapPosition(point,16);});
+    }
+    li.append(num,detail);
+    if (index >= 0 && !busy) {
+      const remove=iconButton("delete","刪除"+label,()=>{
+        if(!routeDrag&&!routeEditingBusy()) void act("/api/points/remove",{mode:"ROUTE",index,expectedRevision:revision});
+      });
+      remove.classList.add("stop-delete");li.append(remove);
     }
     list.append(li);
   }
