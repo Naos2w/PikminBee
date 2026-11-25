@@ -91,7 +91,7 @@ fun MapFirstShell(
     walkingProgress: WalkingProgressSnapshot = WalkingProgressSnapshot(),
     walkEstimatedSteps: Long = 0L,
     walkStopped: Boolean = false,
-    routeSpeedKmh: Double = 1.4,
+    routeSpeedKmh: Double = 0.0,
     routeActive: Boolean = false,
     routePaused: Boolean = false,
     routePreviewReady: Boolean = false,
@@ -298,8 +298,13 @@ fun MapFirstShell(
                     )
                     Text(
                         "${walkingProgress.waypointCount.coerceAtLeast(modeStopsCount)} 點 · " +
-                            String.format(Locale.US, "%.1f km/h", routeSpeedKmh) +
-                            " · 剩餘約 ${(walkingProgress.remainingSeconds + 59L) / 60L} 分鐘",
+                            (com.naos.pikminbee.domain.RouteSurfaceStatusPolicy.appliedRouteSpeedLabel(
+                                if (routePaused) com.naos.pikminbee.domain.WalkPhase.PAUSED
+                                else com.naos.pikminbee.domain.WalkPhase.MOVING, routeSpeedKmh)
+                                ?: "速度待確認") +
+                            (if (routeSpeedKmh.isFinite() && routeSpeedKmh > 0.0)
+                                " · 剩餘約 ${(walkingProgress.remainingSeconds + 59L) / 60L} 分鐘"
+                            else " · ETA 待確認"),
                         color = p.muted, fontSize = 11.sp, lineHeight = 15.sp, maxLines = 2,
                     )
                     Box(Modifier.fillMaxWidth().height(4.dp)

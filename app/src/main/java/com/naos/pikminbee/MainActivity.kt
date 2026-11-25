@@ -252,6 +252,7 @@ private fun PikminBeeScreen() {
     var confirmStopWalk by remember { mutableStateOf(false) }
     val speedPreset by WalkSpeedState.selected.collectAsState()
     val speedProfile by WalkSpeedState.profile.collectAsState()
+    val appliedSpeedKmh by LocationStatus.appliedSpeedKmh.collectAsState()
     val defaultSpeedProfile by WalkSpeedState.preferredProfile.collectAsState()
     var mockGpsJitterLevel by remember { mutableStateOf(prefs.mockGpsJitterLevel()) }
     var virtualStrideMetres by remember { mutableStateOf(prefs.virtualStrideMetres()) }
@@ -979,7 +980,7 @@ private fun PikminBeeScreen() {
                 walkEstimatedSteps = walkEstimatedSteps,
                 walkStopped = walkPhase == WalkPhase.PARKED &&
                     tab == ToolTab.ROUTE && walkMode == WalkMode.ROUTE,
-                routeSpeedKmh = speedPreset.kilometresPerHour,
+                routeSpeedKmh = appliedSpeedKmh,
                 routeActive = walkMode == WalkMode.ROUTE &&
                     walkPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED),
                 routePaused = walkPhase == WalkPhase.PAUSED,
@@ -1171,6 +1172,7 @@ private fun PikminBeeScreen() {
                                     walkEstimatedSteps = walkEstimatedSteps,
                                     speedPreset = speedPreset,
                                     speedProfile = speedProfile,
+                                    appliedSpeedKmh = appliedSpeedKmh,
                                     onSpeedSelected = ::chooseSpeedProfile,
                                     foreground = foreground, muted = muted,
                                     onUndo = {

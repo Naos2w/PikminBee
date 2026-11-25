@@ -1,5 +1,5 @@
 import {parseCoordinate} from "/coordinate-format.mjs";
-import { BRIGHT_STYLE_URL, samePosition, currentPosition, createCameraFocus, visibleMapPadding, countryFlagPath, destinationTime, routePresentation } from "/map-ui-policy.mjs";
+import { BRIGHT_STYLE_URL, samePosition, currentPosition, createCameraFocus, visibleMapPadding, countryFlagPath, destinationTime, routePresentation, appliedSpeedLabel } from "/map-ui-policy.mjs";
 const $ = id => document.getElementById(id);
 let token = null;
 let sessionDeadlineMs = 0;
@@ -1161,7 +1161,8 @@ function updateCompactWalkControls() {
   const step = Number(latest?.progress?.estimatedSteps || 0);
   $("compact-walk-summary").textContent = !remoteLinkHealthy
     ? "連線中斷 · 請在手機操作暫停或停止"
-    : (phase === "PAUSED" ? "已暫停" : "行走中") + " · 本次估算 " + step + " 步";
+    : (phase === "PAUSED" ? "已暫停" : "行走中") + " · " +
+      appliedSpeedLabel(latest) + " · 本次估算 " + step + " 步";
   $("compact-pause").classList.toggle("hidden", phase !== "MOVING");
   $("compact-resume").classList.toggle("hidden", phase !== "PAUSED");
   $("compact-pause").disabled = !remoteLinkHealthy || phase !== "MOVING";
@@ -1284,9 +1285,7 @@ async function refresh() {
       $("speed").value === "RANGE" ||
       (!speedEditing && latest.speedMode === "PRESET" &&
        latest.defaultSpeedMode !== "FIXED" && latest.speedPreset === latest.defaultSpeedPreset);
-    $("speed-applied").textContent = (latest?.phase === "MOVING" || latest?.phase === "PAUSED") &&
-        Number.isFinite(latest.speedAppliedKmh) && latest.speedAppliedKmh > 0
-        ? "手機目前套用 " + latest.speedAppliedKmh.toFixed(1) + " km/h" : "";
+    $("speed-applied").textContent = appliedSpeedLabel(latest);
     updateStatus();
     updateRouteControls();
     renderMap();

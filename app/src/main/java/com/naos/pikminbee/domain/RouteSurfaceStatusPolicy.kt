@@ -44,6 +44,15 @@ object RouteSurfaceStatusPolicy {
             selectedSpeedKmh.isFinite() && selectedSpeedKmh >= 0.0) selectedSpeedKmh
         else 0.0
 
+    /** Report the engine-confirmed test pace, never substitute a selected preset.
+     * A paused route describes the resume pace, not current movement. */
+    fun appliedRouteSpeedLabel(phase: WalkPhase, appliedKmh: Double): String? {
+        if (phase !in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)) return null
+        if (!appliedKmh.isFinite() || appliedKmh <= 0.0) return "速度待確認"
+        val prefix = if (phase == WalkPhase.PAUSED) "恢復速度 " else "已套用 "
+        return prefix + WalkSpeedProfile.number(appliedKmh) + " km/h"
+    }
+
     fun parkedOverlaySummary(status: String, mode: WalkMode?): String = when {
         mode != null && status.startsWith("已抵達終點") -> "已抵達終點 · 原地停留"
         mode != null && status.startsWith("步行已停止") -> "已停止 · 原地停留"

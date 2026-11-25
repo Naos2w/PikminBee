@@ -2,6 +2,7 @@ package com.naos.pikminbee.domain
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -105,6 +106,32 @@ class RouteSurfaceStatusPolicyTest {
             WalkPhase.PAUSED, configuredKmh), 0.0)
         assertEquals(0.0, RouteSurfaceStatusPolicy.visibleRouteSpeedKmh(
             WalkPhase.MOVING, Double.NaN), 0.0)
+    }
+
+    @Test fun speedLabelsDistinguishConfirmedTestPaceFromPausedOrUnknown() {
+        assertEquals("已套用 5.2 km/h",
+            RouteSurfaceStatusPolicy.appliedRouteSpeedLabel(WalkPhase.MOVING, 5.2))
+        assertEquals("恢復速度 5.2 km/h",
+            RouteSurfaceStatusPolicy.appliedRouteSpeedLabel(WalkPhase.PAUSED, 5.2))
+        assertEquals("速度待確認",
+            RouteSurfaceStatusPolicy.appliedRouteSpeedLabel(WalkPhase.MOVING, Double.NaN))
+        assertEquals("速度待確認",
+            RouteSurfaceStatusPolicy.appliedRouteSpeedLabel(WalkPhase.MOVING, 0.0))
+        assertNull(RouteSurfaceStatusPolicy.appliedRouteSpeedLabel(WalkPhase.PARKED, 10.8))
+        assertNull(RouteSurfaceStatusPolicy.appliedRouteSpeedLabel(WalkPhase.IDLE, 10.8))
+    }
+
+    @Test fun testRouteUnitsAndEtaAgreeWithTheConfirmedProfile() {
+        for (profile in WalkSpeedPreset.entries.map(WalkSpeedProfile::preset) +
+            WalkSpeedProfile.fixed(5.2)) {
+            val mps = profile.nominalMps
+            val tick = RouteTickProgression.advance(0.0, 1000.0, mps, 1.0, false)
+            val progress = RoutePlaybackProgress.snapshot(tick.toMetres, 1000.0, mps,
+                listOf(1000.0), false)
+            assertEquals(profile.estimatedKmh / 3.6, tick.acceptedMetres, 1e-9)
+            assertEquals(kotlin.math.round((1000.0 - tick.toMetres) / mps).toLong(),
+                progress.remainingSeconds)
+        }
     }
 
     @Test fun staleCompletionNotificationClearsOnlyForActualJourneyChanges() {

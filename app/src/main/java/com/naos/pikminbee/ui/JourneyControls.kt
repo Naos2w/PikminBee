@@ -52,6 +52,7 @@ fun JourneyControls(
     walkEstimatedSteps: Long,
     speedPreset: WalkSpeedPreset,
     speedProfile: WalkSpeedProfile,
+    appliedSpeedKmh: Double = 0.0,
     onSpeedSelected: (WalkSpeedProfile) -> Unit,
     foreground: Color,
     muted: Color,
@@ -108,7 +109,10 @@ fun JourneyControls(
                 label = { Text("循環路線") },
             )
         }
-        Text("速度", color = muted, fontSize = 12.sp)
+        Text(if (controlling)
+            "速度 · " + com.naos.pikminbee.domain.RouteSurfaceStatusPolicy.appliedRouteSpeedLabel(phase, appliedSpeedKmh)
+            else "速度 · " + speedProfile.display,
+            color = muted, fontSize = 12.sp)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             WalkSpeedPreset.entries.forEach { option ->
                 FilterChip(
