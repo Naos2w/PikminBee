@@ -1,4 +1,4 @@
-import { BRIGHT_STYLE_URL, samePosition, currentPosition, createCameraFocus, visibleMapPadding, countryFlagPath, destinationTime } from "/map-ui-policy.mjs";
+import { BRIGHT_STYLE_URL, samePosition, currentPosition, createCameraFocus, visibleMapPadding, countryFlagPath, destinationTime, routePresentation } from "/map-ui-policy.mjs";
 const $ = id => document.getElementById(id);
 let token = null;
 let sessionDeadlineMs = 0;
@@ -14,6 +14,7 @@ let speedEditing = false;
 let connected = false;
 let remoteLinkHealthy = true;
 let refreshing = false;
+let routeMutationPending = false, routeStateVersion = 0;
 let map = null, maplibre = null;
 let mapStyleReady = false, mapWatchdog = null, mapResizeObserver = null;
 let mapLastError = "";
@@ -361,6 +362,7 @@ $("loop").addEventListener("change", () => {
   if (mode === "ROUTE") loops.ROUTE = $("loop").value === "true";
   $("confirm-snap").checked = false;
   updateRouteControls();
+  renderMap();
 });
 $("confirm-snap").addEventListener("change", updateRouteControls);
 
@@ -405,10 +407,22 @@ function reconcileTeleport(state) {
   }
 }
 async function act(path, body, note = "") {
+  const editsRoute = path.startsWith("/api/points/") ||
+    ["/api/origin", "/api/saved/load", "/api/route/preview"].includes(path);
+  if (editsRoute) {
+    if (routeMutationPending) return false;
+    routeMutationPending = true;
+    routeStateVersion++;
+    // Clear the stale preview immediately; do not let a pre-edit poll restore it.
+    if (latest) latest = {...latest, previews:{}, planning:true};
+    $("confirm-snap").checked = false;
+    updateRouteControls();
+    renderMap();
+  }
   try {
     const reply = await call(path, "POST", body);
     setMessage(reply.message || note || "指令已送出");
-    await refresh();
+    if (!editsRoute) await refresh();
     return true;
   } catch (error) {
     if ((error.message || "").includes("無法連接手機")) {
@@ -417,6 +431,11 @@ async function act(path, body, note = "") {
     }
     setMessage(error.message || "手機無法完成操作");
     return false;
+  } finally {
+    if (editsRoute) {
+      routeMutationPending = false;
+      await refresh();
+    }
   }
 }
 $("teleport").addEventListener("click", async () => {
@@ -538,7 +557,7 @@ $("plan").addEventListener("click", async () => {
   } finally { updateRouteControls(); }
 });
 $("start").addEventListener("click", async () => {
-  const prepared = latest?.previews?.[mode];
+  const prepared = routePresentation(latest, mode, $("loop").value === "true").prepared;
   if (!prepared?.id) { setMessage("請先預覽路線，再按開始"); return; }
   if (prepared.loop !== ($("loop").value === "true")) {
     setMessage("循環設定已改變，請重新規劃"); return;
@@ -846,14 +865,9 @@ function renderMap() {
         .addTo(map));
     lastStopsKey = key;
   }
-  const active = latest?.phase === "MOVING" || latest?.phase === "PAUSED" ||
-    (latest?.phase === "PARKED" && latest?.geometry?.length >= 2);
-  const road = active ? (latest?.geometry || []) :
-    (latest?.previews?.[mode]?.geometry || []);
-  // Dashed draft order is only a sequence guide, never a pedestrian-road preview.
-  const previewReady = (latest?.previews?.[mode]?.geometry || []).length >= 2;
-  const draft = !active && !previewReady && origin && stops.length ?
-    [origin, ...stops] : [];
+  // Match Android: only moving/paused geometry is active. A parked road must
+  // never hide the new draft, and the summary uses the same valid preview.
+  const {road, draft} = routePresentation(latest, mode, $("loop").value === "true");
   const draftKey = mode + "|" + JSON.stringify(draft);
   if (mapStyleReady && draftKey !== lastDraftKey) {
     const guide = {type:"FeatureCollection",features:draft.length >= 2 ? [{
@@ -961,7 +975,7 @@ function renderRouteOrder() {
 function updateRouteControls() {
   const navigating = mode === "ROUTE";
   const stops = latest?.routeStops || [];
-  const prepared = latest?.previews?.[mode];
+  const prepared = routePresentation(latest, mode, $("loop").value === "true").prepared;
   const hasOrigin = !!latest?.origin;
   const moving = latest?.phase === "MOVING";
   const paused = latest?.phase === "PAUSED";
@@ -1102,12 +1116,13 @@ function updateStatus() {
   if (latest?.note && /失敗|無法/.test(latest.note)) setMessage(latest.note);
 }
 async function refresh() {
-  if (!token || refreshing) return;
+  if (!token || refreshing || routeMutationPending) return;
   refreshing = true;
+  const requestedRouteVersion = routeStateVersion;
   try {
     const activeToken = token;
     const nextState = await call("/api/state");
-    if (token !== activeToken) return; // stale response after token rotation
+    if (token !== activeToken || requestedRouteVersion !== routeStateVersion) return;
     latest = nextState;
     remoteLinkHealthy = true;
     sessionDeadlineMs = Date.now() +
@@ -1169,7 +1184,11 @@ async function refresh() {
       renderMap();
       setMessage(error.message || "無法更新手機狀態");
     }
-  } finally { refreshing = false; }
+  } finally {
+    refreshing = false;
+    if (requestedRouteVersion !== routeStateVersion && !routeMutationPending && token)
+      void refresh();
+  }
 }
 async function focusTrustedReal() {
   if (!connected || !remoteLinkHealthy || !token) {

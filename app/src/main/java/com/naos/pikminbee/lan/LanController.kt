@@ -821,8 +821,8 @@ class LanController(private val context: Context) {
         for (mode in WalkMode.entries) {
             val candidate = previews[mode]
             val prepared = candidate?.route
-            if (candidate != null && prepared != null &&
-                prepared.isCurrent(origin(), points(mode), prepared.loop)) {
+            if (candidate != null && prepared != null && candidate.id != usedPreviewId &&
+                !planning.get() && prepared.isCurrent(origin(), points(mode), prepared.loop)) {
                 val sampled = prepared.geometry
                 val shown = if (sampled.size > 350)
                     sampled.filterIndexed { index, _ -> index % (sampled.size / 350 + 1) == 0 } +

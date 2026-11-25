@@ -1,7 +1,7 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
-import { BRIGHT_STYLE_URL, samePosition, currentPosition, createCameraFocus, visibleMapPadding, countryFlagPath, destinationTime } from "../app/src/main/assets/lan/map-ui-policy.mjs";
+import { BRIGHT_STYLE_URL, samePosition, currentPosition, createCameraFocus, visibleMapPadding, countryFlagPath, destinationTime, routePresentation } from "../app/src/main/assets/lan/map-ui-policy.mjs";
 
 test("country flags are local PNGs with safe two-letter names",()=>{
   for (const code of ["TW","jp","US","GB","NP","XK"]) {
@@ -24,6 +24,40 @@ test("destination clock needs no physical GPS, respects DST and handles unknown 
   assert.equal(destinationTime("UTC",new Date("2026-11-22T00:00:00Z")),"當地時間 00:00");
   for (const bad of [null,"","invalid/City","+02:00"])
     assert.equal(destinationTime(bad,winter),"當地時間待確認，可補齊舊收藏");
+});
+
+test("parked route A cannot hide new draft or prepared route B", () => {
+  const origin = {lat:0,lon:0}, a = {lat:1,lon:1}, b = {lat:2,lon:2};
+  const oldRoad = [origin,a], newRoad = [origin,b];
+  const stopped = {phase:"PARKED",mode:"ROUTE",geometry:oldRoad,origin,routeStops:[b]};
+  const draft = routePresentation(stopped,"ROUTE",false);
+  assert.deepEqual(draft.road,[]);
+  assert.deepEqual(draft.draft,newRoad);
+  const preview = {id:"B",loop:false,geometry:newRoad,distanceMetres:200};
+  const ready = routePresentation({...stopped,previews:{ROUTE:preview}},"ROUTE",false);
+  assert.equal(ready.prepared,preview);
+  assert.deepEqual(ready.road,newRoad);
+  assert.deepEqual(ready.draft,[]);
+  for (const state of [{...stopped,planning:true,previews:{ROUTE:preview}},
+                       {...stopped,previews:{ROUTE:{...preview,loop:true}}}]) {
+    const pending = routePresentation(state,"ROUTE",false);
+    assert.equal(pending.prepared,null);
+    assert.deepEqual(pending.road,[]);
+    assert.deepEqual(pending.draft,newRoad);
+  }
+  assert.deepEqual(routePresentation({...stopped,routeStops:[]},"ROUTE",false).draft,[]);
+  assert.deepEqual(routePresentation({...stopped,previews:{ROUTE:preview}},"TELEPORT",false).road,[]);
+});
+
+test("active and paused route geometry remains visible only in route mode", () => {
+  const a = {lat:0,lon:0}, b = {lat:1,lon:1};
+  for (const phase of ["MOVING","PAUSED"]) {
+    const state = {phase,mode:"ROUTE",geometry:[a,b],origin:a,routeStops:[b]};
+    assert.deepEqual(routePresentation(state,"ROUTE",false),{
+      active:true,prepared:null,road:[a,b],draft:[]
+    });
+    assert.deepEqual(routePresentation(state,"TELEPORT",false).road,[]);
+  }
 });
 
 const taipei = {lat:25.033,lon:121.5654};
