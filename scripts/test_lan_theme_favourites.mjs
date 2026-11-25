@@ -61,6 +61,8 @@ try{
   await call("Fetch.enable",{patterns:[{urlPattern:"https://tiles.openfreemap.org/styles/bright*"}]});
   await call("Page.navigate",{url});
   await until(()=>evaluate("document.readyState==='complete' && !!document.querySelector('#connect')"),"pair UI");
+  // Capture the real map instance through the test browser only; no production hook.
+  await evaluate("import('/vendor/maplibre-gl.mjs').then(m=>{const add=m.Map.prototype.addSource;m.Map.prototype.addSource=function(id,source){if(id==='bee-walk'||id==='bee-draft')window.__qaRouteMap=this;return add.call(this,id,source)};return true})");
   await evaluate("document.querySelector('#pin').value='123456';document.querySelector('#connect').click();true");
   try {
     await until(()=>evaluate("document.body.classList.contains('remote-active')"),"mock pairing");
@@ -89,7 +91,30 @@ try{
   assert.equal(saved.clocks.filter(c=>/^當地時間 \d{2}:\d{2}$/.test(c)).length,2);
   assert.ok(saved.clocks.some(c=>c.includes("當地時間待確認")));
   assert.ok(saved.clocks.every(c=>!c.includes("時差")));
-  console.log(JSON.stringify({dark,light,saved,verified:"synthetic browser; no phone or external map tiles"},null,2));
+  // Inspect the actual GeoJSON source data rendered by packaged MapLibre.
+  const origin=[121.5654,25.033], a=[121.5654,25.043], b=[121.5754,25.033];
+  const coords=async()=>evaluate("(async()=>{const m=window.__qaRouteMap;if(!m)return null;const road=m.getSource('bee-walk'),draft=m.getSource('bee-draft');if(!road||!draft)return null;const points=async s=>(await s.getData()).features[0]?.geometry.coordinates||[];return {road:await points(road),draft:await points(draft)}})()");
+  const verifyLayers=async(scenario,road,draft)=>{
+    const response=await fetch(url+"/api/preview/route-state",{method:"POST",
+      headers:{"Content-Type":"application/json"},body:JSON.stringify({scenario})});
+    assert.ok(response.ok);
+    await until(async()=>JSON.stringify(await coords())===JSON.stringify({road,draft}),
+      "route layers "+scenario);
+    return {scenario,road,draft};
+  };
+  const routeLayers=[];
+  routeLayers.push(await verifyLayers("active",[origin,a],[]));
+  routeLayers.push(await verifyLayers("parked",[],[origin,b]));
+  routeLayers.push(await verifyLayers("planning",[],[origin,b]));
+  routeLayers.push(await verifyLayers("ready",[origin,b],[]));
+  await until(()=>evaluate("document.querySelector('#previewinfo').textContent.includes('1.00 公里') && !document.querySelector('#previewinfo').classList.contains('hidden')"),"new preview summary");
+  await evaluate("document.querySelector('#mode-teleport').click();true");
+  await until(async()=>JSON.stringify(await coords())===JSON.stringify({road:[],draft:[]}),"other mode clears layers");
+  await evaluate("document.querySelector('#mode-route').click();true");
+  await until(async()=>JSON.stringify(await coords())===JSON.stringify({road:[origin,b],draft:[]}),"route mode restores B only");
+  routeLayers.push(await verifyLayers("failed",[],[origin,b]));
+  routeLayers.push(await verifyLayers("cleared",[],[]));
+  console.log(JSON.stringify({dark,light,saved,routeLayers,verified:"synthetic browser; no phone or external map tiles"},null,2));
 }finally{
   socket?.close();
   browser?.kill();preview?.kill();

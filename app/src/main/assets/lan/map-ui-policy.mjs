@@ -28,6 +28,23 @@ export function currentPosition(state, physical) {
   return state?.mockActive && state.position ? {point:state.position, simulated:true, historical:false}
     : physical ? {point:physical,simulated:false,historical:!!physical.historical} : null;
 }
+/** The running route and the current draft are different states. A parked
+ * route is history, not an active road; never let it mask a new preview. */
+export function routePresentation(state, mode, loop) {
+  const active = state?.mode === "ROUTE" &&
+    (state.phase === "MOVING" || state.phase === "PAUSED");
+  const candidate = state?.previews?.ROUTE;
+  const prepared = mode === "ROUTE" && !active && !state?.planning &&
+    candidate?.id && candidate.loop === loop && candidate.geometry?.length >= 2
+    ? candidate : null;
+  const road = mode !== "ROUTE" ? [] : active ? (state.geometry || []) :
+    (prepared?.geometry || []);
+  const stops = state?.routeStops || [];
+  const draft = mode === "ROUTE" && !active && !prepared && state?.origin && stops.length
+    ? [state.origin, ...stops] : [];
+  return {active, prepared, road, draft};
+}
+
 /** Find the largest clear rectangle in the map canvas. All bounds are
  * viewport CSS pixels; overlays are clipped to the canvas before evaluation.
  * Sweep the possible horizontal spans and merge their blocked Y intervals.
