@@ -25,6 +25,81 @@ class LanPairingTest {
         assertEquals("invalid", pairing.poll(ip, request.pendingId).state)
     }
 
+    @Test fun combinedApprovalGrantsOnlyTheExplicitRequestAndNeverInheritsConsent() {
+        val pair = pairer()
+        val peer = "192.168.1.12"
+        val ticket = pair.pair(peer, pair.currentPin(), "PC").pendingId
+        val id = pair.connection().approvalId
+        assertTrue(id.isNotBlank())
+        assertFalse(pair.poll(peer, ticket).sharePhysical)
+        assertFalse(pair.approve(sharePhysical = true))
+        assertFalse(pair.approve(sharePhysical = true, approvalId = "stale"))
+        assertTrue(pair.approve(sharePhysical = true, approvalId = id))
+        assertFalse(pair.approve(sharePhysical = false, approvalId = id))
+        assertFalse(pair.poll("192.168.1.13", ticket).sharePhysical)
+        val approved = pair.poll(peer, ticket)
+        assertTrue(approved.sharePhysical)
+        assertTrue(pair.authorised(approved.token, peer))
+        assertFalse(pair.poll(peer, ticket).sharePhysical)
+
+        val renewal = pair.requestRenewal(approved.token, peer).pendingId
+        val renewalId = pair.connection().approvalId
+        assertTrue(pair.connection().renewal)
+        assertNotEquals(id, renewalId)
+        assertFalse(pair.approve(sharePhysical = true, approvalId = id))
+        assertTrue(pair.approve(sharePhysical = false, approvalId = renewalId))
+        val renewed = pair.pollRenewal(peer, renewal, approved.token)
+        assertEquals("approved", renewed.state)
+        assertFalse(renewed.sharePhysical)
+        assertFalse(pair.authorised(approved.token, peer))
+    }
+
+    @Test fun expiredOrDeniedRequestCannotTransferItsSharingChoice() {
+        val pair = pairer()
+        val peer = "192.168.1.12"
+        val first = pair.pair(peer, pair.currentPin(), "PC").pendingId
+        val staleId = pair.connection().approvalId
+        assertTrue(pair.approve(sharePhysical = true, approvalId = staleId))
+        time.addAndGet(91_000)
+        assertEquals("invalid", pair.poll(peer, first).state)
+        val next = pair.pair(peer, pair.currentPin(), "PC").pendingId
+        assertFalse(pair.approve(sharePhysical = true, approvalId = staleId))
+        assertTrue(pair.approve())
+        assertFalse(pair.poll(peer, next).sharePhysical)
+    }
+
+    @Test fun sharedConnectionStateTracksAuthenticatedPresenceAndRevocation() {
+        val pairing = pairer()
+        val peer = "192.168.50.15"
+        assertEquals(LanConnectionPhase.WAITING_PAIR, pairing.connection().phase)
+        val ticket = pairing.pair(peer, pairing.currentPin(), "PC").pendingId
+        assertEquals(LanConnectionPhase.PENDING_APPROVAL, pairing.connection().phase)
+        assertTrue(pairing.approve())
+        assertTrue(pairing.connection().awaitingBrowser)
+        val token = pairing.poll(peer, ticket).token
+        assertEquals(LanConnectionPhase.OFFLINE, pairing.connection().phase)
+        assertFalse(pairing.markStatePoll(token, "192.168.50.16"))
+        assertTrue(pairing.markStatePoll(token, peer))
+        assertEquals(LanConnectionPhase.CONNECTED, pairing.connection().phase)
+        assertEquals(7200, pairing.connection().remainingSeconds)
+        time.addAndGet(LAN_ONLINE_WINDOW_MILLIS + 1)
+        assertEquals(LanConnectionPhase.OFFLINE, pairing.connection().phase)
+        assertTrue(pairing.markStatePoll(token, peer))
+        assertEquals(LanConnectionPhase.CONNECTED, pairing.connection().phase)
+        assertTrue(pairing.connection().remainingSeconds < 7200)
+        pairing.disconnect()
+        assertEquals(LanConnectionPhase.REVOKED, pairing.connection().phase)
+        assertFalse(pairing.authorised(token, peer))
+        assertTrue(pairing.connection().showPin)
+        val next = pairing.pair(peer, pairing.currentPin(), "PC").pendingId
+        assertTrue(pairing.approve())
+        val newToken = pairing.poll(peer, next).token
+        assertTrue(pairing.markStatePoll(newToken, peer))
+        time.addAndGet(7_200_000L)
+        assertEquals(LanConnectionPhase.EXPIRED, pairing.connection().phase)
+        assertFalse(pairing.markStatePoll(newToken, peer))
+    }
+
     @Test fun wrongPinLocksOutAfterFiveTries() {
         val pairing = pairer()
         val wrong = if (pairing.currentPin() == "000000") "999999" else "000000"

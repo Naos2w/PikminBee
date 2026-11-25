@@ -1,7 +1,18 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
-import { BRIGHT_STYLE_URL, samePosition, currentPosition, createCameraFocus, visibleMapPadding, countryFlagPath, destinationTime } from "../app/src/main/assets/lan/map-ui-policy.mjs";
+import { BRIGHT_STYLE_URL, samePosition, currentPosition, createCameraFocus, visibleMapPadding, countryFlagPath, destinationTime, routePresentation, appliedSpeedLabel } from "../app/src/main/assets/lan/map-ui-policy.mjs";
+
+test("display only the confirmed applied speed and distinguish resume pace", () => {
+  const state = {phase:"MOVING", speedPreset:"WALK", speedKmh:1.4, speedAppliedKmh:5.2};
+  assert.equal(appliedSpeedLabel(state),"已套用 5.2 km/h");
+  assert.equal(appliedSpeedLabel({...state,phase:"PAUSED"}),"恢復速度 5.2 km/h");
+  assert.equal(appliedSpeedLabel({...state,speedAppliedDisplay:"已套用 5.2 km/h"}),"已套用 5.2 km/h");
+  assert.equal(appliedSpeedLabel({...state,speedAppliedKmh:0}),"速度待確認");
+  assert.equal(appliedSpeedLabel({...state,speedAppliedKmh:NaN}),"速度待確認");
+  assert.equal(appliedSpeedLabel({...state,phase:"PARKED"}),"");
+  assert.equal(appliedSpeedLabel({...state,phase:"IDLE"}),"");
+});
 
 test("country flags are local PNGs with safe two-letter names",()=>{
   for (const code of ["TW","jp","US","GB","NP","XK"]) {
@@ -16,14 +27,59 @@ test("country flags are local PNGs with safe two-letter names",()=>{
 test("destination clock needs no physical GPS, respects DST and handles unknown zones",()=>{
   const winter=new Date("2026-11-22T12:00:00Z");
   const summer=new Date("2026-07-22T12:00:00Z");
-  assert.equal(destinationTime("Asia/Taipei",winter),"當地時間 20:00");
-  assert.equal(destinationTime("Asia/Tokyo",winter),"當地時間 21:00");
-  assert.equal(destinationTime("America/New_York",winter),"當地時間 07:00");
-  assert.equal(destinationTime("America/New_York",summer),"當地時間 08:00");
-  assert.equal(destinationTime("Asia/Kathmandu",winter),"當地時間 17:45");
-  assert.equal(destinationTime("UTC",new Date("2026-11-22T00:00:00Z")),"當地時間 00:00");
+  assert.equal(destinationTime("Asia/Taipei",winter),"11/22 20:00");
+  assert.equal(destinationTime("Asia/Tokyo",winter),"11/22 21:00");
+  assert.equal(destinationTime("America/New_York",winter),"11/22 07:00");
+  assert.equal(destinationTime("America/New_York",summer),"07/22 08:00");
+  assert.equal(destinationTime("Asia/Kathmandu",winter),"11/22 17:45");
+  assert.equal(destinationTime("UTC",new Date("2026-11-22T00:00:00Z")),"11/22 00:00");
   for (const bad of [null,"","invalid/City","+02:00"])
-    assert.equal(destinationTime(bad,winter),"當地時間待確認，可補齊舊收藏");
+    assert.equal(destinationTime(bad,winter),"—/— —:—");
+  assert.equal(destinationTime(null,winter,"TW"),"11/22 20:00");
+  assert.equal(destinationTime("invalid/City",winter,"jp"),"11/22 21:00");
+  assert.equal(destinationTime("America/New_York",winter,"TW"),"11/22 07:00");
+  for (const code of ["US","AU","CA",null,""])
+    assert.equal(destinationTime(null,winter,code),"—/— —:—");
+  const nextDay=new Date("2026-11-25T02:30:00Z");
+  assert.equal(destinationTime("Asia/Taipei",nextDay),"11/25 10:30");
+  assert.equal(destinationTime("America/Los_Angeles",nextDay),"11/24 18:30");
+  const newYear=new Date("2026-12-31T16:30:00Z");
+  assert.equal(destinationTime("Asia/Taipei",newYear),"2027/01/01 00:30");
+  assert.equal(destinationTime("America/Los_Angeles",newYear),"2026/12/31 08:30");
+});
+
+test("parked route A cannot hide new draft or prepared route B", () => {
+  const origin = {lat:0,lon:0}, a = {lat:1,lon:1}, b = {lat:2,lon:2};
+  const oldRoad = [origin,a], newRoad = [origin,b];
+  const stopped = {phase:"PARKED",mode:"ROUTE",geometry:oldRoad,origin,routeStops:[b]};
+  const draft = routePresentation(stopped,"ROUTE",false);
+  assert.deepEqual(draft.road,[]);
+  assert.deepEqual(draft.draft,newRoad);
+  const preview = {id:"B",loop:false,geometry:newRoad,distanceMetres:200};
+  const ready = routePresentation({...stopped,previews:{ROUTE:preview}},"ROUTE",false);
+  assert.equal(ready.prepared,preview);
+  assert.deepEqual(ready.road,newRoad);
+  assert.deepEqual(ready.draft,[]);
+  for (const state of [{...stopped,planning:true,previews:{ROUTE:preview}},
+                       {...stopped,previews:{ROUTE:{...preview,loop:true}}}]) {
+    const pending = routePresentation(state,"ROUTE",false);
+    assert.equal(pending.prepared,null);
+    assert.deepEqual(pending.road,[]);
+    assert.deepEqual(pending.draft,newRoad);
+  }
+  assert.deepEqual(routePresentation({...stopped,routeStops:[]},"ROUTE",false).draft,[]);
+  assert.deepEqual(routePresentation({...stopped,previews:{ROUTE:preview}},"TELEPORT",false).road,[]);
+});
+
+test("active and paused route geometry remains visible only in route mode", () => {
+  const a = {lat:0,lon:0}, b = {lat:1,lon:1};
+  for (const phase of ["MOVING","PAUSED"]) {
+    const state = {phase,mode:"ROUTE",geometry:[a,b],origin:a,routeStops:[b]};
+    assert.deepEqual(routePresentation(state,"ROUTE",false),{
+      active:true,prepared:null,road:[a,b],draft:[]
+    });
+    assert.deepEqual(routePresentation(state,"TELEPORT",false).road,[]);
+  }
 });
 
 const taipei = {lat:25.033,lon:121.5654};

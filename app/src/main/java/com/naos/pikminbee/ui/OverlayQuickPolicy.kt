@@ -5,7 +5,7 @@ import com.naos.pikminbee.domain.WalkSpeedPreset
 
 /** First-level controls never edit routes or silently restart movement. */
 enum class OverlayQuickAction {
-    PRIMARY, STOP, REAL_GPS, VIRTUAL_GPS, SPEED, MAP, CLOSE
+    PRIMARY, STOP, REAL_GPS, VIRTUAL_GPS, SPEED, MAP, WIFI, CLOSE
 }
 
 enum class OverlayPrimaryState { START, PAUSE, RESUME }
@@ -21,7 +21,7 @@ object OverlayQuickPolicy {
         OverlayQuickAction.REAL_GPS, OverlayQuickAction.VIRTUAL_GPS,
     )
     val bottomRow = listOf(
-        OverlayQuickAction.SPEED, OverlayQuickAction.MAP, OverlayQuickAction.CLOSE,
+        OverlayQuickAction.SPEED, OverlayQuickAction.MAP, OverlayQuickAction.WIFI, OverlayQuickAction.CLOSE,
     )
 
     fun primary(phase: WalkPhase): OverlayPrimaryState = when (phase) {
@@ -38,6 +38,10 @@ object OverlayQuickPolicy {
     fun isGpsHighlighted(which: OverlayQuickAction, mockActive: Boolean): Boolean =
         which in listOf(OverlayQuickAction.REAL_GPS, OverlayQuickAction.VIRTUAL_GPS) &&
             which == selectedGps(mockActive)
+
+    /** Wi-Fi lighting follows the listener, independent of the selected GPS mode. */
+    fun isHighlighted(which: OverlayQuickAction, mockActive: Boolean, wifiActive: Boolean): Boolean =
+        isGpsHighlighted(which, mockActive) || (which == OverlayQuickAction.WIFI && wifiActive)
 
     fun gpsPress(
         action: OverlayQuickAction, mockActive: Boolean, hasRememberedVirtual: Boolean,

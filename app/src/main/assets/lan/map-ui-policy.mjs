@@ -6,16 +6,25 @@ export function countryFlagPath(countryCode) {
   const code = typeof countryCode === "string" ? countryCode.trim().toLowerCase() : "";
   return /^[a-z]{2}$/.test(code) ? "/flags/" + code + ".png" : null;
 }
-/** A destination clock needs no physical GPS reference or browser time-zone guess. */
-export function destinationTime(zone, date = new Date()) {
-  if (typeof zone !== "string" || !zone || zone.length > 90 || /^[+-]/.test(zone))
-    return "當地時間待確認，可補齊舊收藏";
-  try {
-    const clock = new Intl.DateTimeFormat("en-GB", {
-      timeZone: zone, hour:"2-digit", minute:"2-digit", hourCycle:"h23"
-    }).format(date);
-    return "當地時間 " + clock;
-  } catch (_) { return "當地時間待確認，可補齊舊收藏"; }
+/** Destination date/time is independent of physical GPS and browser local time.
+ * Conservative TW/JP fallback: IANA tzdb zone1970.tab (TW and JP entries).
+ * Keep in parity with Android SavedPlaceTimePolicy.effectiveZone. */
+export function destinationTime(zone, date = new Date(), countryCode = null) {
+  const country = typeof countryCode === "string" ? countryCode.trim().toUpperCase() : "";
+  const fallback = country === "TW" ? "Asia/Taipei" : country === "JP" ? "Asia/Tokyo" : null;
+  for (const id of [zone, fallback]) {
+    if (typeof id !== "string" || !id || id.length > 90 || /^[+-]/.test(id)) continue;
+    try {
+      const parts = Object.fromEntries(new Intl.DateTimeFormat("en-GB", {
+        timeZone:id, year:"numeric", month:"2-digit", day:"2-digit",
+        hour:"2-digit", minute:"2-digit", hourCycle:"h23"
+      }).formatToParts(date).map(p=>[p.type,p.value]));
+      const day = parts.month + "/" + parts.day;
+      const year = day === "12/31" || day === "01/01" ? parts.year + "/" : "";
+      return year + day + " " + parts.hour + ":" + parts.minute;
+    } catch (_) { /* Try the bounded country fallback, or leave unknown. */ }
+  }
+  return "—/— —:—";
 }
 export function samePosition(a,b, toleranceMetres = 3) {
   if (!a || !b || ![a.lat,a.lon,b.lat,b.lon].every(Number.isFinite)) return false;
@@ -28,6 +37,34 @@ export function currentPosition(state, physical) {
   return state?.mockActive && state.position ? {point:state.position, simulated:true, historical:false}
     : physical ? {point:physical,simulated:false,historical:!!physical.historical} : null;
 }
+/** Use the confirmed phone test pace; older snapshots may omit the label. */
+export function appliedSpeedLabel(state) {
+  if (!["MOVING","PAUSED"].includes(state?.phase)) return "";
+  if (typeof state.speedAppliedDisplay === "string" && state.speedAppliedDisplay)
+    return state.speedAppliedDisplay;
+  const speed = state.speedAppliedKmh;
+  return Number.isFinite(speed) && speed > 0
+    ? (state.phase === "PAUSED" ? "恢復速度 " : "已套用 ") + Number(speed.toFixed(1)) + " km/h"
+    : "速度待確認";
+}
+
+/** The running route and the current draft are different states. A parked
+ * route is history, not an active road; never let it mask a new preview. */
+export function routePresentation(state, mode, loop) {
+  const active = state?.mode === "ROUTE" &&
+    (state.phase === "MOVING" || state.phase === "PAUSED");
+  const candidate = state?.previews?.ROUTE;
+  const prepared = mode === "ROUTE" && !active && !state?.planning &&
+    candidate?.id && candidate.loop === loop && candidate.geometry?.length >= 2
+    ? candidate : null;
+  const road = mode !== "ROUTE" ? [] : active ? (state.geometry || []) :
+    (prepared?.geometry || []);
+  const stops = state?.routeStops || [];
+  const draft = mode === "ROUTE" && !active && !prepared && state?.origin && stops.length
+    ? [state.origin, ...stops] : [];
+  return {active, prepared, road, draft};
+}
+
 /** Find the largest clear rectangle in the map canvas. All bounds are
  * viewport CSS pixels; overlays are clipped to the canvas before evaluation.
  * Sweep the possible horizontal spans and merge their blocked Y intervals.

@@ -11,8 +11,8 @@ import androidx.core.content.ContextCompat
 import android.Manifest
 import android.content.pm.PackageManager
 import com.naos.pikminbee.ui.BeePermissions
-import com.naos.pikminbee.ui.VerifiedPhysicalFixState
 import com.naos.pikminbee.data.PreparedRouteState
+import com.naos.pikminbee.data.RouteDraftState
 import com.naos.pikminbee.domain.PreparedWalkingRoute
 import com.naos.pikminbee.domain.WalkingGeometry
 import com.naos.pikminbee.domain.WalkPhase
@@ -28,6 +28,7 @@ import com.naos.pikminbee.data.VerifiedRealTimeZone
 import com.naos.pikminbee.data.WalkSpeedState
 import com.naos.pikminbee.domain.WalkSpeedPreset
 import com.naos.pikminbee.domain.WalkSpeedProfile
+import com.naos.pikminbee.domain.WalkSpeedMode
 import com.naos.pikminbee.domain.Coordinate
 import com.naos.pikminbee.domain.WalkMode
 import com.naos.pikminbee.location.LocationStatus
@@ -38,6 +39,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
@@ -52,6 +54,7 @@ data class LanDisplay(
     val pendingDevice: String = "",
     val note: String = "Wi-Fi 控制已關閉",
     val physicalSharingAllowed: Boolean = false,
+    val connection: LanConnection = LanConnection(),
 )
 
 object LanStatus {
@@ -84,9 +87,8 @@ class LanController(private val context: Context) {
     private val placeLookup = PlaceLookup(context)
     private val pairing = LanPairing()
     private val rateLimiter = LanRateLimiter()
-    private val planning = AtomicBoolean(false)
     private val starting = AtomicBoolean(false)
-    private data class WebPreview(val id: String, val route: PreparedWalkingRoute)
+    private data class WebPreview(val id: String, val route: PreparedWalkingRoute, val draftRevision: Long)
     private val previews = ConcurrentHashMap<WalkMode, WebPreview>()
     private data class PendingPlaceLookup(
         val coordinate: Coordinate, val requestedAtMillis: Long,
@@ -111,8 +113,6 @@ class LanController(private val context: Context) {
     @Volatile private var physicalShareSessionToken: String? = null
     @Volatile private var physicalSnapshot: LanPhysicalSnapshot? = null
     @Volatile private var verifiedTimeZoneReference: VerifiedRealTimeZone? = null
-    private val realZoneLookupBusy = AtomicBoolean(false)
-    @Volatile private var lastRealZoneLookupAtMillis = 0L
     @Volatile private var lastObservedMock = false
     private fun origin(): Coordinate? = browserOrigin ?: LocationStatus.selected.value
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -133,24 +133,46 @@ class LanController(private val context: Context) {
             LanStatus.display.value = LanDisplay(
                 active = true, address = "http://${ip.hostAddress}:8765/",
                 pairingPin = pairing.currentPin(),
+                connection = pairing.connection(),
                 note = "僅接受可互通的私人區網，配對碼不會上傳雲端",
             )
             "已開啟電腦網頁控制"
         }.getOrElse {
             pairing.revoke()
-            LanStatus.display.value = LanDisplay(note = "無法開啟：${it.message}")
+            LanStatus.display.value = LanDisplay(note = "無法開啟：${it.message}", connection = LanConnection(LanConnectionPhase.ERROR))
             "無法啟動 Wi-Fi 服務：${it.message}"
         }
     }
 
-    fun approvePending() {
-        val renewal = LanStatus.display.value.pendingDevice.startsWith("續期")
-        val approved = pairing.approve()
+    private fun refreshConnectionDisplay() {
+        if (server == null) return
+        val connection = pairing.connection()
+        LanStatus.display.update { current ->
+            if (!current.active) current else current.copy(
+                connection = connection,
+                pendingDevice = connection.pendingDevice,
+                pairingPin = if (connection.showPin) pairing.currentPin() else "",
+            )
+        }
+    }
+
+    /** End browser authorisation, not the Wi-Fi listener or route. */
+    fun disconnectBrowser() {
+        if (server == null) return
+        pairing.disconnect()
+        revokePhysicalSharing("已撤銷瀏覽器授權；可重新配對")
+        refreshConnectionDisplay()
+    }
+
+    fun approvePending(sharePhysical: Boolean = false, approvalId: String? = null) {
+        val renewal = pairing.connection().renewal
+        val approved = pairing.approve(sharePhysical, approvalId)
         LanStatus.display.value = LanStatus.display.value.copy(
             pendingDevice = "",
             note = if (!approved) "沒有待核准的裝置"
                 else if (renewal) "已核准續期，等待原網頁完成更新權杖"
                 else "已核准網頁裝置，等待瀏覽器建立工作階段")
+        refreshConnectionDisplay()
     }
 
     fun denyPending() {
@@ -159,14 +181,18 @@ class LanController(private val context: Context) {
         LanStatus.display.value = LanStatus.display.value.copy(
             pendingDevice = "",
             note = if (renewal) "已拒絕網頁續期" else "已拒絕裝置配對")
+        refreshConnectionDisplay()
     }
 
-    /** Called only from the visible Android Settings consent confirmation. */
-    fun approvePhysicalSharing() {
-        val session = pairing.activeSessionToken()
+    /** Called from an explicit on-phone consent, not a browser or listener startup. */
+    @Synchronized fun approvePhysicalSharing() {
+        grantPhysicalSharing(pairing.activeSessionToken())
+    }
+
+    private fun grantPhysicalSharing(session: String?) {
         val fineGranted = ContextCompat.checkSelfPermission(context,
             Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        if (session == null || !fineGranted || server == null) {
+        if (session == null || session != pairing.activeSessionToken() || !fineGranted || server == null) {
             LanStatus.display.value = LanStatus.display.value.copy(
                 physicalSharingAllowed = false,
                 note = if (session == null) "請先完成網頁配對與手機核准，再同意分享真實位置"
@@ -185,8 +211,15 @@ class LanController(private val context: Context) {
             else "已允許分享，但尚無可信真實定位；請先切回真實 GPS 並取得定位")
     }
 
+    /** Apply the explicit choice only to the newly issued token. Never inherit consent. */
+    @Synchronized private fun applyPairingConsent(status: LanPairing.ApprovalStatus) {
+        if (status.token == null || status.token != pairing.activeSessionToken() || server == null) return
+        revokePhysicalSharing("網頁配對已核准；真實位置未分享")
+        if (status.sharePhysical) grantPhysicalSharing(status.token)
+    }
+
     /** Revocation also cancels in-flight GPS requests and removes precise data. */
-    fun revokePhysicalSharing(note: String = "已撤銷真實 GPS 分享") {
+    @Synchronized fun revokePhysicalSharing(note: String = "已撤銷真實 GPS 分享") {
         physicalShareSessionToken = null
         physicalSnapshot = null
         realRequestGeneration.incrementAndGet()
@@ -213,14 +246,19 @@ class LanController(private val context: Context) {
         server = null
         bound = null
         pairing.revoke()
-        LanStatus.display.value = LanDisplay(note = reason)
+        LanStatus.display.value = LanDisplay(note = reason, connection = LanConnection(
+            if (reason.contains("斷線") || reason.contains("切換")) LanConnectionPhase.ERROR
+            else LanConnectionPhase.CLOSED))
     }
 
     fun checkNetwork() {
         if (server == null) return
-        if (physicalShareSessionToken != null &&
-            physicalShareSessionToken != pairing.activeSessionToken()) {
-            revokePhysicalSharing("配對工作階段已到期；真實 GPS 分享已關閉")
+        refreshConnectionDisplay()
+        synchronized(this) {
+            if (physicalShareSessionToken != null &&
+                physicalShareSessionToken != pairing.activeSessionToken()) {
+                revokePhysicalSharing("配對工作階段已到期；真實 GPS 分享已關閉")
+            }
         }
         val now = android.os.SystemClock.elapsedRealtime()
         if (now - lastNetworkCheck < 10_000L) return
@@ -231,7 +269,7 @@ class LanController(private val context: Context) {
     }
 
     fun close() {
-        stop()
+        if (server != null) stop()
         scope.cancel()
     }
 
@@ -250,6 +288,9 @@ class LanController(private val context: Context) {
         }
         if (req.method == "GET" && req.path == "/map-ui-policy.mjs") {
             return asset("lan/map-ui-policy.mjs", "application/javascript; charset=utf-8")
+        }
+        if (req.method == "GET" && req.path == "/coordinate-format.mjs") {
+            return asset("lan/coordinate-format.mjs", "application/javascript; charset=utf-8")
         }
         // Only two-letter flag filenames are served; no arbitrary asset paths.
         if (req.method == "GET" && req.path.matches(Regex("/flags/[a-z]{2}\\.png"))) {
@@ -281,14 +322,16 @@ class LanController(private val context: Context) {
             LanStatus.display.value = LanStatus.display.value.copy(
                 pendingDevice = pending?.let { "${it.name} · ${it.address}" }.orEmpty(),
                 note = "新裝置要求連線，請在手機上核准或拒絕")
+            refreshConnectionDisplay()
             return acceptedJson(JSONObject().put("pendingId", result.pendingId).toString())
         }
         if (req.method == "GET" && req.path == "/api/pair/status") {
             val status = pairing.poll(req.remoteAddress, req.pendingId)
             return when (status.state) {
                 "approved" -> {
-                    // Approving another browser revokes ALL prior precise-data consent.
-                    revokePhysicalSharing("新的網頁配對已核准；真實位置必須重新授權")
+                    // The new browser gets only the choice explicitly confirmed for its request.
+                    applyPairingConsent(status)
+                    refreshConnectionDisplay()
                     ok(JSONObject().put("token", status.token)
                         .put("expiresInSeconds", pairing.sessionDurationSeconds).toString())
                 }
@@ -304,6 +347,7 @@ class LanController(private val context: Context) {
             LanStatus.display.value = LanStatus.display.value.copy(
                 pendingDevice = "續期目前裝置 · ${req.remoteAddress}",
                 note = "網頁要求再延長 2 小時；須在手機明確核准")
+            refreshConnectionDisplay()
             return acceptedJson(JSONObject().put("pendingId", renewal.pendingId).toString())
         }
         if (req.method == "POST" && req.path == "/api/session/renew/status") {
@@ -313,8 +357,9 @@ class LanController(private val context: Context) {
             )
             return when (renewal.state) {
                 "approved" -> {
-                    // A rotated session never inherits consent to share precise GPS.
-                    revokePhysicalSharing("網頁已核准續期；真實 GPS 分享需要重新同意")
+                    // Renewed tokens get only the new explicit on-phone choice.
+                    applyPairingConsent(renewal)
+                    refreshConnectionDisplay()
                     ok(JSONObject().put("token", renewal.token)
                         .put("expiresInSeconds", pairing.sessionDurationSeconds).toString())
                 }
@@ -324,8 +369,12 @@ class LanController(private val context: Context) {
         }
         if (req.path.startsWith("/api/flowers/"))
             return error(410, "尋花模式已移除；舊資料仍保留在手機上")
-        if (req.method == "GET" && req.path == "/api/state")
+        if (req.method == "GET" && req.path == "/api/state") {
+            if (!pairing.markStatePoll(req.token, req.remoteAddress))
+                return error(401, "配對已失效，請重新配對")
+            refreshConnectionDisplay()
             return ok(snapshot(req.token, req.remoteAddress))
+        }
         if (req.method == "GET" && req.path == "/api/saved") return ok(savedSnapshot())
         if (req.method != "POST") return error(404, "找不到操作")
         return when (req.path) {
@@ -338,41 +387,45 @@ class LanController(private val context: Context) {
                     .fold({ accepted("已送出瞬移指令") },
                         { error(409, "無法瞬移：" + (it.message ?: "請確認手機狀態")) })
             }
-            "/api/points/add" -> {
-                if (walking()) return error(409, "行走中無法修改路點，請先停止")
-                val json = parse(req.body) ?: return error(400, "JSON 無效")
-                val mode = mode(json.optString("mode")) ?: return error(400, "模式無效")
-                val target = coordinate(json) ?: return error(400, "經緯度無效")
-                val result = LanRouteDraftPolicy.add(
-                    mode, points(mode), target, origin(),
-                )
-                if (!result.accepted) return error(409, result.message)
-                savePoints(mode, result.stops)
-                invalidate(mode)
-                accepted(result.message)
-            }
-            "/api/points/reorder", "/api/points/remove" -> {
-                if (walking()) return error(409, "行走中無法修改路點")
-                val json = parse(req.body) ?: return error(400, "JSON 無效")
-                val mode = mode(json.optString("mode")) ?: return error(400, "模式無效")
-                val index = json.optInt("index", -1)
-                val current = points(mode)
-                val result = if (req.path.endsWith("reorder"))
-                    LanRouteDraftPolicy.reorder(current, index, json.optInt("offset", 0))
-                else LanRouteDraftPolicy.remove(current, index)
-                if (!result.accepted) return error(409, result.message)
-                savePoints(mode, result.stops)
-                invalidate(mode)
-                accepted(result.message)
-            }
+            "/api/points/add", "/api/points/reorder", "/api/points/remove", "/api/points/replace",
             "/api/points/undo", "/api/points/clear" -> {
-                if (walking()) return error(409, "行走中無法修改路點，請先停止")
+                if (walking() || starting.get() || RouteDraftState.planning.value)
+                    return error(409, "路線規劃或行走中，不能修改路點")
                 val json = parse(req.body) ?: return error(400, "JSON 無效")
                 val mode = mode(json.optString("mode")) ?: return error(400, "模式無效")
-                val current = points(mode)
-                savePoints(mode, if (req.path.endsWith("undo")) current.dropLast(1) else emptyList())
+                val draft = RouteDraftState.snapshot()
+                val expected = if (json.has("expectedRevision")) json.optLong("expectedRevision", -1)
+                    else draft.revision
+                if (expected != draft.revision)
+                    return error(409, "路點已在其他介面變更，請重新確認")
+                val index = json.optInt("index", -1)
+                val current = draft.stops
+                val result = when {
+                    req.path.endsWith("add") -> {
+                        val target = coordinate(json) ?: return error(400, "經緯度無效")
+                        LanRouteDraftPolicy.add(mode, current, target, origin())
+                    }
+                    req.path.endsWith("reorder") -> {
+                        if (json.has("from") || json.has("to")) {
+                            if (!json.has("expectedRevision")) return error(400, "缺少路點版本")
+                            LanRouteDraftPolicy.moveTo(current, json.optInt("from", -1), json.optInt("to", -1))
+                        } else LanRouteDraftPolicy.reorder(current, index, json.optInt("offset", 0))
+                    }
+                    req.path.endsWith("replace") -> {
+                        val target = coordinate(json) ?: return error(400, "經緯度無效")
+                        LanRouteDraftPolicy.replace(current, index, target, origin())
+                    }
+                    req.path.endsWith("remove") -> LanRouteDraftPolicy.remove(current, index)
+                    req.path.endsWith("undo") -> LanRouteDraftPolicy.Addition(
+                        current.dropLast(1), true, "路點已更新")
+                    else -> LanRouteDraftPolicy.Addition(emptyList(), true, "路點已清除")
+                }
+                if (!result.accepted) return error(409, result.message)
+                if (walking() || starting.get() ||
+                    !prefs.saveRouteDraftIfCurrent(expected, result.stops))
+                    return error(409, "路點已變更，或目前無法編輯，請重新確認")
                 invalidate(mode)
-                accepted("路點已更新")
+                accepted(result.message)
             }
             "/api/speed" -> {
                 val json = parse(req.body) ?: return error(400, "JSON 無效")
@@ -387,11 +440,10 @@ class LanController(private val context: Context) {
             }
             "/api/speed/default" -> {
                 val json = parse(req.body) ?: return error(400, "JSON 無效")
-                val preset = WalkSpeedPreset.entries.firstOrNull {
-                    it.name == json.optString("speedPreset")
-                } ?: return error(400, "不支援的預設速度")
-                prefs.setDefaultWalkSpeedPreset(preset)
-                accepted("下次開啟 App 的預設速度已設為：${preset.display}")
+                val profile = speedProfile(json)?.takeUnless { it.mode == WalkSpeedMode.RANGE }
+                    ?: return error(400, "不支援的預設速度")
+                prefs.setDefaultWalkSpeedProfile(profile)
+                accepted("下次開啟 App 的預設速度已設為：${profile.display}")
             }
             "/api/location/real" -> requestRealLocation(req.token)
             "/api/origin" -> {
@@ -510,13 +562,14 @@ class LanController(private val context: Context) {
                 accepted("已刪除收藏地點，不會移動 GPS")
             }
             "/api/saved/load" -> {
-                if (walking()) return error(409, "行走中無法載入路線；請先停止")
+                if (walking() || starting.get() || RouteDraftState.planning.value)
+                    return error(409, "規劃或行走中無法載入路線")
                 val id = parse(req.body)?.optString("id").orEmpty()
                 val route = prefs.savedRoutes().firstOrNull { it.id == id }
                     ?: return error(404, "找不到收藏路線")
-                if (route.mode == WalkMode.FLOWERS)
-                    prefs.saveRouteDraft(route.stops)
-                else prefs.loadSavedRouteIntoDraft(route)
+                val draft = RouteDraftState.snapshot()
+                if (!prefs.saveRouteDraftIfCurrent(draft.revision, route.stops))
+                    return error(409, "路點已變更，請重新確認")
                 invalidate(WalkMode.ROUTE)
                 accepted("已載入一般路線草稿，請先預覽道路")
             }
@@ -526,13 +579,14 @@ class LanController(private val context: Context) {
                 val walkMode = mode(json.optString("mode")) ?: return error(400, "模式無效")
                 val start = origin() ?: return error(409,
                     "請先在地圖選起點並按「設為起點」，或先啟動手機定位")
-                val stops = points(walkMode).toList()
+                val draft = RouteDraftState.snapshot()
+                val stops = draft.stops
                 val loop = json.optBoolean("loop", false)
                 val anchors = runCatching {
                     LanRouteDraftPolicy.anchors(walkMode, start, stops, loop)
                 }.getOrElse { return error(409, it.message ?: "路點無效") }
-                if (!planning.compareAndSet(false, true))
-                    return error(409, "仍在規劃上一條道路")
+                val owner = RouteDraftState.beginPlanning(draft.revision)
+                    ?: return error(409, "路點已變更或仍在規劃，請重新確認")
                 invalidate(walkMode)
                 LanStatus.display.value = LanStatus.display.value.copy(
                     note = "正在規劃步行道路；不會移動模擬 GPS")
@@ -540,7 +594,8 @@ class LanController(private val context: Context) {
                     try {
                         val detailed = ValhallaPlanner.planDetailed(anchors)
                         // Reject stale responses after draft edits or origin change.
-                        if (origin() != start || points(walkMode) != stops) {
+                        if (origin() != start || RouteDraftState.snapshot().revision != draft.revision ||
+                            points(walkMode) != stops) {
                             LanStatus.display.value = LanStatus.display.value.copy(
                                 note = "起點或路點已變更，請重新規劃")
                         } else {
@@ -549,7 +604,7 @@ class LanController(private val context: Context) {
                                 loop = loop, snapMetres = detailed.snapMetres,
                             )
                             val id = UUID.randomUUID().toString()
-                            previews[walkMode] = WebPreview(id, prepared)
+                            previews[walkMode] = WebPreview(id, prepared, draft.revision)
                             PreparedRouteState.set(walkMode, prepared)
                             LanStatus.display.value = LanStatus.display.value.copy(
                                 note = "已完成道路預覽。確認地圖路線後再按開始行走")
@@ -558,20 +613,22 @@ class LanController(private val context: Context) {
                         LanStatus.display.value = LanStatus.display.value.copy(
                             note = "道路預覽失敗：" + (e.message ?: "請稍後重試"))
                     } finally {
-                        planning.set(false)
+                        RouteDraftState.finishPlanning(owner)
                     }
-                }
+                }.invokeOnCompletion { RouteDraftState.finishPlanning(owner) }
                 accepted("正在規劃道路，不會移動 GPS")
             }
             "/api/route/start" -> {
-                if (planning.get()) return error(409, "道路仍在規劃，請先預覽")
+                if (RouteDraftState.planning.value) return error(409, "道路仍在規劃，請先預覽")
                 if (walking()) return error(409, "已經在行走；請先停止")
                 if (!mockPermissionReady()) return error(409,
                     "請先在手機授予精確定位，並於開發人員選項選取 PikminBee 為模擬位置 App")
                 val json = parse(req.body) ?: return error(400, "JSON 無效")
                 val walkMode = mode(json.optString("mode")) ?: return error(400, "模式無效")
                 val loop = json.optBoolean("loop", false)
-                val available = previews[walkMode]
+                val available = previews[walkMode]?.takeIf {
+                    it.draftRevision == RouteDraftState.snapshot().revision
+                }
                 val check = LanWebPreviewPolicy.canStart(
                     available?.route, available?.id, json.optString("previewId"),
                     origin(), points(walkMode), loop,
@@ -747,35 +804,8 @@ class LanController(private val context: Context) {
         PreparedRouteState.set(mode, null)
     }
 
-    private fun maybeResolveRealZoneFromPhone() {
-        // Only an explicitly non-mock, fresh fix captured by the Android App
-        // can establish the reference. A browser opening Favourites is an
-        // explicit user action, never a GPS tick or background location poll.
-        val verified = VerifiedPhysicalFixState.fresh() ?: return
-        if (verifiedTimeZoneReference?.let {
-                it.physicalFixAtMillis >= verified.timestampMillis && it.freshId() != null
-            } == true) return
-        val now = System.currentTimeMillis()
-        if (now - lastRealZoneLookupAtMillis in 0L..60_000L) return
-        if (!realZoneLookupBusy.compareAndSet(false, true)) return
-        lastRealZoneLookupAtMillis = now
-        scope.launch {
-            try {
-                val zone = placeLookup.zoneForVerifiedPhysical(verified.coordinate)
-                if (zone != null &&
-                    VerifiedPhysicalFixState.fresh()?.timestampMillis ==
-                        verified.timestampMillis) {
-                    verifiedTimeZoneReference = VerifiedRealTimeZone(
-                        zone, verified.timestampMillis)
-                }
-            } finally {
-                realZoneLookupBusy.set(false)
-            }
-        }
-    }
-
     private fun savedSnapshot(): String {
-        maybeResolveRealZoneFromPhone()
+        // Destination clocks need no phone-position time zone or external lookup.
         fun encoded(point: Coordinate) = JSONObject()
             .put("lat", point.latitude).put("lon", point.longitude)
         val places = JSONArray().apply {
@@ -817,12 +847,14 @@ class LanController(private val context: Context) {
         val path = if (geometry.size > 250)
             geometry.filterIndexed { index, _ -> index % (geometry.size / 250 + 1) == 0 } +
                 geometry.last() else geometry
+        val draft = RouteDraftState.snapshot()
         val routeStates = JSONObject()
         for (mode in WalkMode.entries) {
             val candidate = previews[mode]
             val prepared = candidate?.route
-            if (candidate != null && prepared != null &&
-                prepared.isCurrent(origin(), points(mode), prepared.loop)) {
+            if (candidate != null && prepared != null && candidate.id != usedPreviewId &&
+                candidate.draftRevision == draft.revision && !RouteDraftState.planning.value &&
+                prepared.isCurrent(origin(), draft.stops, prepared.loop)) {
                 val sampled = prepared.geometry
                 val shown = if (sampled.size > 350)
                     sampled.filterIndexed { index, _ -> index % (sampled.size / 350 + 1) == 0 } +
@@ -838,6 +870,9 @@ class LanController(private val context: Context) {
             }
         }
         val progress = LocationStatus.progress.value
+        val phase = LocationStatus.phase.value
+        val appliedKmh = com.naos.pikminbee.domain.RouteSurfaceStatusPolicy.visibleRouteSpeedKmh(
+            phase, LocationStatus.appliedSpeedKmh.value)
         // A newly enabled mock provider invalidates any earlier real-location request.
         val mocked = LocationStatus.mockActive.value
         if (mocked && !lastObservedMock) {
@@ -866,6 +901,7 @@ class LanController(private val context: Context) {
             ?.takeIf { it.freshId(now) != null }
         return JSONObject()
             .put("sessionExpiresInSeconds", pairing.secondsRemaining(requesterToken, requesterPeer))
+            .put("connectionPhase", pairing.connection().phase.name)
             .put("appVersionName", installedVersion.name ?: JSONObject.NULL)
             .put("appVersionCode", installedVersion.code ?: JSONObject.NULL)
             .put("appEnvironment", installedVersion.environment)
@@ -892,9 +928,9 @@ class LanController(private val context: Context) {
                         now - it.capturedAtMillis > 120_000L)
             })
             .put("origin", origin()?.let { JSONObject().put("lat", it.latitude).put("lon", it.longitude) })
-            .put("phase", LocationStatus.phase.value.name)
+            .put("phase", phase.name)
             .put("mode", LocationStatus.mode.value?.name)
-            .put("planning", planning.get())
+            .put("planning", RouteDraftState.planning.value)
             .put("mockPermissionReady", mockPermissionReady())
             .put("progress", JSONObject()
                 .put("activeLeg", progress.activeLegLabel)
@@ -911,9 +947,15 @@ class LanController(private val context: Context) {
             .put("speedKmh", WalkSpeedState.profile.value.fixedKmh)
             .put("speedMinKmh", WalkSpeedState.profile.value.minKmh)
             .put("speedMaxKmh", WalkSpeedState.profile.value.maxKmh)
-            .put("speedAppliedKmh", LocationStatus.appliedSpeedKmh.value)
+            .put("speedAppliedKmh", appliedKmh)
+            .put("speedAppliedDisplay", com.naos.pikminbee.domain.RouteSurfaceStatusPolicy
+                .appliedRouteSpeedLabel(phase, appliedKmh) ?: "")
             .put("defaultSpeedPreset", WalkSpeedState.preferred.value.name)
-            .put("routeStops", coordinates(prefs.routeDraft()))
+            .put("defaultSpeedMode", WalkSpeedState.preferredProfile.value.mode.name)
+            .put("defaultSpeedKmh", WalkSpeedState.preferredProfile.value.fixedKmh)
+            .put("defaultSpeedDisplay", WalkSpeedState.preferredProfile.value.display)
+            .put("routeRevision", draft.revision)
+            .put("routeStops", coordinates(draft.stops))
             .put("geometry", coordinates(path))
             .toString()
     }

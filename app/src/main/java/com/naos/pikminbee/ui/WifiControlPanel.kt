@@ -18,6 +18,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Button
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -51,11 +52,10 @@ fun WifiControlPanel(
     var confirmRealShare by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
         Text("電腦網頁控制", fontWeight = FontWeight.SemiBold, color = foreground)
-        Text(
-            if (lan.active) "網頁控制已開啟 · 同一可互通私人區網"
-            else "預設關閉。電腦與手機連線到同一私人區網後即可啟用，不必先啟動模擬位置。",
-            color = muted, fontSize = 12.sp
-        )
+        Text(lan.connection.label + if (lan.connection.hasSession)
+            " · 剩餘 " + lan.connection.countdown else "",
+            color = foreground, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        if (lan.connection.device.isNotBlank()) Text(lan.connection.device, color = muted, fontSize = 12.sp)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (!lan.active) Button(
                 onClick = {
@@ -107,8 +107,11 @@ fun WifiControlPanel(
                     Text("複製", fontSize = 12.sp, color = foreground)
                 }
             }
-            Text("配對碼：${lan.pairingPin}", color = foreground,
+            if (lan.connection.showPin) Text("配對碼：${lan.pairingPin}", color = foreground,
                 fontWeight = FontWeight.Bold, fontSize = 20.sp)
+            if (lan.connection.hasSession) OutlinedButton(onClick = {
+                context.startService(LanControlService.command(context, LanControlService.DISCONNECT))
+            }, modifier = Modifier.fillMaxWidth()) { Text("中斷瀏覽器連線") }
         }
         if (lan.active) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
@@ -122,7 +125,7 @@ fun WifiControlPanel(
                             context, LanControlService.REVOKE_PHYSICAL))
                     }) { Text("撤銷分享", fontSize = 12.sp) }
                 } else {
-                    OutlinedButton(onClick = { confirmRealShare = true }) {
+                    OutlinedButton(enabled = lan.connection.hasSession, onClick = { confirmRealShare = true }) {
                         Text("允許分享", fontSize = 12.sp)
                     }
                 }
@@ -131,16 +134,26 @@ fun WifiControlPanel(
                 "模擬 GPS 期間僅顯示歷史快照；分享不會自動啟動定位或行走。",
                 color = muted, fontSize = 11.sp)
         }
-        if (lan.pendingDevice.isNotBlank()) {
+        if (lan.pendingDevice.isNotBlank() && lan.connection.approvalId.isNotBlank()) {
+            val approvalId = lan.connection.approvalId
+            var shareOnApproval by remember(approvalId) {
+                mutableStateOf(!lan.connection.renewal || lan.physicalSharingAllowed)
+            }
             Text("待核准連線／續期：${lan.pendingDevice}",
                 color = foreground, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = shareOnApproval, onCheckedChange = { shareOnApproval = it })
+                Text("分享最近真實位置（可取消）", color = foreground, fontSize = 12.sp)
+            }
+            Text("僅限本次核准的瀏覽器，快照最多 30 分鐘；私人 Wi-Fi 的 HTTP 未加密。",
+                color = muted, fontSize = 11.sp)
             Row(Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = {
-                    context.startService(LanControlService.command(
-                        context, LanControlService.APPROVE))
+                    context.startService(LanControlService.approveCommand(
+                        context, approvalId, shareOnApproval))
                 }, modifier = Modifier.weight(1f)) {
-                    Text(if (lan.pendingDevice.startsWith("續期")) "核准續期" else "核准裝置",
+                    Text(if (shareOnApproval) "核准並分享" else if (lan.connection.renewal) "核准續期" else "核准裝置",
                         fontSize = 12.sp)
                 }
                 OutlinedButton(onClick = {

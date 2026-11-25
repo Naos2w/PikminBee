@@ -4,6 +4,17 @@ import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.content.Context
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Intent
+import android.net.Uri
+import android.view.inputmethod.InputMethodManager
+import android.widget.EditText
+import com.naos.pikminbee.MainActivity
+import com.naos.pikminbee.lan.LanControlService
+import com.naos.pikminbee.lan.LanStatus
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.combine
 import android.content.res.ColorStateList
 import androidx.compose.ui.graphics.toArgb
 import android.graphics.PixelFormat
@@ -58,7 +69,7 @@ class FloatingControls(
     private val onStartRoute: () -> Unit,
     private val openMap: () -> Unit,
     private val chooseVirtualPoint: () -> Unit,
-    private val onSpeedSelected: (WalkSpeedPreset) -> Unit,
+    private val onSpeedSelected: (WalkSpeedProfile) -> Unit,
 ) {
     companion object {
         const val PAUSE = "pause"
@@ -76,6 +87,20 @@ class FloatingControls(
     private var logoRenderKey: String = ""
     private var quickSummary: TextView? = null
     private var quickSteps: TextView? = null
+    private var detail = OverlayDetail.NONE
+    private var header: LinearLayout? = null
+    private var headerTitle: TextView? = null
+    private var headerBack: ImageView? = null
+    private var overviewScroll: ScrollView? = null
+    private var overview: LinearLayout? = null
+    private var quickGrid: LinearLayout? = null
+    private var overflowAction: TextView? = null
+    private var wifiPanel: FloatingWifiPanel? = null
+    private var speedPanel: FloatingSpeedPanel? = null
+    private var wifiStatusJob: Job? = null
+    private var speedStatusJob: Job? = null
+    private var lastWifiIconLabel = ""
+    private var activeEditor: EditText? = null
     private val quickActions = linkedMapOf<OverlayQuickAction, ImageView>()
     private var lastPhase: WalkPhase = WalkPhase.IDLE
     private var lastMode: WalkMode? = null
@@ -155,8 +180,7 @@ class FloatingControls(
         quickSteps?.contentDescription = display
     }
     private var root: LinearLayout? = null
-    private var panel: ScrollView? = null
-    private var currentSpeed: WalkSpeedPreset = WalkSpeedPreset.DEFAULT
+    private var panel: LinearLayout? = null
     private var params: WindowManager.LayoutParams? = null
     private var expanded = false
     private val placementPrefs = context.getSharedPreferences(
@@ -204,22 +228,128 @@ class FloatingControls(
         }
     }
 
+    private fun expandedWidth(): Int = minOf(
+        (screenSize().first - dp(24)).coerceAtLeast(dp(120)), dp(292),
+    )
+
+    /** Only the ordinary overview may scroll. A detail panel always fits in full,
+     * using a dedicated view when the grid would crowd it. */
     private fun fitExpandedPanelToScreen() {
-        val scroll = panel ?: return
-        val child = scroll.getChildAt(0) ?: return
-        val (width, height) = screenSize()
-        val availableWidth = (width - dp(20)).coerceAtLeast(dp(120))
-        val availableHeight = (height - dp(36) - dp(28) - dp(72))
-            .coerceAtMost(dp(360)).coerceAtLeast(dp(100))
-        child.measure(
-            View.MeasureSpec.makeMeasureSpec(availableWidth, View.MeasureSpec.AT_MOST),
-            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
-        )
-        val targetHeight = child.measuredHeight.coerceAtMost(availableHeight)
-        val current = scroll.layoutParams as? LinearLayout.LayoutParams ?: return
-        if (current.height != targetHeight) {
-            current.height = targetHeight
-            scroll.layoutParams = current
+        if (!expanded) return
+        val holder = panel ?: return
+        val top = header ?: return
+        val scroll = overviewScroll ?: return
+        val normal = overview ?: return
+        val grid = quickGrid ?: return
+        val fallback = overflowAction ?: return
+        val contentWidth = (expandedWidth() - dp(14)).coerceAtLeast(1)
+        val available = (screenSize().second - dp(36 + 28 + 10)).coerceAtLeast(dp(48))
+        fun measure(view: View): Int {
+            view.measure(View.MeasureSpec.makeMeasureSpec(contentWidth, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+            return view.measuredHeight
+        }
+        fun visible(view: View?, show: Boolean) {
+            val next = if (show) View.VISIBLE else View.GONE
+            if (view?.visibility != next) view?.visibility = next
+        }
+        fun scrollHeight(height: Int) {
+            val lp = scroll.layoutParams
+            val target = height.coerceAtLeast(1)
+            if (lp.height != target) { lp.height = target; scroll.layoutParams = lp }
+        }
+        headerTitle?.text = when (detail) {
+            OverlayDetail.NONE -> "PikminBee · 快捷控制"
+            OverlayDetail.SPEED -> "速度設定"
+            OverlayDetail.WIFI -> "Wi-Fi 控制"
+        }
+        visible(headerBack, detail != OverlayDetail.NONE)
+        val headerHeight = measure(top)
+        visible(quickSummary, detail == OverlayDetail.NONE)
+        visible(quickSteps, detail == OverlayDetail.NONE)
+        visible(fallback, false)
+        visible(grid, true)
+        val selected = when (detail) {
+            OverlayDetail.SPEED -> speedPanel?.root
+            OverlayDetail.WIFI -> wifiPanel?.root
+            OverlayDetail.NONE -> null
+        }
+        visible(wifiPanel?.root, selected != null && selected === wifiPanel?.root)
+        visible(speedPanel?.root, selected != null && selected === speedPanel?.root)
+        if (selected == null) {
+            visible(scroll, true)
+            scroll.isVerticalScrollBarEnabled = true
+            scrollHeight(minOf(measure(normal), (available - headerHeight).coerceAtLeast(1)))
+        } else {
+            val detailHeight = measure(selected)
+            val gridHeight = measure(grid)
+            val layout = OverlayPanelPolicy.layout(available, headerHeight, gridHeight,
+                detailHeight, editing = activeEditor != null)
+            scroll.isVerticalScrollBarEnabled = false
+            visible(scroll, layout == OverlayDetailLayout.GRID_AND_DETAIL)
+            if (layout == OverlayDetailLayout.GRID_AND_DETAIL) {
+                scroll.scrollTo(0, 0)
+                scrollHeight(gridHeight)
+            }
+            if (layout == OverlayDetailLayout.OPEN_APP) {
+                visible(selected, false)
+                visible(fallback, true)
+                fallback.text = if (detail == OverlayDetail.WIFI) "在 App 開啟 Wi-Fi 控制"
+                    else "在 App 調整速度"
+            }
+        }
+        holder.requestLayout()
+    }
+
+    private fun changeDetail(next: OverlayDetail) {
+        val previous = detail
+        detail = next
+        if (previous == OverlayDetail.SPEED && next != previous) speedPanel?.closeEditor()
+        if (next == OverlayDetail.WIFI) refreshWifiPanel()
+        if (next == OverlayDetail.SPEED) refreshSpeedPanel()
+        fitExpandedPanelToScreen()
+    }
+
+    /** The overlay remains non-focusable except while its own numeric editor is
+     * explicitly tapped. Always release keyboard focus on apply, back or collapse. */
+    private fun requestSpeedInput(editor: EditText?) {
+        if (editor == null) {
+            val previous = activeEditor ?: return
+            activeEditor = null
+            context.getSystemService(InputMethodManager::class.java)
+                ?.hideSoftInputFromWindow(previous.windowToken, 0)
+            previous.clearFocus()
+            previous.isFocusableInTouchMode = false
+            previous.isFocusable = false
+            params?.let { placement ->
+                placement.flags = placement.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                root?.let { runCatching { windows.updateViewLayout(it, placement) } }
+            }
+            if (expanded) fitExpandedPanelToScreen()
+            return
+        }
+        if (!expanded || detail != OverlayDetail.SPEED || activeEditor === editor) return
+        val placement = params ?: return
+        val view = root ?: return
+        val originalFlags = placement.flags
+        activeEditor = editor
+        placement.flags = placement.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
+        placement.flags = placement.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+        val updated = runCatching { windows.updateViewLayout(view, placement) }
+        if (updated.isFailure) {
+            placement.flags = originalFlags
+            activeEditor = null
+            Toast.makeText(context, "無法開啟輸入，請在 App 調整速度", Toast.LENGTH_SHORT).show()
+            return
+        }
+        editor.isFocusable = true
+        editor.isFocusableInTouchMode = true
+        fitExpandedPanelToScreen()
+        editor.requestFocus()
+        editor.post {
+            if (activeEditor === editor && editor.isShown)
+                context.getSystemService(InputMethodManager::class.java)
+                    ?.showSoftInput(editor, InputMethodManager.SHOW_IMPLICIT)
         }
     }
 
@@ -236,6 +366,10 @@ class FloatingControls(
         }
         repaint(holder)
         quickSteps?.setTextColor(palette.muted.toArgb())
+        headerBack?.setImageDrawable(NaosOverlayActionIcon(OverlayGlyph.BACK, palette.ink.toArgb(), dp(22)))
+        overflowAction?.background = softButtonBackground()
+        speedPanel?.repaint()
+        wifiPanel?.repaint()
         beeIcon?.background = null
         beeButton?.background = beeGlassRim()
         // Re-render semantic actions only after appearance changes, not every step tick.
@@ -250,7 +384,11 @@ class FloatingControls(
         params?.let { placement ->
             root?.let { view ->
                 view.post {
-                    if (expanded) fitExpandedPanelToScreen()
+                    if (expanded) {
+                        placement.width = expandedWidth()
+                        runCatching { windows.updateViewLayout(view, placement) }
+                        fitExpandedPanelToScreen()
+                    }
                     keepVisible(view, placement)
                 }
             }
@@ -290,8 +428,8 @@ class FloatingControls(
     /** Active GPS uses a solid accent, a CONTRASTING rim and a tiny dot.
      *  Both use the approved theme palette; no glowing or animated effects. */
     private fun actionBackground(which: OverlayQuickAction, enabled: Boolean): Drawable {
-        val activeGps = OverlayQuickPolicy.isGpsHighlighted(
-            which, com.naos.pikminbee.location.LocationStatus.mockActive.value)
+        val activeGps = OverlayQuickPolicy.isHighlighted(
+            which, com.naos.pikminbee.location.LocationStatus.mockActive.value, LanStatus.display.value.active)
         val palette = colors()
         val color = when (which) {
             OverlayQuickAction.PRIMARY -> BeeActionColors.primary(lastPhase)
@@ -394,8 +532,8 @@ class FloatingControls(
         which: OverlayQuickAction, icon: OverlayGlyph, label: String, enabled: Boolean = true,
     ) {
         quickActions[which]?.apply {
-            val activeGps = OverlayQuickPolicy.isGpsHighlighted(
-                which, com.naos.pikminbee.location.LocationStatus.mockActive.value)
+            val activeGps = OverlayQuickPolicy.isHighlighted(
+                which, com.naos.pikminbee.location.LocationStatus.mockActive.value, LanStatus.display.value.active)
             val ink = when {
                 !enabled -> colors().muted.toArgb()
                 which == OverlayQuickAction.PRIMARY -> BeeActionColors.ON_BRIGHT
@@ -423,6 +561,7 @@ class FloatingControls(
             contentDescription = when (which) {
                 OverlayQuickAction.REAL_GPS, OverlayQuickAction.VIRTUAL_GPS ->
                     label + if (activeGps) " · 目前使用此 GPS 模式" else " · 未啟用"
+                OverlayQuickAction.WIFI -> label + if (activeGps) " · 已開啟" else " · 未開啟"
                 else -> label
             }
             isEnabled = enabled
@@ -472,11 +611,8 @@ class FloatingControls(
         } else ""
         val selectedProfile = WalkSpeedState.profile.value
         val applied = com.naos.pikminbee.location.LocationStatus.appliedSpeedKmh.value
-        val speedLabel = if (applied > 0.0 &&
-            lastPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)) {
-            val prefix = if (selectedProfile.mode == WalkSpeedMode.RANGE) "區間 · " else ""
-            prefix + WalkSpeedProfile.number(applied) + " km/h"
-        } else selectedProfile.display
+        val speedLabel = RouteSurfaceStatusPolicy.appliedRouteSpeedLabel(lastPhase, applied)
+            ?: selectedProfile.display
         quickSummary?.text = "$label · $speedLabel$journey"
         val primaryLabel = when (primary) {
             OverlayPrimaryState.START -> "開始行走"
@@ -500,9 +636,11 @@ class FloatingControls(
         // Both icons stay tappable: without a saved virtual point we guide the
         // user to choose one instead of swallowing touches on a disabled view.
         iconUpdate(OverlayQuickAction.SPEED, OverlayGlyph.SPEED,
-            "切換行走速度，目前 ${currentSpeed.kilometresPerHour} km/h")
+            "展開速度設定，目前 $speedLabel")
         iconUpdate(OverlayQuickAction.MAP, OverlayGlyph.MAP, "開啟 PikminBee 地圖")
+        iconUpdate(OverlayQuickAction.WIFI, OverlayGlyph.WIFI, "Wi-Fi 控制 · " + LanStatus.display.value.connection.label)
         iconUpdate(OverlayQuickAction.CLOSE, OverlayGlyph.CLOSE, "關閉懸浮視窗，不停止行走")
+        if (detail == OverlayDetail.SPEED) refreshSpeedPanel()
         refreshBeeLogo()
     }
 
@@ -575,10 +713,22 @@ class FloatingControls(
         val actions = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
         }
-        val header = LinearLayout(context).apply {
+        val heading = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
+        header = heading
+        val back = ImageView(context).apply {
+            setImageDrawable(NaosOverlayActionIcon(OverlayGlyph.BACK, colors().ink.toArgb(), dp(22)))
+            scaleType = ImageView.ScaleType.CENTER
+            contentDescription = "返回快捷控制"
+            visibility = View.GONE
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { changeDetail(OverlayDetail.NONE) }
+        }
+        headerBack = back
+        heading.addView(back, LinearLayout.LayoutParams(dp(48), dp(48)))
         val description = TextView(context).apply {
             text = "PikminBee · 快捷控制"
             textSize = 14f
@@ -587,8 +737,9 @@ class FloatingControls(
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(9), 0, dp(2), 0)
         }
-        header.addView(description, LinearLayout.LayoutParams(0, dp(45), 1f))
-        header.addView(ImageView(context).apply {
+        headerTitle = description
+        heading.addView(description, LinearLayout.LayoutParams(0, dp(45), 1f))
+        heading.addView(ImageView(context).apply {
             setImageDrawable(NaosOverlayActionIcon(OverlayGlyph.BEE,
                 BeeLogoPolicy.HONEY, dp(30)))
             setPadding(dp(6), dp(6), dp(6), dp(6))
@@ -599,7 +750,9 @@ class FloatingControls(
             setOnLongClickListener { sendAction(HIDE); true }
             headerBeeIcon = this
         }, LinearLayout.LayoutParams(dp(48), dp(48)))
-        actions.addView(header)
+        actions.addView(heading)
+        val overviewContent = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        overview = overviewContent
 
         val summary = TextView(context).apply {
             text = "待命"
@@ -611,7 +764,7 @@ class FloatingControls(
             maxLines = 1
         }
         quickSummary = summary
-        actions.addView(summary)
+        overviewContent.addView(summary)
         val stepsLine = TextView(context).apply {
             text = "今日步數 —（尚未取得）"
             textSize = 11f
@@ -620,7 +773,9 @@ class FloatingControls(
             maxLines = 2
         }
         quickSteps = stepsLine
-        actions.addView(stepsLine)
+        overviewContent.addView(stepsLine)
+        val grid = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        quickGrid = grid
 
         val buttons = (OverlayQuickPolicy.topRow + OverlayQuickPolicy.bottomRow).map { which ->
             when (which) {
@@ -633,9 +788,11 @@ class FloatingControls(
                 OverlayQuickAction.VIRTUAL_GPS ->
                     Triple(which, OverlayGlyph.VIRTUAL, "恢復虛擬定位")
                 OverlayQuickAction.SPEED ->
-                    Triple(which, OverlayGlyph.SPEED, "切換三種速度預設；自訂與區間速度請在主畫面設定")
+                    Triple(which, OverlayGlyph.SPEED, "展開速度設定")
                 OverlayQuickAction.MAP ->
                     Triple(which, OverlayGlyph.MAP, "打開地圖")
+                OverlayQuickAction.WIFI ->
+                    Triple(which, OverlayGlyph.WIFI, "Wi-Fi 控制")
                 OverlayQuickAction.CLOSE ->
                     Triple(which, OverlayGlyph.CLOSE, "關閉懸浮")
             }
@@ -649,13 +806,10 @@ class FloatingControls(
                         OverlayQuickAction.STOP -> sendAction(STOP_WALK)
                         OverlayQuickAction.REAL_GPS -> clickGps(OverlayQuickAction.REAL_GPS)
                         OverlayQuickAction.VIRTUAL_GPS -> clickGps(OverlayQuickAction.VIRTUAL_GPS)
-                        OverlayQuickAction.SPEED -> {
-                            val next = OverlayQuickPolicy.nextSpeed(currentSpeed)
-                            currentSpeed = next
-                            onSpeedSelected(next)
-                            refreshQuick()
-                        }
+                        OverlayQuickAction.SPEED -> changeDetail(
+                            OverlayPanelPolicy.toggle(detail, OverlayDetail.SPEED))
                         OverlayQuickAction.MAP -> openMap()
+                        OverlayQuickAction.WIFI -> toggleWifiPanel()
                         OverlayQuickAction.CLOSE -> sendAction(HIDE)
                     }
                 }, LinearLayout.LayoutParams(0, dp(52), 1f).apply {
@@ -663,16 +817,58 @@ class FloatingControls(
                     bottomMargin = dp(5)
                 })
             }
-            actions.addView(row)
+            grid.addView(row)
         }
-
+        overviewContent.addView(grid)
         val scroll = ScrollView(context).apply {
-            visibility = View.GONE
             isVerticalScrollBarEnabled = true
             isFillViewport = false
-            addView(actions)
+            addView(overviewContent)
         }
-        container.addView(scroll)
+        overviewScroll = scroll
+        actions.addView(scroll, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        speedPanel = FloatingSpeedPanel(context, ::colors,
+            submit = { profile ->
+                runCatching { onSpeedSelected(profile) }
+                    .onFailure { Toast.makeText(context, "無法套用速度，請在 App 重試", Toast.LENGTH_SHORT).show() }
+                    .isSuccess
+            }, requestInput = ::requestSpeedInput, resize = ::fitExpandedPanelToScreen)
+        actions.addView(requireNotNull(speedPanel).root)
+        wifiPanel = FloatingWifiPanel(context, ::colors,
+            onEnable = ::enableWifi,
+            onDisable = { wifiCommand(LanControlService.DISABLE) },
+            onCopy = ::copyWifiAddress, onBrowser = ::openWifiBrowser,
+            onApprove = { id, share ->
+                runCatching {
+                    context.startService(LanControlService.approveCommand(context, id, share))
+                }.onFailure {
+                    Toast.makeText(context, "無法核准配對，請回 App 重試", Toast.LENGTH_SHORT).show()
+                }
+            },
+            onDeny = { wifiCommand(LanControlService.DENY) },
+            onDisconnect = { wifiCommand(LanControlService.DISCONNECT) },
+            onHelp = {
+                Toast.makeText(context, "同一可信私人 Wi-Fi：開啟網址、輸入六位碼、手機核准。HTTP 未加密；請勿公開連接埠。", Toast.LENGTH_LONG).show()
+            }, onSettings = ::openWifiSettings)
+        actions.addView(requireNotNull(wifiPanel).root)
+        overflowAction = TextView(context).apply {
+            textSize = 12f
+            setTextColor(colors().ink.toArgb())
+            gravity = Gravity.CENTER
+            minHeight = dp(48)
+            background = softButtonBackground()
+            isClickable = true
+            isFocusable = true
+            visibility = View.GONE
+            setOnClickListener {
+                val requested = detail
+                if (expanded) toggleExpanded()
+                if (requested == OverlayDetail.WIFI) openWifiSettings() else openMap()
+            }
+        }.also { actions.addView(it) }
+        actions.visibility = View.GONE
+        container.addView(actions)
         val stored = OverlayPlacement.fromStoredDp(
             placementPrefs.getInt("x_from_right_dp", OverlayPlacement.DEFAULT_X_DP),
             placementPrefs.getInt("y_from_top_dp", OverlayPlacement.DEFAULT_Y_DP),
@@ -744,16 +940,96 @@ class FloatingControls(
         }
         windows.addView(container, layout)
         root = container
-        panel = scroll
+        panel = actions
         params = layout
         expanded = false
+        wifiStatusJob = dailyReadScope.launch {
+            LanStatus.display.collect { lan ->
+                if (detail == OverlayDetail.WIFI) refreshWifiPanel()
+                val label = lan.connection.label
+                val iconKey = "${lan.active}:$label"
+                if (lastWifiIconLabel != iconKey) {
+                    lastWifiIconLabel = iconKey
+                    iconUpdate(OverlayQuickAction.WIFI, OverlayGlyph.WIFI, "Wi-Fi 控制 · $label")
+                }
+            }
+        }
+        speedStatusJob = dailyReadScope.launch {
+            combine(WalkSpeedState.profile, com.naos.pikminbee.location.LocationStatus.appliedSpeedKmh) { _, _ -> Unit }
+                .collect { refreshQuick() }
+        }
         stepsHandler.removeCallbacks(stepRefresh)
         stepsHandler.post(stepRefresh)
         container.post { keepVisible(container, layout) }
     }
 
+    private fun wifiCommand(action: String) {
+        runCatching { context.startService(LanControlService.command(context, action)) }
+            .onFailure { Toast.makeText(context, "無法執行 Wi-Fi 操作，請回 App", Toast.LENGTH_SHORT).show() }
+    }
+
+    private fun openWifiSettings() {
+        runCatching {
+            context.startActivity(Intent(context, MainActivity::class.java)
+                .putExtra(MainActivity.EXTRA_OPEN_WIFI_SETTINGS, true)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+        }.onFailure { Toast.makeText(context, "請從主 App 設定開啟 Wi-Fi", Toast.LENGTH_LONG).show() }
+    }
+
+    private fun enableWifi() {
+        // This method is invoked only by a visible user tap.
+        runCatching { LanControlService.enable(context) }.onFailure {
+            Toast.makeText(context, "系統限制背景啟動，請回 App 開啟 Wi-Fi", Toast.LENGTH_LONG).show()
+            openWifiSettings()
+        }
+    }
+
+    private fun copyWifiAddress() {
+        val lan = LanStatus.display.value
+        val address = OverlayPanelPolicy.browserPage(lan.active, lan.address) ?: return
+        context.getSystemService(ClipboardManager::class.java)
+            .setPrimaryClip(ClipData.newPlainText("PikminBee URL", address))
+        Toast.makeText(context, "已複製網址", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun openWifiBrowser() {
+        val lan = LanStatus.display.value
+        val address = OverlayPanelPolicy.browserPage(lan.active, lan.address)
+        if (address == null || OverlayPanelPolicy.wifiView(lan.active, lan.connection) != OverlayWifiView.PAIRING) {
+            Toast.makeText(context, "請確認 Wi-Fi 目前為等待配對", Toast.LENGTH_SHORT).show()
+            return
+        }
+        // Only the address is shared. The user enters the code and approves as before.
+        runCatching {
+            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(address))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }.onFailure {
+            Toast.makeText(context, "無法開啟瀏覽器，請複製網址或回 App", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun toggleWifiPanel() {
+        val next = OverlayPanelPolicy.toggle(detail, OverlayDetail.WIFI)
+        changeDetail(next)
+        if (next == OverlayDetail.WIFI && !LanStatus.display.value.active &&
+            LanStatus.display.value.connection.phase.name != "STARTING") enableWifi()
+    }
+
+    private fun refreshWifiPanel() {
+        if (detail != OverlayDetail.WIFI) return
+        if (wifiPanel?.render(LanStatus.display.value) == true && expanded)
+            fitExpandedPanelToScreen()
+    }
+
+    private fun refreshSpeedPanel() {
+        if (detail != OverlayDetail.SPEED) return
+        speedPanel?.render(WalkSpeedState.profile.value,
+            com.naos.pikminbee.location.LocationStatus.appliedSpeedKmh.value, lastPhase)
+    }
+
     private fun toggleExpanded() {
         expanded = !expanded
+        if (!expanded) changeDetail(OverlayDetail.NONE)
         root?.apply {
             background = if (expanded) glass() else null
             elevation = if (expanded) dp(6).toFloat() else 0f
@@ -784,7 +1060,7 @@ class FloatingControls(
         }
         params?.let { placement ->
             placement.width = if (expanded)
-                minOf(screenSize().first - dp(24), dp(292)).coerceAtLeast(dp(220))
+                expandedWidth()
                 else WindowManager.LayoutParams.WRAP_CONTENT
             if (expanded) fitExpandedPanelToScreen()
             // Keep game input focus: no keyboard in the single-level overlay.
@@ -812,12 +1088,28 @@ class FloatingControls(
         lastMode = mode
         lastStatus = status
         planningRoute = planningFlowers
-        currentSpeed = speedPreset
         updateStepSummary()
         refreshQuick()
     }
 
     fun dismiss() {
+        expanded = false
+        speedPanel?.closeEditor()
+        requestSpeedInput(null)
+        wifiStatusJob?.cancel()
+        wifiStatusJob = null
+        speedStatusJob?.cancel()
+        speedStatusJob = null
+        wifiPanel = null
+        speedPanel = null
+        overviewScroll = null
+        overview = null
+        quickGrid = null
+        header = null
+        headerTitle = null
+        headerBack = null
+        overflowAction = null
+        detail = OverlayDetail.NONE
         stepsHandler.removeCallbacks(stepRefresh)
         dailyReadJob?.cancel()
         dailyStepsCache.invalidate()
@@ -838,7 +1130,6 @@ class FloatingControls(
         lastMode = null
         lastStatus = ""
         planningRoute = false
-        currentSpeed = WalkSpeedPreset.DEFAULT
         params = null
         expanded = false
     }

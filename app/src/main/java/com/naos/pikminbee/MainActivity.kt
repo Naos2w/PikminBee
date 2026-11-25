@@ -52,6 +52,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
@@ -64,6 +65,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -143,14 +146,18 @@ private val darkGlass = Color(0xFF1E2B3C).copy(alpha = 0.985f)
 class MainActivity : ComponentActivity() {
     companion object {
         const val EXTRA_OPEN_SETTINGS = "com.naos.pikminbee.OPEN_SETTINGS"
+        const val EXTRA_OPEN_WIFI_SETTINGS = "com.naos.pikminbee.OPEN_WIFI_SETTINGS"
         const val EXTRA_OPEN_MODE = "com.naos.pikminbee.OPEN_MODE"
         val settingsRequests = MutableStateFlow(0L)
+        val wifiSettingsRequests = MutableStateFlow(0L)
         val mapModeRequests = MutableStateFlow(-1)
     }
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        if (intent.getBooleanExtra(EXTRA_OPEN_SETTINGS, false))
+        if (intent.getBooleanExtra(EXTRA_OPEN_WIFI_SETTINGS, false))
+            wifiSettingsRequests.value++
+        else if (intent.getBooleanExtra(EXTRA_OPEN_SETTINGS, false))
             settingsRequests.value++
         val selectedMode = intent.getIntExtra(EXTRA_OPEN_MODE, -1)
         if (selectedMode in 0..3) mapModeRequests.value = selectedMode
@@ -228,20 +235,25 @@ private fun PikminBeeScreen() {
         )
     }
     LaunchedEffect(tab) { controlsScroll.scrollTo(0) }
-    var showWifiPanel by remember { mutableStateOf(false) }
+    var showWifiPanel by remember {
+        mutableStateOf((context as? MainActivity)?.intent
+            ?.getBooleanExtra(MainActivity.EXTRA_OPEN_WIFI_SETTINGS, false) == true)
+    }
     var places by remember { mutableStateOf(prefs.places()) }
     var showFavourites by remember { mutableStateOf(false) }
     var backfillingPlaces by remember { mutableStateOf(false) }
     var backfillResult by remember { mutableStateOf("") }
     var savingPlace by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("地圖點一下就能選擇位置") }
-    val roadStops by RouteDraftState.routeStops.collectAsState()
+    val routeDraft by RouteDraftState.routeSnapshot.collectAsState()
+    val roadStops by remember { derivedStateOf { routeDraft.stops } }
     val savedRoutes by SavedRouteState.routes.collectAsState()
-    var planning by remember { mutableStateOf(false) }
+    val planning by RouteDraftState.planning.collectAsState()
     var confirmStopWalk by remember { mutableStateOf(false) }
     val speedPreset by WalkSpeedState.selected.collectAsState()
     val speedProfile by WalkSpeedState.profile.collectAsState()
-    val defaultSpeedPreset by WalkSpeedState.preferred.collectAsState()
+    val appliedSpeedKmh by LocationStatus.appliedSpeedKmh.collectAsState()
+    val defaultSpeedProfile by WalkSpeedState.preferredProfile.collectAsState()
     var mockGpsJitterLevel by remember { mutableStateOf(prefs.mockGpsJitterLevel()) }
     var virtualStrideMetres by remember { mutableStateOf(prefs.virtualStrideMetres()) }
     val work = rememberCoroutineScope()
@@ -257,8 +269,19 @@ private fun PikminBeeScreen() {
         if (!WalkStopUiPolicy.canRequest(walkMode, walkPhase))
             confirmStopWalk = false
     }
-    // Draft edits invalidate their previous preview.
-    LaunchedEffect(roadStops) { PreparedRouteState.route.value = null }
+    fun commitDraft(expected: Long, points: List<Coordinate>): Boolean {
+        if (LocationStatus.phase.value in listOf(WalkPhase.MOVING, WalkPhase.PAUSED) ||
+            !prefs.saveRouteDraftIfCurrent(expected, points)) {
+            message = "路點已變更，或目前無法編輯，請重新確認"
+            return false
+        }
+        return true
+    }
+    // The draft store invalidates previews atomically with a committed edit.
+    LaunchedEffect(routeDraft.revision) {
+        routeEditingStopIndex = null
+        routeStopActionIndex = null
+    }
 
     var phoneLocationRefresh by remember { mutableIntStateOf(0) }
     val requestLocation = rememberLauncherForActivityResult(
@@ -410,14 +433,13 @@ private fun PikminBeeScreen() {
         }.onFailure { message = "無法改名：" + (it.message ?: "儲存錯誤") }.isSuccess
 
     fun loadRoute(route: SavedRoute) {
+        if (!commitDraft(routeDraft.revision, route.stops)) return
         if (route.mode == WalkMode.FLOWERS) {
             // Migrate only the *draft*, never mutate/delete the user's saved legacy route.
-            prefs.saveRouteDraft(route.stops)
             tab = ToolTab.ROUTE
             message = "舊尋花收藏已載入一般路徑草稿；原收藏保留，請重新預覽道路"
             return
         }
-        prefs.loadSavedRouteIntoDraft(route)
         tab = ToolTab.ROUTE
         message = "已載入「" + route.name + "」的路點，沒有啟動行走"
     }
@@ -456,8 +478,8 @@ private fun PikminBeeScreen() {
         message = "速度已選擇：${next.display}" +
             if (moving) " · 行走中已要求更新" else " · 下次行走時使用"
     }
-    fun setDefaultWalkSpeed(next: WalkSpeedPreset) {
-        prefs.setDefaultWalkSpeedPreset(next)
+    fun setDefaultWalkSpeed(next: WalkSpeedProfile) {
+        prefs.setDefaultWalkSpeedProfile(next)
         message = "已將 ${next.display} 設為下次開啟 App 的預設速度"
     }
     fun setMockGpsJitter(next: MockGpsJitterLevel) {
@@ -500,11 +522,17 @@ private fun PikminBeeScreen() {
     var activePage by remember {
         mutableStateOf(if ((context as? MainActivity)?.intent?.let {
                 it.getBooleanExtra(MainActivity.EXTRA_OPEN_SETTINGS, false) ||
+                    it.getBooleanExtra(MainActivity.EXTRA_OPEN_WIFI_SETTINGS, false) ||
                     it.getIntExtra(MainActivity.EXTRA_OPEN_MODE, -1) == 3
             } == true) BeePage.SETTINGS
             else if (prefs.setupCompleted()) BeePage.MAP else BeePage.PERMISSIONS)
     }
+    var mapMounted by remember { mutableStateOf(activePage == BeePage.MAP) }
+    LaunchedEffect(activePage) {
+        if (activePage == BeePage.MAP) mapMounted = true
+    }
     val settingsRequest by MainActivity.settingsRequests.collectAsState()
+    val wifiSettingsRequest by MainActivity.wifiSettingsRequests.collectAsState()
     val modeRequest by MainActivity.mapModeRequests.collectAsState()
     var showOverlayGuide by remember { mutableStateOf(false) }
     var showOverlayAfterGuide by remember { mutableStateOf(false) }
@@ -599,13 +627,16 @@ private fun PikminBeeScreen() {
                 val capturedStops = stops.toList()
                 val capturedOrigin = origin
                 val capturedLoop = loop
-                planning = true
+                val capturedRevision = routeDraft.revision
+                val owner = RouteDraftState.beginPlanning(capturedRevision)
+                    ?: run { message = "路點已變更或仍在規劃，請稍後重試"; return }
                 message = "正在規劃可步行道路…"
                 work.launch {
                     try {
                         val plan = ValhallaPlanner.planDetailed(listOf(capturedOrigin) + capturedStops)
                         val currentOrigin = mockPosition ?: phonePosition
-                        if (currentOrigin == null || roadStops != capturedStops ||
+                        if (currentOrigin == null || RouteDraftState.snapshot().revision != capturedRevision ||
+                            RouteDraftState.snapshot().stops != capturedStops ||
                             WalkingGeometry.distanceMeters(capturedOrigin, currentOrigin) > 30.0) {
                             message = "規劃期間路點或起點已變更，請重新規劃"
                         } else {
@@ -627,15 +658,21 @@ private fun PikminBeeScreen() {
                     } catch (error: Exception) {
                         message = "道路規劃失敗：" + (error.message ?: "請檢查網路或路點")
                     } finally {
-                        planning = false
+                        RouteDraftState.finishPlanning(owner)
                     }
-                }
+                }.invokeOnCompletion { RouteDraftState.finishPlanning(owner) }
             }
         }
     }
 
     LaunchedEffect(settingsRequest) {
         if (settingsRequest > 0L) activePage = BeePage.SETTINGS
+    }
+    LaunchedEffect(wifiSettingsRequest) {
+        if (wifiSettingsRequest > 0L) {
+            showWifiPanel = true
+            activePage = BeePage.SETTINGS
+        }
     }
     LaunchedEffect(modeRequest) {
         if (modeRequest == 3) {
@@ -655,6 +692,57 @@ private fun PikminBeeScreen() {
     var coordinateInputDismissToken by remember { mutableIntStateOf(0) }
     LaunchedEffect(selected, selectionExplicit) {
         coordinateInput = if (selectionExplicit) selected.label() else ""
+    }
+    fun saveSelectedPlace() {
+        if (savingPlace) return
+        if (!selectionExplicit) {
+            message = "請先點地圖選取要收藏的位置"
+        } else {
+            val target = selected
+            val alreadySaved = prefs.places().firstOrNull {
+                it.coordinate == target
+            }
+            if (alreadySaved != null) {
+                message = "這個位置已收藏為「${alreadySaved.name}」；可在收藏清單改名"
+            } else {
+                savingPlace = true
+                message = "正在取得附近地標／商家名稱與國家、時區後收藏…"
+                // Only this explicit tap sends the selected
+                // coordinate to Photon / TimeAPI, not map pans.
+                work.launch {
+                    try {
+                        val suggestion = runCatching {
+                            placeLookup.suggest(target)
+                        }.getOrElse {
+                            PlaceSuggestion(PlaceSuggestionPolicy.pointLabel(target))
+                        }
+                        // A paired browser may have saved the same
+                        // coordinate while the lookup was running.
+                        if (prefs.places().none { it.coordinate == target }) {
+                            prefs.addPlace(
+                                suggestion.displayName, target,
+                                suggestion.countryCode,
+                                suggestion.countryName,
+                                suggestion.city,
+                                suggestion.timeZoneId,
+                            )
+                        }
+                        places = prefs.places()
+                        message = if (suggestion.displayName ==
+                            PlaceSuggestionPolicy.pointLabel(target))
+                            "地名查詢無結果，已用座標名稱收藏；可稍後補齊資訊"
+                        else "已自動命名並收藏「${suggestion.displayName}」 " +
+                            listOf(suggestion.city, suggestion.countryName ?: suggestion.countryCode)
+                                .filterNot { it.isNullOrBlank() }
+                                .joinToString(" · ")
+                    } catch (e: Exception) {
+                        message = "收藏失敗：${e.message ?: "請再試一次"}"
+                    } finally {
+                        savingPlace = false
+                    }
+                }
+            }
+        }
     }
     fun teleportTo(coordinate: Coordinate) {
         selected = coordinate
@@ -682,7 +770,7 @@ private fun PikminBeeScreen() {
     fun applyCoordinateInput() {
         val parsed = Coordinate.parseCombined(coordinateInput)
         if (parsed == null) {
-            message = "請輸入經緯度，例如 25.0330, 121.5654"
+            message = "經緯度格式或範圍無效（支援 DD、DMS、DDM）"
             return
         }
         teleportTo(parsed)
@@ -818,7 +906,8 @@ private fun PikminBeeScreen() {
                     confirmButton = {
                         TextButton(onClick = {
                             routeStopActionIndex = null
-                            if (index in roadStops.indices &&
+                            if (index in roadStops.indices && !RouteDraftState.planning.value &&
+                                RouteDraftState.snapshot().revision == routeDraft.revision &&
                                 walkPhase !in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)) {
                                 routeEditingStopIndex = index
                                 message = "請點地圖重新選擇第 ${index + 1} 點"
@@ -832,8 +921,7 @@ private fun PikminBeeScreen() {
                                 routeStopActionIndex = null
                                 if (walkPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)) {
                                     message = "行走中不能刪除路點，請先停止"
-                                } else {
-                                    prefs.saveRouteDraft(RoutePointDraft.remove(roadStops, index))
+                                } else if (commitDraft(routeDraft.revision, RoutePointDraft.remove(roadStops, index))) {
                                     routeEditingStopIndex = null
                                     message = "已刪除第 ${index + 1} 點；其餘路點已重新編號"
                                 }
@@ -843,72 +931,11 @@ private fun PikminBeeScreen() {
                 )
             }
         }
-        when (activePage) {
-            BeePage.PERMISSIONS -> BeePermissionWizard(
-                dark = dark,
-                initial = !prefs.setupCompleted(),
-                onFinish = {
-                    prefs.setSetupCompleted(true)
-                    phoneLocationRefresh++
-                    activePage = BeePage.MAP
-                },
-                onExit = { activePage = BeePage.MAP },
-            )
-            BeePage.SETTINGS -> BeeSettingsScreen(
-                dark = dark,
-                provider = provider,
-                appearance = appearance,
-                defaultSpeed = defaultSpeedPreset,
-                virtualStrideMetres = virtualStrideMetres,
-                mockGpsJitterLevel = mockGpsJitterLevel,
-                overlayVisible = overlayVisible,
-                mockActive = mockPosition != null,
-                showWifiPanel = showWifiPanel,
-                checkpoint = checkpoint,
-                onProvider = {
-                    provider = it
-                    prefs.setProvider(it)
-                },
-                onAppearance = {
-                    appearance = it
-                    prefs.setAppearance(it)
-                    if (overlayVisible) runCatching {
-                        context.startService(MockLocationService.command(
-                            context, MockLocationService.ACTION_REFRESH_OVERLAY_APPEARANCE))
-                    }.onFailure { message = "已切換主題，浮窗更新失敗：${it.message}" }
-                },
-                onDefaultSpeed = ::setDefaultWalkSpeed,
-                onVirtualStrideMetres = {
-                    prefs.setVirtualStrideMetres(it)
-                    virtualStrideMetres = it
-                    message = "虛擬步幅已設定為 ${String.format(java.util.Locale.US, "%.1f", it * 100).removeSuffix(".0")} 公分，下一次行走生效"
-                },
-                onMockGpsJitterLevel = ::setMockGpsJitter,
-                onPermissions = { activePage = BeePage.PERMISSIONS },
-                overlayGuideEnabled = guideEnabled,
-                overlayHoldHints = holdHints,
-                onOverlayGuideEnabled = {
-                    guideEnabled = it
-                    prefs.setOverlayFirstUseGuideEnabled(it)
-                },
-                onOverlayHoldHints = {
-                    holdHints = it
-                    prefs.setOverlayLongPressTips(it)
-                },
-                onReplayOverlayGuide = {
-                    showOverlayAfterGuide = false
-                    showOverlayGuide = true
-                },
-                onOverlay = { toggleOverlayControl() },
-                onToggleWifi = { showWifiPanel = !showWifiPanel },
-                onAskLocation = {
-                    requestLocation.launch(Manifest.permission.ACCESS_FINE_LOCATION)
-                },
-                onMessage = { message = it },
-                statusMessage = message,
-                onBack = { activePage = BeePage.MAP },
-            )
-            BeePage.MAP -> MapFirstShell(
+        // Keep one native map instance after the first map visit. Settings and
+        // permissions cover it in the same composition instead of destroying it.
+        Box(Modifier.fillMaxSize().background(semantic.bg)) {
+            if (mapMounted || activePage == BeePage.MAP) MapFirstShell(
+                controlsVisible = activePage == BeePage.MAP,
                 dark = dark,
                 modeIndex = tab.ordinal,
                 modeTitle = tab.label,
@@ -953,7 +980,7 @@ private fun PikminBeeScreen() {
                 walkEstimatedSteps = walkEstimatedSteps,
                 walkStopped = walkPhase == WalkPhase.PARKED &&
                     tab == ToolTab.ROUTE && walkMode == WalkMode.ROUTE,
-                routeSpeedKmh = speedPreset.kilometresPerHour,
+                routeSpeedKmh = appliedSpeedKmh,
                 routeActive = walkMode == WalkMode.ROUTE &&
                     walkPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED),
                 routePaused = walkPhase == WalkPhase.PAUSED,
@@ -964,12 +991,13 @@ private fun PikminBeeScreen() {
                     if (walkPhase !in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)) {
                         when (tab) {
                             ToolTab.ROUTE -> {
-                                prefs.saveRouteDraft(RoutePointDraft.undo(roadStops))
-                                routeEditingStopIndex = null
+                                if (commitDraft(routeDraft.revision, RoutePointDraft.undo(roadStops))) {
+                                    routeEditingStopIndex = null
+                                    message = "已移除最後一個路點，請點地圖重新選取"
+                                }
                             }
                             else -> Unit
                         }
-                        message = "已移除最後一個路點，請點地圖重新選取"
                     }
                 },
                 onRoutePrimary = { handleJourneyPrimary() },
@@ -977,6 +1005,7 @@ private fun PikminBeeScreen() {
                 mapContent = {
             LocationMap(
                 provider = provider, dark = dark,
+                interactive = activePage == BeePage.MAP,
                 selected = if (selectionExplicit) selected
                     else mockPosition ?: phonePosition ?: selected,
                 selectionActive = selectionExplicit,
@@ -1002,8 +1031,9 @@ private fun PikminBeeScreen() {
                     when (tab) {
                         ToolTab.ROUTE -> {
                             selected = point
-                            if (walkPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)) {
-                                message = "行走中不可修改路點，請先停止行走"
+                            if (RouteDraftState.planning.value ||
+                                walkPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)) {
+                                message = "規劃或行走中不可修改路點"
                             } else {
                                 val edit = RoutePointDraft.select(
                                     roadStops, mockPosition ?: phonePosition, point,
@@ -1011,13 +1041,14 @@ private fun PikminBeeScreen() {
                                 )
                                 when (edit.outcome) {
                                     RoutePointDraft.Outcome.ADDED -> {
-                                        prefs.saveRouteDraft(edit.stops)
-                                        message = "已加入第 ${edit.index + 1} 點，請選第 ${edit.stops.size + 1} 點"
+                                        if (commitDraft(routeDraft.revision, edit.stops))
+                                            message = "已加入第 ${edit.index + 1} 點，請選第 ${edit.stops.size + 1} 點"
                                     }
                                     RoutePointDraft.Outcome.REPLACED -> {
-                                        prefs.saveRouteDraft(edit.stops)
-                                        routeEditingStopIndex = null
-                                        message = "已重新選擇第 ${edit.index + 1} 點"
+                                        if (commitDraft(routeDraft.revision, edit.stops)) {
+                                            routeEditingStopIndex = null
+                                            message = "已重新選擇第 ${edit.index + 1} 點"
+                                        }
                                     }
                                     RoutePointDraft.Outcome.DUPLICATE ->
                                         message = "該位置已經是路點，請選擇其他位置"
@@ -1073,8 +1104,7 @@ private fun PikminBeeScreen() {
                             ToolTab.TELEPORT -> {
                                 Text("瞬移到指定位置", fontWeight = FontWeight.Bold, color = foreground)
                                 Text("選取：" + selected.label(), color = muted, fontSize = 13.sp)
-                                Text("上方座標列可貼上經緯度；點地圖只會選取，不會自動瞬移。",
-                                    color = muted, fontSize = 12.sp)
+                                Text("選取座標後確認。", color = muted, fontSize = 12.sp)
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Button(
                                         onClick = {
@@ -1122,56 +1152,7 @@ private fun PikminBeeScreen() {
                                 }
                                 TextButton(
                                     enabled = !savingPlace,
-                                    onClick = {
-                                        if (!selectionExplicit) {
-                                            message = "請先點地圖選取要收藏的位置"
-                                        } else {
-                                            val target = selected
-                                            val alreadySaved = prefs.places().firstOrNull {
-                                                it.coordinate == target
-                                            }
-                                            if (alreadySaved != null) {
-                                                message = "這個位置已收藏為「${alreadySaved.name}」；可在收藏清單改名"
-                                            } else {
-                                                savingPlace = true
-                                                message = "正在取得附近地標／商家名稱與國家、時區後收藏…"
-                                                // Only this explicit tap sends the selected
-                                                // coordinate to Photon / TimeAPI, not map pans.
-                                                work.launch {
-                                                    try {
-                                                        val suggestion = runCatching {
-                                                            placeLookup.suggest(target)
-                                                        }.getOrElse {
-                                                            PlaceSuggestion(PlaceSuggestionPolicy.pointLabel(target))
-                                                        }
-                                                        // A paired browser may have saved the same
-                                                        // coordinate while the lookup was running.
-                                                        if (prefs.places().none { it.coordinate == target }) {
-                                                            prefs.addPlace(
-                                                                suggestion.displayName, target,
-                                                                suggestion.countryCode,
-                                                                suggestion.countryName,
-                                                                suggestion.city,
-                                                                suggestion.timeZoneId,
-                                                            )
-                                                        }
-                                                        places = prefs.places()
-                                                        message = if (suggestion.displayName ==
-                                                            PlaceSuggestionPolicy.pointLabel(target))
-                                                            "地名查詢無結果，已用座標名稱收藏；可稍後補齊資訊"
-                                                        else "已自動命名並收藏「${suggestion.displayName}」 " +
-                                                            listOf(suggestion.city, suggestion.countryName ?: suggestion.countryCode)
-                                                                .filterNot { it.isNullOrBlank() }
-                                                                .joinToString(" · ")
-                                                    } catch (e: Exception) {
-                                                        message = "收藏失敗：${e.message ?: "請再試一次"}"
-                                                    } finally {
-                                                        savingPlace = false
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
+                                    onClick = ::saveSelectedPlace
                                 ) {
                                     Row(horizontalArrangement = Arrangement.spacedBy(5.dp),
                                         verticalAlignment = Alignment.CenterVertically) {
@@ -1183,25 +1164,29 @@ private fun PikminBeeScreen() {
                             ToolTab.ROUTE -> {
                                 JourneyControls(
                                     mode = WalkMode.ROUTE,
-                                    stops = roadStops,
+                                    stops = routeDraft.stops,
+                                    draftRevision = routeDraft.revision,
                                     origin = mockPosition ?: phonePosition,
                                     activeMode = walkMode,
                                     phase = walkPhase,
                                     walkEstimatedSteps = walkEstimatedSteps,
                                     speedPreset = speedPreset,
                                     speedProfile = speedProfile,
+                                    appliedSpeedKmh = appliedSpeedKmh,
                                     onSpeedSelected = ::chooseSpeedProfile,
                                     foreground = foreground, muted = muted,
                                     onUndo = {
-                                        if (roadStops.isNotEmpty()) {
-                                            prefs.saveRouteDraft(RoutePointDraft.undo(roadStops))
+                                        if (roadStops.isNotEmpty() &&
+                                            commitDraft(routeDraft.revision, RoutePointDraft.undo(roadStops))) {
                                             routeEditingStopIndex = null
-                                            message = "已回到第 ${roadStops.size} 點，請點地圖重選"
+                                            message = "已撤銷最後一個路點"
                                         }
                                     },
                                     onClear = {
-                                        prefs.saveRouteDraft(emptyList())
-                                        routeEditingStopIndex = null
+                                        if (commitDraft(routeDraft.revision, emptyList())) {
+                                            routeEditingStopIndex = null
+                                            message = "所有路點已清除"
+                                        }
                                     },
                                     onMessage = { message = it },
                                     preparedRoad = if (routePreviewReady) routeRoadPreview else emptyList(),
@@ -1211,11 +1196,111 @@ private fun PikminBeeScreen() {
                                     onLoopChange = {},
                                     onRoutePrimary = { handleJourneyPrimary() },
                                     onRouteStop = ::requestStopWalk,
+                                    onLocateStop = { point ->
+                                        focusMapPoint(point)
+                                        closeDetailsRequest++
+                                    },
+                                    onMoveStop = { expectedRevision, from, to ->
+                                        val current = RouteDraftState.snapshot()
+                                        if (planning || LocationStatus.phase.value in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)) {
+                                            message = "路線規劃或行走中，不能排序路點"
+                                        } else if (current.revision != expectedRevision ||
+                                            !prefs.saveRouteDraftIfCurrent(expectedRevision,
+                                                RoutePointDraft.moveTo(current.stops, from, to))) {
+                                            message = "路點已在其他介面變更，請重新排序"
+                                        } else {
+                                            message = "路點順序已更新，請重新預覽道路"
+                                        }
+                                    },
+                                    onDeleteStop = { expectedRevision, index ->
+                                        val current = RouteDraftState.snapshot()
+                                        if (!planning && LocationStatus.phase.value !in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)) {
+                                            if (current.revision != expectedRevision ||
+                                                !prefs.saveRouteDraftIfCurrent(expectedRevision, RoutePointDraft.remove(current.stops, index)))
+                                                message = "路點已變更，請重新確認"
+                                        }
+                                    },
                                 )
                             }
                         }
                 },
             )
+            if (activePage != BeePage.MAP) {
+                Box(Modifier.fillMaxSize().background(semantic.bg)
+                    .pointerInput(Unit) {
+                        // Participate in hit testing even on blank settings space.
+                        // Do not consume children's events: switches, scrolling and
+                        // text editing must keep their normal gesture handling.
+                        awaitPointerEventScope {
+                            while (true) awaitPointerEvent(PointerEventPass.Final)
+                        }
+                    }) {
+            if (activePage == BeePage.PERMISSIONS) BeePermissionWizard(
+                dark = dark,
+                initial = !prefs.setupCompleted(),
+                onFinish = {
+                    prefs.setSetupCompleted(true)
+                    phoneLocationRefresh++
+                    activePage = BeePage.MAP
+                },
+                onExit = { activePage = BeePage.MAP },
+            )
+            if (activePage == BeePage.SETTINGS) BeeSettingsScreen(
+                dark = dark,
+                provider = provider,
+                appearance = appearance,
+                defaultSpeed = defaultSpeedProfile,
+                virtualStrideMetres = virtualStrideMetres,
+                mockGpsJitterLevel = mockGpsJitterLevel,
+                overlayVisible = overlayVisible,
+                mockActive = mockPosition != null,
+                showWifiPanel = showWifiPanel,
+                checkpoint = checkpoint,
+                onProvider = {
+                    provider = it
+                    prefs.setProvider(it)
+                },
+                onAppearance = {
+                    appearance = it
+                    prefs.setAppearance(it)
+                    if (overlayVisible) runCatching {
+                        context.startService(MockLocationService.command(
+                            context, MockLocationService.ACTION_REFRESH_OVERLAY_APPEARANCE))
+                    }.onFailure { message = "已切換主題，浮窗更新失敗：${it.message}" }
+                },
+                onDefaultSpeed = ::setDefaultWalkSpeed,
+                onVirtualStrideMetres = {
+                    prefs.setVirtualStrideMetres(it)
+                    virtualStrideMetres = it
+                    message = "虛擬步幅已設定為 ${String.format(java.util.Locale.US, "%.1f", it * 100).removeSuffix(".0")} 公分，下一次行走生效"
+                },
+                onMockGpsJitterLevel = ::setMockGpsJitter,
+                onPermissions = { activePage = BeePage.PERMISSIONS },
+                overlayGuideEnabled = guideEnabled,
+                overlayHoldHints = holdHints,
+                onOverlayGuideEnabled = {
+                    guideEnabled = it
+                    prefs.setOverlayFirstUseGuideEnabled(it)
+                },
+                onOverlayHoldHints = {
+                    holdHints = it
+                    prefs.setOverlayLongPressTips(it)
+                },
+                onReplayOverlayGuide = {
+                    showOverlayAfterGuide = false
+                    showOverlayGuide = true
+                },
+                onOverlay = { toggleOverlayControl() },
+                onToggleWifi = { showWifiPanel = false },
+                onAskLocation = {
+                    requestLocation.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+                },
+                onMessage = { message = it },
+                statusMessage = message,
+                onBack = { activePage = BeePage.MAP },
+            )
+                }
+            }
         }
         if (showFavourites && activePage == BeePage.MAP) {
             ModalBottomSheet(
@@ -1227,8 +1312,12 @@ private fun PikminBeeScreen() {
             ) {
                 FavouritesPanel(
                     places = places,
+                    routeCount = savedRoutes.size,
                     foreground = foreground,
                     muted = muted,
+                    canAddPlace = selectionExplicit,
+                    savingPlace = savingPlace,
+                    onAddPlace = ::saveSelectedPlace,
                     onSelectPlace = { place ->
                         showFavourites = false
                         selected = place.coordinate

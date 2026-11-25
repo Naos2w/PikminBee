@@ -61,6 +61,8 @@ try{
   await call("Fetch.enable",{patterns:[{urlPattern:"https://tiles.openfreemap.org/styles/bright*"}]});
   await call("Page.navigate",{url});
   await until(()=>evaluate("document.readyState==='complete' && !!document.querySelector('#connect')"),"pair UI");
+  // Capture the real map instance through the test browser only; no production hook.
+  await evaluate("import('/vendor/maplibre-gl.mjs').then(m=>{const add=m.Map.prototype.addSource;m.Map.prototype.addSource=function(id,source){if(id==='bee-walk'||id==='bee-draft')window.__qaRouteMap=this;return add.call(this,id,source)};return true})");
   await evaluate("document.querySelector('#pin').value='123456';document.querySelector('#connect').click();true");
   try {
     await until(()=>evaluate("document.body.classList.contains('remote-active')"),"mock pairing");
@@ -70,9 +72,30 @@ try{
   }
   await evaluate("document.querySelector('#mode-route').click();true");
   await until(()=>evaluate("!!document.querySelector('.ordinal-pin[aria-label=\"路點 2\"]')"),"real MapLibre route marker",20000);
+  // Actual coordinate input in the packaged UI. Selection is explicit, and no
+  // phone or external geocoding endpoint is involved.
+  const paste=async text=>{
+    await until(()=>evaluate("!document.querySelector('#set-origin').disabled"),"previous route edit settled");
+    await evaluate("(()=>{const field=document.querySelector('#coordinate');field.value="+JSON.stringify(text)+";field.dispatchEvent(new Event('input',{bubbles:true}));return field.value})()");
+  };
+  const dms="25°01′58.8″N 121°33′55.44″E";
+  await paste(dms);
+  assert.equal(await evaluate("document.querySelector('#coordinate').value"),dms);
+  await evaluate("document.querySelector('#set-origin').click();true");
+  await until(()=>evaluate("document.querySelector('#coordinate').value==='25.033000, 121.565400'"),"DMS input normalisation");
+  await paste("33°30′S 70°40′W");
+  await evaluate("document.querySelector('#set-origin').click();true");
+  await until(()=>evaluate("document.querySelector('#coordinate').value==='-33.500000, -70.666667'"),"DDM input normalisation");
+  await paste("25°60′N 121°0′E");
+  await evaluate("document.querySelector('#set-origin').click();true");
+  await until(()=>evaluate("document.querySelector('#message').textContent.includes('經緯度格式或範圍無效')"),"invalid angular input rejected");
+  await paste("0, 0");
+  await evaluate("document.querySelector('#set-origin').click();true");
+  await until(()=>evaluate("document.querySelector('#coordinate').value==='0.000000, 0.000000' && document.querySelector('#external-map').href.includes('/0.00000/0.00000')"),"zero coordinate remains valid");
+  console.log("Coordinate input: DD/DMS/DDM paste, explicit confirmation and invalid input verified in Chromium.");
   await evaluate("document.querySelector('.ordinal-pin[aria-label=\"路點 2\"]').click();true");
   await until(()=>evaluate("!!document.querySelector('.maplibregl-popup-content')"),"route popup");
-  const popupStyle=()=>evaluate("(()=>{const c=document.querySelector('.maplibregl-popup-content'), p=c.parentElement, t=p.querySelector('.maplibregl-popup-tip'), b=c.querySelector('button');return {text:c.textContent,bg:getComputedStyle(c).backgroundColor,fg:getComputedStyle(c).color,tip:[getComputedStyle(t).borderTopColor,getComputedStyle(t).borderBottomColor,getComputedStyle(t).borderLeftColor,getComputedStyle(t).borderRightColor],close:getComputedStyle(b).color,closeHeight:b.getBoundingClientRect().height}})()");
+  const popupStyle=()=>evaluate("(()=>{const c=document.querySelector('.maplibregl-popup-content'), p=c.parentElement, t=p.querySelector('.maplibregl-popup-tip'), b=c.querySelector('.maplibregl-popup-close-button');return {text:c.textContent,bg:getComputedStyle(c).backgroundColor,fg:getComputedStyle(c).color,tip:[getComputedStyle(t).borderTopColor,getComputedStyle(t).borderBottomColor,getComputedStyle(t).borderLeftColor,getComputedStyle(t).borderRightColor],close:getComputedStyle(b).color,closeHeight:b.getBoundingClientRect().height}})()");
   async function choose(theme){
     await evaluate("(()=>{const s=document.querySelector('#web-appearance');s.value="+JSON.stringify(theme)+";s.dispatchEvent(new Event('change'));return true})()");
   }
@@ -82,14 +105,113 @@ try{
   assert.equal(dark.bg,"rgb(28, 43, 52)");assert.equal(dark.fg,"rgb(234, 242, 242)");
   assert.equal(light.bg,"rgb(255, 255, 255)");assert.equal(light.fg,"rgb(32, 49, 58)");
   for(const p of [dark,light]){assert.ok(p.tip.includes(p.bg));assert.equal(p.close,p.fg);assert.equal(p.closeHeight,30);}
-  await evaluate("document.querySelector('.maplibregl-popup-close-button').click();document.querySelector('#show-saved').click();true");
+  await evaluate("document.querySelector('.maplibregl-popup-close-button').click();true");
+  // Settings is a small Web-only panel: no dead phone-only categories.
+  const mapBounds=()=>evaluate("(()=>{const r=document.querySelector('#map').getBoundingClientRect();return [r.x,r.y,r.width,r.height]})()");
+  const mapBeforeSettings=await mapBounds();
+  await evaluate("document.querySelector('#mode-settings').click();true");
+  await until(()=>evaluate("document.body.dataset.mode==='settings' && !document.querySelector('#web-settings').classList.contains('hidden')"),"compact settings open");
+  assert.equal(await evaluate("document.querySelectorAll('#web-settings [data-web-theme-option]').length"),3);
+  assert.equal(await evaluate("document.querySelectorAll('#web-settings .settings-group').length"),0);
+  await evaluate("document.querySelector('[data-web-theme-option=dark]').click();true");
+  assert.ok(await evaluate("document.documentElement.dataset.webTheme==='dark' && document.querySelector('[data-web-theme-option=dark]').getAttribute('aria-pressed')==='true' && localStorage.getItem('pikminbee-web-theme')==='dark'"));
+  await evaluate("document.querySelector('[data-web-theme-option=light]').click();true");
+  assert.deepEqual(await mapBounds(),mapBeforeSettings);
+  await evaluate("document.querySelector('#web-settings-close').click();true");
+  await until(()=>evaluate("document.body.dataset.mode==='route' && document.querySelector('#web-settings').classList.contains('hidden')"),"return to original route mode");
+  assert.deepEqual(await mapBounds(),mapBeforeSettings);
+  console.log("Compact Web settings: three theme actions, persistence and unchanged map canvas verified.");
+  // Real pointer input against the isolated synthetic server. No phone commands.
+  const fixtureState=()=>fetch(url+"/api/state").then(r=>r.json());
+  await until(()=>evaluate("document.querySelectorAll('#route-order .stop-grip').length===3"),"three editable waypoints");
+  const oldDraft=await fixtureState();
+  await evaluate("document.querySelector('#route-order').scrollIntoView({block:'center'});document.querySelector('#route-order').scrollTop=0;true");
+  const bounds=await evaluate("(()=>{const handles=[...document.querySelectorAll('#route-order .stop-grip')];return handles.map(h=>{const r=h.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})})()");
+  assert.equal(bounds.length,3);
+  await call("Input.dispatchMouseEvent",{type:"mouseMoved",x:bounds[0].x,y:bounds[0].y});
+  await call("Input.dispatchMouseEvent",{type:"mousePressed",x:bounds[0].x,y:bounds[0].y,button:"left",buttons:1,clickCount:1});
+  await until(()=>evaluate("!!document.querySelector('.stop-dragging')"),"pointer capture on drag grip");
+  await call("Input.dispatchMouseEvent",{type:"mouseMoved",x:bounds[2].x,y:bounds[2].y,button:"left",buttons:1});
+  await until(()=>evaluate("[...document.querySelectorAll('#route-order .stop-item[data-index]')].at(-1).dataset.index==='0'"),"live multi-row reorder");
+  assert.equal((await fixtureState()).routeRevision,oldDraft.routeRevision,"no request until pointer release");
+  await call("Input.dispatchMouseEvent",{type:"mouseReleased",x:bounds[2].x,y:bounds[2].y,button:"left",buttons:0,clickCount:1});
+  const moved=[...oldDraft.routeStops.slice(1),oldDraft.routeStops[0]];
+  await until(async()=>JSON.stringify((await fixtureState()).routeStops)===JSON.stringify(moved),"atomic drag commit");
+  assert.equal((await fixtureState()).routeRevision,oldDraft.routeRevision+1);
+  await until(()=>evaluate("document.querySelectorAll('#route-order .stop-grip').length===3"),"confirmed rows after drag");
+  const stale=await fetch(url+"/api/points/reorder",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({mode:"ROUTE",from:0,to:2,expectedRevision:oldDraft.routeRevision})});
+  assert.equal(stale.status,409);
+  assert.deepEqual((await fixtureState()).routeStops,moved);
+  await evaluate("window.confirm=()=>false;document.querySelector('#clear').click();true");
+  assert.deepEqual((await fixtureState()).routeStops,moved,"cancelled clear must not change draft");
+  await evaluate("document.querySelector('#route-order .stop-grip').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true}));true");
+  const keyboardMoved=[moved[1],moved[0],moved[2]];
+  await until(async()=>JSON.stringify((await fixtureState()).routeStops)===JSON.stringify(keyboardMoved),"keyboard reorder");
+  console.log("Route editing: pointer drag across multiple rows, one commit, stale revision rejection, cancelled clear and accessible keyboard reorder verified.");
+  await evaluate("document.querySelector('#show-saved').click();true");
   await until(()=>evaluate("document.querySelectorAll('.saved-country-flag').length===2 && [...document.querySelectorAll('.saved-country-flag')].every(i=>i.complete&&i.naturalWidth>0)"),"two decoded local flags");
   const saved=await evaluate("({flags:[...document.querySelectorAll('.saved-country-flag')].map(i=>[new URL(i.src).pathname,i.naturalWidth]),clocks:[...document.querySelectorAll('.saved-clock')].map(i=>i.textContent)})");
   assert.deepEqual(saved.flags.map(a=>a[0]).sort(),["/flags/jp.png","/flags/tw.png"]);
-  assert.equal(saved.clocks.filter(c=>/^當地時間 \d{2}:\d{2}$/.test(c)).length,2);
-  assert.ok(saved.clocks.some(c=>c.includes("當地時間待確認")));
+  assert.equal(saved.clocks.filter(c=>/^(?:\d{4}\/)?\d{2}\/\d{2} \d{2}:\d{2}$/.test(c)).length,2);
+  assert.ok(saved.clocks.includes("—/— —:—"));
   assert.ok(saved.clocks.every(c=>!c.includes("時差")));
-  console.log(JSON.stringify({dark,light,saved,verified:"synthetic browser; no phone or external map tiles"},null,2));
+  const cardLayout=()=>evaluate("(()=>{const list=document.querySelector('#saved-list');return {width:list.clientWidth,scrollWidth:list.scrollWidth,cards:[...list.querySelectorAll('.saved-place-card')].map(c=>{const top=c.querySelector('.saved-place-top').getBoundingClientRect(),clock=c.querySelector('.saved-clock-row').getBoundingClientRect(),coord=c.querySelector('.saved-place-coordinate').getBoundingClientRect(),more=c.querySelector('.saved-place-more').getBoundingClientRect();return {text:c.querySelector('.saved-place-select').innerText,clockInside:clock.right<=top.right+1,coordinateBelow:coord.top>=top.bottom-1,menuSize:more.height,hidden:c.querySelector('.saved-place-actions').classList.contains('hidden')}})}})()");
+  const desktopCards=await cardLayout();
+  assert.equal(desktopCards.cards.length,3);
+  assert.ok(desktopCards.cards.every(c=>c.clockInside&&c.coordinateBelow&&c.hidden&&c.menuSize>=40&&!c.text.includes("收藏於")));
+  await call("Emulation.setDeviceMetricsOverride",{width:320,height:720,deviceScaleFactor:1,mobile:true});
+  await delay(300);
+  const mobileCards=await cardLayout();
+  assert.equal(mobileCards.cards.length,3);
+  assert.ok(mobileCards.scrollWidth<=mobileCards.width+1,"saved list does not overflow at 320px");
+  assert.ok(mobileCards.cards.every(c=>c.clockInside&&c.coordinateBelow&&c.hidden));
+  await evaluate("document.querySelector('.saved-place-more').click();true");
+  assert.ok(await evaluate("document.querySelector('#saved-dialog').open && !document.querySelector('.saved-place-actions').classList.contains('hidden') && document.querySelector('.saved-place-actions').innerText.includes('複製座標')"));
+  // Exercise menu actions against synthetic records only. Clipboard and dialogs
+  // are stubbed inside this temporary test browser, not on the user's desktop.
+  await evaluate("Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async value=>{window.__copied=value}}});[...document.querySelectorAll('.saved-place-actions:not(.hidden) button')].find(b=>b.textContent==='複製座標').click();true");
+  await until(()=>evaluate("window.__copied==='35.681236, 139.767125'"),"copy synthetic coordinate");
+  await evaluate("window.prompt=()=> '重新命名的合成收藏';[...document.querySelectorAll('.saved-place-actions:not(.hidden) button')].find(b=>b.textContent==='改名').click();true");
+  await until(()=>evaluate("[...document.querySelectorAll('.saved-place-name')].some(n=>n.textContent==='重新命名的合成收藏')"),"rename synthetic record");
+  await evaluate("window.prompt=()=> '東京車站（合成資料）';[...document.querySelectorAll('.saved-place-actions:not(.hidden) button')].find(b=>b.textContent==='改名').click();true");
+  await until(()=>evaluate("[...document.querySelectorAll('.saved-place-name')].some(n=>n.textContent.includes('東京車站'))"),"restore synthetic name");
+  await evaluate("window.confirm=()=>true;[...document.querySelectorAll('.saved-place-card')].find(c=>c.innerText.includes('舊收藏（合成資料）')).querySelector('.saved-place-more').click();[...document.querySelectorAll('.saved-place-actions:not(.hidden) button')].find(b=>b.textContent==='刪除').click();true");
+  await until(()=>evaluate("document.querySelectorAll('.saved-place-card').length===2"),"delete synthetic record");
+  await evaluate("document.querySelector('#saved-tab-routes').click();true");
+  assert.ok(await evaluate("document.querySelector('#saved-tab-routes').getAttribute('aria-pressed')==='true' && document.querySelectorAll('.saved-place-card').length===0"));
+  await evaluate("document.querySelector('#saved-tab-places').click();document.querySelector('#saved-search').value='台灣';document.querySelector('#saved-search').dispatchEvent(new Event('input'));true");
+  assert.equal(await evaluate("document.querySelectorAll('.saved-place-card').length"),1);
+  await evaluate("document.querySelector('#saved-search').value='';document.querySelector('#saved-search').dispatchEvent(new Event('input'));true");
+  await evaluate("[...document.querySelectorAll('.saved-place-select')].find(b=>b.textContent.includes('東京車站')).click();true");
+  await until(()=>evaluate("!document.querySelector('#saved-dialog').open && document.querySelector('#coordinate').value==='35.681236, 139.767125' && document.querySelector('#message').textContent.includes('沒有自動瞬移')"),"favourite selection without teleport");
+  await call("Emulation.clearDeviceMetricsOverride");
+  await evaluate("document.querySelector('#mode-route').click();true");
+  console.log(JSON.stringify({desktopCards,mobileCards,cardInteractions:"menu, tabs, metadata search, explicit map selection"},null,2));
+  // Inspect the actual GeoJSON source data rendered by packaged MapLibre.
+  const origin=[121.5654,25.033], a=[121.5654,25.043], b=[121.5754,25.033];
+  const coords=async()=>evaluate("(async()=>{const m=window.__qaRouteMap;if(!m)return null;const road=m.getSource('bee-walk'),draft=m.getSource('bee-draft');if(!road||!draft)return null;const points=async s=>(await s.getData()).features[0]?.geometry.coordinates||[];return {road:await points(road),draft:await points(draft)}})()");
+  const verifyLayers=async(scenario,road,draft)=>{
+    const response=await fetch(url+"/api/preview/route-state",{method:"POST",
+      headers:{"Content-Type":"application/json"},body:JSON.stringify({scenario})});
+    assert.ok(response.ok);
+    await until(async()=>JSON.stringify(await coords())===JSON.stringify({road,draft}),
+      "route layers "+scenario);
+    return {scenario,road,draft};
+  };
+  const routeLayers=[];
+  routeLayers.push(await verifyLayers("active",[origin,a],[]));
+  routeLayers.push(await verifyLayers("parked",[],[origin,b]));
+  routeLayers.push(await verifyLayers("planning",[],[origin,b]));
+  routeLayers.push(await verifyLayers("ready",[origin,b],[]));
+  await until(()=>evaluate("document.querySelector('#previewinfo').textContent.includes('1.00 公里') && !document.querySelector('#previewinfo').classList.contains('hidden')"),"new preview summary");
+  await evaluate("document.querySelector('#mode-teleport').click();true");
+  await until(async()=>JSON.stringify(await coords())===JSON.stringify({road:[],draft:[]}),"other mode clears layers");
+  await evaluate("document.querySelector('#mode-route').click();true");
+  await until(async()=>JSON.stringify(await coords())===JSON.stringify({road:[origin,b],draft:[]}),"route mode restores B only");
+  routeLayers.push(await verifyLayers("failed",[],[origin,b]));
+  routeLayers.push(await verifyLayers("cleared",[],[]));
+  console.log(JSON.stringify({dark,light,saved,routeLayers,verified:"synthetic browser; no phone or external map tiles"},null,2));
 }finally{
   socket?.close();
   browser?.kill();preview?.kill();

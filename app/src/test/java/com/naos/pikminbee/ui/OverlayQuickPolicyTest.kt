@@ -23,11 +23,11 @@ class OverlayQuickPolicyTest {
         )
         assertEquals(
             listOf(OverlayQuickAction.SPEED, OverlayQuickAction.MAP,
-                OverlayQuickAction.CLOSE),
+                OverlayQuickAction.WIFI, OverlayQuickAction.CLOSE),
             OverlayQuickPolicy.bottomRow,
         )
         assertFalse(OverlayQuickAction.entries.any { it.name == "FLOWER_VISION" })
-        assertEquals(7, (OverlayQuickPolicy.topRow + OverlayQuickPolicy.bottomRow).distinct().size)
+        assertEquals(8, (OverlayQuickPolicy.topRow + OverlayQuickPolicy.bottomRow).distinct().size)
     }
 
     @Test fun gpsModeIndicatorReflectsActualMockProviderNotLastClick() {
@@ -41,6 +41,16 @@ class OverlayQuickPolicyTest {
             val active = actions.filter { OverlayQuickPolicy.isGpsHighlighted(it, mockActive) }
             assertEquals(listOf(OverlayQuickPolicy.selectedGps(mockActive)), active)
             assertFalse(OverlayQuickPolicy.isGpsHighlighted(OverlayQuickAction.MAP, mockActive))
+        }
+    }
+
+    @Test fun wifiHighlightIsIndependentFromGpsAndUsesConfirmedListenerState() {
+        val actions = OverlayQuickPolicy.topRow + OverlayQuickPolicy.bottomRow
+        for (mock in listOf(false, true)) {
+            assertEquals(listOf(OverlayQuickPolicy.selectedGps(mock)),
+                actions.filter { OverlayQuickPolicy.isHighlighted(it, mock, false) })
+            assertEquals(listOf(OverlayQuickPolicy.selectedGps(mock), OverlayQuickAction.WIFI),
+                actions.filter { OverlayQuickPolicy.isHighlighted(it, mock, true) })
         }
     }
 

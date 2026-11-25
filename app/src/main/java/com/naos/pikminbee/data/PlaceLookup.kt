@@ -73,9 +73,10 @@ class PlaceLookup(context: Context) {
         if (cached != null) {
             val item = runCatching { JSONObject(cached) }.getOrNull()
             if (item != null && System.currentTimeMillis() - item.optLong("timestamp") in 0..ttlMillis) {
-                return optional(item, "zone")?.takeIf {
+                // An invalid legacy cache entry must not suppress explicit retry.
+                optional(item, "zone")?.takeIf {
                     SavedPlaceTimePolicy.validatedZone(it) != null
-                }
+                }?.let { return it }
             }
         }
         val response = fetchJson(

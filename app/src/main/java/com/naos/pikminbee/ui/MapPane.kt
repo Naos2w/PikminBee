@@ -1,5 +1,6 @@
 package com.naos.pikminbee.ui
 
+import android.view.View
 import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -83,18 +84,19 @@ fun LocationMap(
     onFlowerPick: (FlowerSpot) -> Unit,
     onStopPick: ((Int) -> Unit)? = null,
     modifier: Modifier = Modifier,
+    interactive: Boolean = true,
 ) {
     when (provider) {
         MapProvider.OPEN_FREE_MAP -> OpenFreeMapPane(dark, selected, selectionActive, current, currentIsMock, start, stops, road, previewRoad, flowerSpots,
             cameraRequest, viewport, onViewport, onCameraApplied, mapExplore, onCameraFailure,
-            onPick, onFlowerPick, onStopPick, modifier)
+            onPick, onFlowerPick, onStopPick, modifier, interactive)
         MapProvider.GOOGLE_MAPS -> if (BuildConfig.HAS_GOOGLE_MAPS_KEY) {
             GoogleMapsPane(dark, selected, selectionActive, current, currentIsMock, start, stops, road, previewRoad, flowerSpots,
-                cameraRequest, viewport, onViewport, onCameraApplied, mapExplore, onCameraFailure, onPick, onFlowerPick, onStopPick, modifier)
+                cameraRequest, viewport, onViewport, onCameraApplied, mapExplore, onCameraFailure, onPick, onFlowerPick, onStopPick, modifier, interactive)
         } else {
             OpenFreeMapPane(dark, selected, selectionActive, current, currentIsMock, start, stops, road, previewRoad, flowerSpots,
                 cameraRequest, viewport, onViewport, onCameraApplied, mapExplore, onCameraFailure,
-                onPick, onFlowerPick, onStopPick, modifier)
+                onPick, onFlowerPick, onStopPick, modifier, interactive)
         }
     }
 }
@@ -111,9 +113,11 @@ private fun OpenFreeMapPane(
     onPick: (Coordinate) -> Unit, onFlowerPick: (FlowerSpot) -> Unit,
     onStopPick: ((Int) -> Unit)?,
     modifier: Modifier,
+    interactive: Boolean,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val latestInteractive by rememberUpdatedState(interactive)
     val latestOnPick by rememberUpdatedState(onPick)
     val latestOnFlowerPick by rememberUpdatedState(onFlowerPick)
     val latestOnStopPick by rememberUpdatedState(onStopPick)
@@ -159,15 +163,17 @@ private fun OpenFreeMapPane(
             if (disposed) return@getMapAsync
             map = ready
             ready.uiSettings.isCompassEnabled = false
-            ready.uiSettings.isScrollGesturesEnabled = true
-            ready.uiSettings.isZoomGesturesEnabled = true
-            ready.uiSettings.isRotateGesturesEnabled = true
+            ready.uiSettings.isScrollGesturesEnabled = latestInteractive
+            ready.uiSettings.isZoomGesturesEnabled = latestInteractive
+            ready.uiSettings.isRotateGesturesEnabled = latestInteractive
+            ready.uiSettings.isTiltGesturesEnabled = latestInteractive
             ready.uiSettings.isAttributionEnabled = true
             ready.addOnMapClickListener { point ->
-                latestOnPick(Coordinate(point.latitude, point.longitude))
+                if (latestInteractive) latestOnPick(Coordinate(point.latitude, point.longitude))
                 true
             }
             ready.setOnMarkerClickListener { tapped ->
+                if (!latestInteractive) return@setOnMarkerClickListener true
                 val stopIndex = stopMarkers.firstOrNull { it.second.id == tapped.id }?.first ?: -1
                 val stopCallback = latestOnStopPick
                 if (stopIndex >= 0 && stopCallback != null) {
@@ -213,6 +219,14 @@ private fun OpenFreeMapPane(
             view.onPause()
             view.onStop()
             view.onDestroy()
+        }
+    }
+    LaunchedEffect(map, interactive) {
+        map?.uiSettings?.apply {
+            isScrollGesturesEnabled = interactive
+            isZoomGesturesEnabled = interactive
+            isRotateGesturesEnabled = interactive
+            isTiltGesturesEnabled = interactive
         }
     }
     LaunchedEffect(map, dark) {
@@ -342,7 +356,10 @@ private fun OpenFreeMapPane(
             }
         }
     }
-    AndroidView(factory = { view }, modifier = modifier)
+    AndroidView(factory = { view }, modifier = modifier, update = { native ->
+        native.importantForAccessibility = if (interactive) View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
+            else View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+    })
 }
 
 @Composable
@@ -357,9 +374,11 @@ private fun GoogleMapsPane(
     onPick: (Coordinate) -> Unit, onFlowerPick: (FlowerSpot) -> Unit,
     onStopPick: ((Int) -> Unit)?,
     modifier: Modifier,
+    interactive: Boolean,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val latestInteractive by rememberUpdatedState(interactive)
     val latestOnPick by rememberUpdatedState(onPick)
     val latestOnFlowerPick by rememberUpdatedState(onFlowerPick)
     val latestOnStopPick by rememberUpdatedState(onStopPick)
@@ -398,13 +417,15 @@ private fun GoogleMapsPane(
             if (disposed) return@getMapAsync
             map = ready
             ready.uiSettings.isMapToolbarEnabled = false
-            ready.uiSettings.isScrollGesturesEnabled = true
-            ready.uiSettings.isZoomGesturesEnabled = true
-            ready.uiSettings.isRotateGesturesEnabled = true
+            ready.uiSettings.isScrollGesturesEnabled = latestInteractive
+            ready.uiSettings.isZoomGesturesEnabled = latestInteractive
+            ready.uiSettings.isRotateGesturesEnabled = latestInteractive
+            ready.uiSettings.isTiltGesturesEnabled = latestInteractive
             ready.setOnMapClickListener { point ->
-                latestOnPick(Coordinate(point.latitude, point.longitude))
+                if (latestInteractive) latestOnPick(Coordinate(point.latitude, point.longitude))
             }
             ready.setOnMarkerClickListener { tapped ->
+                if (!latestInteractive) return@setOnMarkerClickListener true
                 val stopIndex = stopMarkers.firstOrNull { it.second.id == tapped.id }?.first ?: -1
                 val stopCallback = latestOnStopPick
                 if (stopIndex >= 0 && stopCallback != null) {
@@ -449,6 +470,14 @@ private fun GoogleMapsPane(
             view.onPause()
             view.onStop()
             view.onDestroy()
+        }
+    }
+    LaunchedEffect(map, interactive) {
+        map?.uiSettings?.apply {
+            isScrollGesturesEnabled = interactive
+            isZoomGesturesEnabled = interactive
+            isRotateGesturesEnabled = interactive
+            isTiltGesturesEnabled = interactive
         }
     }
     LaunchedEffect(map, dark) {
@@ -576,7 +605,10 @@ private fun GoogleMapsPane(
             }
         }
     }
-    AndroidView(factory = { view }, modifier = modifier)
+    AndroidView(factory = { view }, modifier = modifier, update = { native ->
+        native.importantForAccessibility = if (interactive) View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
+            else View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+    })
 }
 
 private const val GOOGLE_DARK_STYLE = """[

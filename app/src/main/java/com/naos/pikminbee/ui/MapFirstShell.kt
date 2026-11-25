@@ -31,6 +31,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.material3.AlertDialog
+import com.naos.pikminbee.lan.LanStatus
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -61,6 +64,7 @@ import androidx.compose.ui.unit.sp
 @Composable
 fun MapFirstShell(
     dark: Boolean,
+    controlsVisible: Boolean = true,
     modeIndex: Int,
     modeTitle: String,
     message: String,
@@ -87,7 +91,7 @@ fun MapFirstShell(
     walkingProgress: WalkingProgressSnapshot = WalkingProgressSnapshot(),
     walkEstimatedSteps: Long = 0L,
     walkStopped: Boolean = false,
-    routeSpeedKmh: Double = 1.4,
+    routeSpeedKmh: Double = 0.0,
     routeActive: Boolean = false,
     routePaused: Boolean = false,
     routePreviewReady: Boolean = false,
@@ -98,8 +102,16 @@ fun MapFirstShell(
     onRouteStop: () -> Unit = {},
 ) {
     var detailsOpen by rememberSaveable { mutableStateOf(false) }
+    var helpOpen by rememberSaveable { mutableStateOf(false) }
+    val lan by LanStatus.display.collectAsState()
+    LaunchedEffect(controlsVisible) {
+        if (!controlsVisible) {
+            detailsOpen = false
+            helpOpen = false
+        }
+    }
     LaunchedEffect(openDetailsRequest) {
-        if (openDetailsRequest > 0) detailsOpen = true
+        if (controlsVisible && openDetailsRequest > 0) detailsOpen = true
     }
     LaunchedEffect(closeDetailsRequest) {
         if (closeDetailsRequest > 0) detailsOpen = false
@@ -118,6 +130,7 @@ fun MapFirstShell(
 
     Box(Modifier.fillMaxSize().background(p.bg)) {
         mapContent()
+        if (controlsVisible) {
 
         // Bottom dock: 14dp side margins, 78dp body. The map remains fully
         // interactive above and to either side of the visible controls.
@@ -285,8 +298,13 @@ fun MapFirstShell(
                     )
                     Text(
                         "${walkingProgress.waypointCount.coerceAtLeast(modeStopsCount)} 點 · " +
-                            String.format(Locale.US, "%.1f km/h", routeSpeedKmh) +
-                            " · 剩餘約 ${(walkingProgress.remainingSeconds + 59L) / 60L} 分鐘",
+                            (com.naos.pikminbee.domain.RouteSurfaceStatusPolicy.appliedRouteSpeedLabel(
+                                if (routePaused) com.naos.pikminbee.domain.WalkPhase.PAUSED
+                                else com.naos.pikminbee.domain.WalkPhase.MOVING, routeSpeedKmh)
+                                ?: "速度待確認") +
+                            (if (routeSpeedKmh.isFinite() && routeSpeedKmh > 0.0)
+                                " · 剩餘約 ${(walkingProgress.remainingSeconds + 59L) / 60L} 分鐘"
+                            else " · ETA 待確認"),
                         color = p.muted, fontSize = 11.sp, lineHeight = 15.sp, maxLines = 2,
                     )
                     Box(Modifier.fillMaxWidth().height(4.dp)
@@ -319,6 +337,17 @@ fun MapFirstShell(
             backdrop = backdrop,
         )
 
+        if (lan.active || lan.connection.phase.name == "ERROR") {
+            Surface(
+                modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding()
+                    .padding(top = 85.dp, end = 16.dp).clickable { onSettings() },
+                color = p.surface, shape = RoundedCornerShape(12.dp),
+            ) {
+                Text("Wi-Fi · " + lan.connection.label, color = p.ink,
+                    fontSize = 11.sp, modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp))
+            }
+        }
+
         CurrentLocationMapButton(
             onClick = onCurrentLocation,
             dark = dark,
@@ -327,9 +356,18 @@ fun MapFirstShell(
                     bottom = if (showQuick) 224.dp else 132.dp),
             backdrop = backdrop,
         )
+        }
     }
 
-    if (detailsOpen) {
+    if (controlsVisible && helpOpen) AlertDialog(
+        onDismissRequest = { helpOpen = false },
+        title = { Text("$modeTitle 操作說明") },
+        text = { Text(if (active == 0)
+            "在地圖選點或貼上 DD、DMS、DDM 座標，確認後才會瞬移。書籤可收藏位置；恢復真實 GPS 會停止模擬。"
+            else "依序點地圖加入路點，最多 15 點。先規劃道路並確認預覽，再開始。長按左側手柄拖移路點，點座標查看，右側刪除。規劃、行走或暫停時路點唯讀。") },
+        confirmButton = { TextButton(onClick = { helpOpen = false }) { Text("關閉") } },
+    )
+    if (controlsVisible && detailsOpen) {
         ModalBottomSheet(
             onDismissRequest = { detailsOpen = false },
             sheetState = sheetState,
@@ -341,9 +379,13 @@ fun MapFirstShell(
                 Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 3.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("$modeTitle · 詳細操作",
+                Text(modeTitle,
                     modifier = Modifier.weight(1f), color = p.ink,
                     fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                IconButton(onClick = { helpOpen = true },
+                    modifier = Modifier.size(48.dp).semantics { contentDescription = "目前模式操作說明" }) {
+                    Text("?", fontSize = 20.sp, color = p.ink)
+                }
                 IconButton(
                     onClick = { detailsOpen = false; onSettings() },
                     modifier = Modifier.size(48.dp).semantics { contentDescription = "開啟設定" },

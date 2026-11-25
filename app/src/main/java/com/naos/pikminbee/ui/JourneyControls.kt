@@ -1,6 +1,11 @@
 package com.naos.pikminbee.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.material3.AlertDialog
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
@@ -40,12 +45,14 @@ import com.naos.pikminbee.domain.WalkingGeometry
 fun JourneyControls(
     mode: WalkMode,
     stops: List<Coordinate>,
+    draftRevision: Long,
     origin: Coordinate?,
     activeMode: WalkMode?,
     phase: WalkPhase,
     walkEstimatedSteps: Long,
     speedPreset: WalkSpeedPreset,
     speedProfile: WalkSpeedProfile,
+    appliedSpeedKmh: Double = 0.0,
     onSpeedSelected: (WalkSpeedProfile) -> Unit,
     foreground: Color,
     muted: Color,
@@ -59,7 +66,11 @@ fun JourneyControls(
     onLoopChange: (Boolean) -> Unit,
     onRoutePrimary: () -> Unit,
     onRouteStop: () -> Unit,
+    onLocateStop: (Coordinate) -> Unit = {},
+    onMoveStop: (Long, Int, Int) -> Unit = { _, _, _ -> },
+    onDeleteStop: (Long, Int) -> Unit = { _, _ -> },
 ) {
+    var confirmClear by remember(draftRevision) { mutableStateOf(false) }
     val activeWalk = phase == WalkPhase.MOVING || phase == WalkPhase.PAUSED
     val controlling = activeWalk && activeMode == mode
     val otherWalking = activeWalk && activeMode != mode
@@ -77,15 +88,19 @@ fun JourneyControls(
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text(if (flower) "尋花路點" else "道路路點",
+        Text("路徑 · ${stops.size} 個路點",
             color = foreground, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-        Text("${stops.size} 個路點" + if (origin == null) " · 尚未設定起點"
-            else " · 起點 ${origin.label()}",
-            color = muted, fontSize = 12.sp)
-        if (stops.isNotEmpty()) {
-            Text("順序： " + stops.indices.joinToString("  →  ") { "${it + 1}" },
-                color = foreground, fontSize = 13.sp)
-        }
+        RouteWaypointList(
+            stops = stops,
+            origin = origin,
+            revision = draftRevision,
+            editable = canEdit,
+            foreground = foreground,
+            muted = muted,
+            onLocate = onLocateStop,
+            onMove = onMoveStop,
+            onDelete = onDeleteStop,
+        )
         if (flower) {
             FilterChip(
                 selected = loop,
@@ -94,7 +109,10 @@ fun JourneyControls(
                 label = { Text("循環路線") },
             )
         }
-        Text("速度", color = muted, fontSize = 12.sp)
+        Text(if (controlling)
+            "速度 · " + com.naos.pikminbee.domain.RouteSurfaceStatusPolicy.appliedRouteSpeedLabel(phase, appliedSpeedKmh)
+            else "速度 · " + speedProfile.display,
+            color = muted, fontSize = 12.sp)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             WalkSpeedPreset.entries.forEach { option ->
                 FilterChip(
@@ -192,18 +210,23 @@ fun JourneyControls(
             }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            TextButton(
-                onClick = onUndo,
-                enabled = canEdit && stops.isNotEmpty(),
-                modifier = Modifier.semantics { contentDescription = "撤銷最後加入的路點" },
-            ) {
+            IconButton(onClick = onUndo, enabled = canEdit && stops.isNotEmpty(),
+                modifier = Modifier.size(48.dp).semantics { contentDescription = "撤銷最後加入的路點" }) {
                 NaosActionIcon(NaosActionGlyph.UNDO, foreground)
-                Text("撤銷上一點", color = foreground, fontSize = 12.sp)
             }
-            TextButton(
-                onClick = { onClear(); onMessage("所有路點已清除") },
-                enabled = canEdit && stops.isNotEmpty(),
-            ) { Text("清除全部", fontSize = 12.sp) }
+            IconButton(onClick = { confirmClear = true }, enabled = canEdit && stops.isNotEmpty(),
+                modifier = Modifier.size(48.dp).semantics { contentDescription = "清除全部路點" }) {
+                NaosActionIcon(NaosActionGlyph.DELETE, Color(BeeActionColors.STOP_RED))
+            }
         }
     }
+    if (confirmClear) AlertDialog(
+        onDismissRequest = { confirmClear = false },
+        title = { Text("清除全部路點？") },
+        text = { Text("不會移動目前位置。") },
+        confirmButton = { TextButton(enabled = canEdit, onClick = {
+            confirmClear = false; onClear()
+        }) { Text("清除") } },
+        dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("取消") } },
+    )
 }

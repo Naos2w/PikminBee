@@ -1,6 +1,7 @@
 package com.naos.pikminbee.lan
 
 import com.naos.pikminbee.domain.Coordinate
+import com.naos.pikminbee.domain.RoutePointDraft
 import com.naos.pikminbee.domain.FlowerMapDraft
 import com.naos.pikminbee.domain.WalkMode
 import com.naos.pikminbee.domain.WalkingGeometry
@@ -58,6 +59,20 @@ object LanRouteDraftPolicy {
         reordered[index] = reordered[other]
         reordered[other] = previous
         return Addition(reordered, true, "路點順序已更新，請重新預覽道路")
+    }
+
+    fun moveTo(current: List<Coordinate>, from: Int, to: Int): Addition {
+        if (from !in current.indices || to !in current.indices)
+            return reject(current, "路點順序無效")
+        return Addition(RoutePointDraft.moveTo(current, from, to), true,
+            "路點順序已更新，請重新預覽道路")
+    }
+
+    fun replace(current: List<Coordinate>, index: Int, point: Coordinate, origin: Coordinate?): Addition {
+        val result = RoutePointDraft.select(current, origin, point, index)
+        return if (result.outcome == RoutePointDraft.Outcome.REPLACED)
+            Addition(result.stops, true, "已重選路點，請重新預覽道路")
+        else reject(current, "路點無效、重複或太接近起點")
     }
 
     fun remove(current: List<Coordinate>, index: Int): Addition {
