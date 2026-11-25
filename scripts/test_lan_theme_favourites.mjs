@@ -105,7 +105,23 @@ try{
   assert.equal(dark.bg,"rgb(28, 43, 52)");assert.equal(dark.fg,"rgb(234, 242, 242)");
   assert.equal(light.bg,"rgb(255, 255, 255)");assert.equal(light.fg,"rgb(32, 49, 58)");
   for(const p of [dark,light]){assert.ok(p.tip.includes(p.bg));assert.equal(p.close,p.fg);assert.equal(p.closeHeight,30);}
-  await evaluate("document.querySelector('.maplibregl-popup-close-button').click();document.querySelector('#show-saved').click();true");
+  await evaluate("document.querySelector('.maplibregl-popup-close-button').click();true");
+  // Settings is a small Web-only panel: no dead phone-only categories.
+  const mapBounds=()=>evaluate("(()=>{const r=document.querySelector('#map').getBoundingClientRect();return [r.x,r.y,r.width,r.height]})()");
+  const mapBeforeSettings=await mapBounds();
+  await evaluate("document.querySelector('#mode-settings').click();true");
+  await until(()=>evaluate("document.body.dataset.mode==='settings' && !document.querySelector('#web-settings').classList.contains('hidden')"),"compact settings open");
+  assert.equal(await evaluate("document.querySelectorAll('#web-settings [data-web-theme-option]').length"),3);
+  assert.equal(await evaluate("document.querySelectorAll('#web-settings .settings-group').length"),0);
+  await evaluate("document.querySelector('[data-web-theme-option=dark]').click();true");
+  assert.ok(await evaluate("document.documentElement.dataset.webTheme==='dark' && document.querySelector('[data-web-theme-option=dark]').getAttribute('aria-pressed')==='true' && localStorage.getItem('pikminbee-web-theme')==='dark'"));
+  await evaluate("document.querySelector('[data-web-theme-option=light]').click();true");
+  assert.deepEqual(await mapBounds(),mapBeforeSettings);
+  await evaluate("document.querySelector('#web-settings-close').click();true");
+  await until(()=>evaluate("document.body.dataset.mode==='route' && document.querySelector('#web-settings').classList.contains('hidden')"),"return to original route mode");
+  assert.deepEqual(await mapBounds(),mapBeforeSettings);
+  console.log("Compact Web settings: three theme actions, persistence and unchanged map canvas verified.");
+  await evaluate("document.querySelector('#show-saved').click();true");
   await until(()=>evaluate("document.querySelectorAll('.saved-country-flag').length===2 && [...document.querySelectorAll('.saved-country-flag')].every(i=>i.complete&&i.naturalWidth>0)"),"two decoded local flags");
   const saved=await evaluate("({flags:[...document.querySelectorAll('.saved-country-flag')].map(i=>[new URL(i.src).pathname,i.naturalWidth]),clocks:[...document.querySelectorAll('.saved-clock')].map(i=>i.textContent)})");
   assert.deepEqual(saved.flags.map(a=>a[0]).sort(),["/flags/jp.png","/flags/tw.png"]);

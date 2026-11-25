@@ -27,6 +27,7 @@ import com.naos.pikminbee.data.VerifiedRealTimeZone
 import com.naos.pikminbee.data.WalkSpeedState
 import com.naos.pikminbee.domain.WalkSpeedPreset
 import com.naos.pikminbee.domain.WalkSpeedProfile
+import com.naos.pikminbee.domain.WalkSpeedMode
 import com.naos.pikminbee.domain.Coordinate
 import com.naos.pikminbee.domain.WalkMode
 import com.naos.pikminbee.location.LocationStatus
@@ -430,11 +431,10 @@ class LanController(private val context: Context) {
             }
             "/api/speed/default" -> {
                 val json = parse(req.body) ?: return error(400, "JSON 無效")
-                val preset = WalkSpeedPreset.entries.firstOrNull {
-                    it.name == json.optString("speedPreset")
-                } ?: return error(400, "不支援的預設速度")
-                prefs.setDefaultWalkSpeedPreset(preset)
-                accepted("下次開啟 App 的預設速度已設為：${preset.display}")
+                val profile = speedProfile(json)?.takeUnless { it.mode == WalkSpeedMode.RANGE }
+                    ?: return error(400, "不支援的預設速度")
+                prefs.setDefaultWalkSpeedProfile(profile)
+                accepted("下次開啟 App 的預設速度已設為：${profile.display}")
             }
             "/api/location/real" -> requestRealLocation(req.token)
             "/api/origin" -> {
@@ -930,6 +930,9 @@ class LanController(private val context: Context) {
             .put("speedMaxKmh", WalkSpeedState.profile.value.maxKmh)
             .put("speedAppliedKmh", LocationStatus.appliedSpeedKmh.value)
             .put("defaultSpeedPreset", WalkSpeedState.preferred.value.name)
+            .put("defaultSpeedMode", WalkSpeedState.preferredProfile.value.mode.name)
+            .put("defaultSpeedKmh", WalkSpeedState.preferredProfile.value.fixedKmh)
+            .put("defaultSpeedDisplay", WalkSpeedState.preferredProfile.value.display)
             .put("routeStops", coordinates(prefs.routeDraft()))
             .put("geometry", coordinates(path))
             .toString()
