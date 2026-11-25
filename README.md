@@ -14,7 +14,7 @@ PikminBee is a free, ad-free Android location and route testing app built with K
 
 ## Development tracking
 
-Use [GitHub Issues](https://github.com/Naos2w/PikminBee/issues) as the only active task ledger. Review screen and function proposals in [V4 Epic #140](https://github.com/Naos2w/PikminBee/issues/140) and its linked issues. GitHub Projects is the planned board (authorization/configuration pending); see [task navigation and migration history](docs/TODO.md). Do not equate source merge or signed APK packaging with device acceptance.
+Use [GitHub Issues](https://github.com/Naos2w/PikminBee/issues) as the only active task ledger. Review screen and function proposals in [V4 Epic #140](https://github.com/Naos2w/PikminBee/issues/140) and its linked issues. [PikminBee Development (Project #1)](https://github.com/users/Naos2w/projects/1) is the verified planning board, with separate design review and UAT views; see [task navigation and migration history](docs/TODO.md). Do not equate source merge or signed APK packaging with device acceptance.
 
 ## Setup
 
