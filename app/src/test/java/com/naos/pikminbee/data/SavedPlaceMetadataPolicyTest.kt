@@ -45,6 +45,18 @@ class SavedPlaceMetadataPolicyTest {
                 PlaceSuggestion("其他地名", "JP", "日本", "東京", "Asia/Tokyo")).name)
     }
 
+    @Test fun invalidLegacyTimezoneCanBeRepairedWithoutOverwritingOtherFields() {
+        val stored = SavedPlace(7, "自訂名稱", coordinate, "JP", "日本", "東京",
+            "Mars/Ocean", 1222L)
+        assertTrue(SavedPlaceMetadataPolicy.incomplete(stored))
+        val updated = SavedPlaceMetadataPolicy.enriched(stored,
+            PlaceSuggestion("其他名稱", "JP", "日本", "東京", "Asia/Tokyo"))
+        assertEquals(stored.copy(timeZoneId = "Asia/Tokyo"), updated)
+        assertFalse(SavedPlaceMetadataPolicy.incomplete(updated))
+        assertEquals(stored, SavedPlaceMetadataPolicy.enriched(stored,
+            PlaceSuggestion("其他名稱", "JP", "日本", "東京", null)))
+    }
+
     @Test fun invalidTimezoneAndCountryStayUnresolved() {
         val stored = SavedPlace(1, "自訂", coordinate)
         val new = SavedPlaceMetadataPolicy.enriched(stored,

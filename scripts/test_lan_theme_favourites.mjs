@@ -109,9 +109,41 @@ try{
   await until(()=>evaluate("document.querySelectorAll('.saved-country-flag').length===2 && [...document.querySelectorAll('.saved-country-flag')].every(i=>i.complete&&i.naturalWidth>0)"),"two decoded local flags");
   const saved=await evaluate("({flags:[...document.querySelectorAll('.saved-country-flag')].map(i=>[new URL(i.src).pathname,i.naturalWidth]),clocks:[...document.querySelectorAll('.saved-clock')].map(i=>i.textContent)})");
   assert.deepEqual(saved.flags.map(a=>a[0]).sort(),["/flags/jp.png","/flags/tw.png"]);
-  assert.equal(saved.clocks.filter(c=>/^當地時間 \d{2}:\d{2}$/.test(c)).length,2);
-  assert.ok(saved.clocks.some(c=>c.includes("當地時間待確認")));
+  assert.equal(saved.clocks.filter(c=>/^(?:\d{4}\/)?\d{2}\/\d{2} \d{2}:\d{2}$/.test(c)).length,2);
+  assert.ok(saved.clocks.includes("—/— —:—"));
   assert.ok(saved.clocks.every(c=>!c.includes("時差")));
+  const cardLayout=()=>evaluate("(()=>{const list=document.querySelector('#saved-list');return {width:list.clientWidth,scrollWidth:list.scrollWidth,cards:[...list.querySelectorAll('.saved-place-card')].map(c=>{const top=c.querySelector('.saved-place-top').getBoundingClientRect(),clock=c.querySelector('.saved-clock-row').getBoundingClientRect(),coord=c.querySelector('.saved-place-coordinate').getBoundingClientRect(),more=c.querySelector('.saved-place-more').getBoundingClientRect();return {text:c.querySelector('.saved-place-select').innerText,clockInside:clock.right<=top.right+1,coordinateBelow:coord.top>=top.bottom-1,menuSize:more.height,hidden:c.querySelector('.saved-place-actions').classList.contains('hidden')}})}})()");
+  const desktopCards=await cardLayout();
+  assert.equal(desktopCards.cards.length,3);
+  assert.ok(desktopCards.cards.every(c=>c.clockInside&&c.coordinateBelow&&c.hidden&&c.menuSize>=40&&!c.text.includes("收藏於")));
+  await call("Emulation.setDeviceMetricsOverride",{width:320,height:720,deviceScaleFactor:1,mobile:true});
+  await delay(300);
+  const mobileCards=await cardLayout();
+  assert.equal(mobileCards.cards.length,3);
+  assert.ok(mobileCards.scrollWidth<=mobileCards.width+1,"saved list does not overflow at 320px");
+  assert.ok(mobileCards.cards.every(c=>c.clockInside&&c.coordinateBelow&&c.hidden));
+  await evaluate("document.querySelector('.saved-place-more').click();true");
+  assert.ok(await evaluate("document.querySelector('#saved-dialog').open && !document.querySelector('.saved-place-actions').classList.contains('hidden') && document.querySelector('.saved-place-actions').innerText.includes('複製座標')"));
+  // Exercise menu actions against synthetic records only. Clipboard and dialogs
+  // are stubbed inside this temporary test browser, not on the user's desktop.
+  await evaluate("Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async value=>{window.__copied=value}}});[...document.querySelectorAll('.saved-place-actions:not(.hidden) button')].find(b=>b.textContent==='複製座標').click();true");
+  await until(()=>evaluate("window.__copied==='35.681236, 139.767125'"),"copy synthetic coordinate");
+  await evaluate("window.prompt=()=> '重新命名的合成收藏';[...document.querySelectorAll('.saved-place-actions:not(.hidden) button')].find(b=>b.textContent==='改名').click();true");
+  await until(()=>evaluate("[...document.querySelectorAll('.saved-place-name')].some(n=>n.textContent==='重新命名的合成收藏')"),"rename synthetic record");
+  await evaluate("window.prompt=()=> '東京車站（合成資料）';[...document.querySelectorAll('.saved-place-actions:not(.hidden) button')].find(b=>b.textContent==='改名').click();true");
+  await until(()=>evaluate("[...document.querySelectorAll('.saved-place-name')].some(n=>n.textContent.includes('東京車站'))"),"restore synthetic name");
+  await evaluate("window.confirm=()=>true;[...document.querySelectorAll('.saved-place-card')].find(c=>c.innerText.includes('舊收藏（合成資料）')).querySelector('.saved-place-more').click();[...document.querySelectorAll('.saved-place-actions:not(.hidden) button')].find(b=>b.textContent==='刪除').click();true");
+  await until(()=>evaluate("document.querySelectorAll('.saved-place-card').length===2"),"delete synthetic record");
+  await evaluate("document.querySelector('#saved-tab-routes').click();true");
+  assert.ok(await evaluate("document.querySelector('#saved-tab-routes').getAttribute('aria-pressed')==='true' && document.querySelectorAll('.saved-place-card').length===0"));
+  await evaluate("document.querySelector('#saved-tab-places').click();document.querySelector('#saved-search').value='台灣';document.querySelector('#saved-search').dispatchEvent(new Event('input'));true");
+  assert.equal(await evaluate("document.querySelectorAll('.saved-place-card').length"),1);
+  await evaluate("document.querySelector('#saved-search').value='';document.querySelector('#saved-search').dispatchEvent(new Event('input'));true");
+  await evaluate("[...document.querySelectorAll('.saved-place-select')].find(b=>b.textContent.includes('東京車站')).click();true");
+  await until(()=>evaluate("!document.querySelector('#saved-dialog').open && document.querySelector('#coordinate').value==='35.681236, 139.767125' && document.querySelector('#message').textContent.includes('沒有自動瞬移')"),"favourite selection without teleport");
+  await call("Emulation.clearDeviceMetricsOverride");
+  await evaluate("document.querySelector('#mode-route').click();true");
+  console.log(JSON.stringify({desktopCards,mobileCards,cardInteractions:"menu, tabs, metadata search, explicit map selection"},null,2));
   // Inspect the actual GeoJSON source data rendered by packaged MapLibre.
   const origin=[121.5654,25.033], a=[121.5654,25.043], b=[121.5754,25.033];
   const coords=async()=>evaluate("(async()=>{const m=window.__qaRouteMap;if(!m)return null;const road=m.getSource('bee-walk'),draft=m.getSource('bee-draft');if(!road||!draft)return null;const points=async s=>(await s.getData()).features[0]?.geometry.coordinates||[];return {road:await points(road),draft:await points(draft)}})()");

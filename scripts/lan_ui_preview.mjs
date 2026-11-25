@@ -55,7 +55,7 @@ let previewPlaces=[{
 },{
   id:2,name:"台北（合成資料）",position:{lat:25.033,lon:121.5654},
   countryCode:"TW",countryName:"台灣",city:"台北",
-  timeZoneId:"Asia/Taipei",createdAtMillis:1795180000000
+  timeZoneId:null,createdAtMillis:1795180000000
 },{
   id:3,name:"舊收藏（合成資料）",position:{lat:40.7,lon:-74.0},
   timeZoneId:null,createdAtMillis:1795180000000

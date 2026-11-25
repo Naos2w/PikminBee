@@ -1,9 +1,14 @@
 package com.naos.pikminbee.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.graphics.BitmapFactory
+import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -14,6 +19,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -27,10 +36,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.naos.pikminbee.data.SavedPlace
@@ -38,56 +51,75 @@ import com.naos.pikminbee.data.SavedPlaceTimePolicy
 import com.naos.pikminbee.data.SavedPlaceMetadataPolicy
 import kotlinx.coroutines.delay
 
-/**
- * Independent scrollable favourite sheet content, shared data with Android's
- * previous Saved tab. Selecting only previews a coordinate, never starts mock GPS.
- */
+/** Compact two-line place cards; selection never starts mock GPS. */
 @Composable
 fun FavouritesPanel(
     places: List<SavedPlace>,
+    routeCount: Int,
     foreground: Color,
     muted: Color,
     onSelectPlace: (SavedPlace) -> Unit,
     onRenamePlace: (SavedPlace, String) -> Unit,
     onDeletePlace: (SavedPlace) -> Unit,
+    canAddPlace: Boolean,
+    savingPlace: Boolean,
+    onAddPlace: () -> Unit,
     backfillBusy: Boolean,
     backfillMessage: String,
     onBackfill: () -> Unit,
     routeContent: @Composable (String) -> Unit,
 ) {
+    val context = LocalContext.current
     var search by remember { mutableStateOf("") }
+    var showingRoutes by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<SavedPlace?>(null) }
     var renaming by remember { mutableStateOf<SavedPlace?>(null) }
     var newName by remember { mutableStateOf("") }
-    var detailId by remember { mutableStateOf<Long?>(null) }
+    var menuId by remember { mutableStateOf<Long?>(null) }
+    var helpOpen by remember { mutableStateOf(false) }
+    var headerMenuOpen by remember { mutableStateOf(false) }
     var nowMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
         while (true) {
-            delay(60_000L)
+            // Align updates to the actual minute boundary rather than opening time.
+            delay(60_000L - System.currentTimeMillis() % 60_000L)
             nowMillis = System.currentTimeMillis()
         }
     }
     val display = remember(places, search) {
         places.asSequence().filter { item ->
-            search.isBlank() || listOfNotNull(item.name, item.city, item.countryName)
+            search.isBlank() || listOfNotNull(item.name, item.city, item.countryName, item.countryCode)
                 .any { it.contains(search.trim(), ignoreCase = true) }
         }.sortedByDescending { it.createdAtMillis }.toList()
     }
+    val hasIncomplete = places.any(SavedPlaceMetadataPolicy::incomplete)
     Column(Modifier.fillMaxWidth().padding(horizontal = 17.dp, vertical = 5.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("收藏地點與路線", color = foreground, fontWeight = FontWeight.SemiBold,
-            fontSize = 18.sp)
-        if (places.any(SavedPlaceMetadataPolicy::incomplete)) {
-            OutlinedButton(
-                enabled = !backfillBusy,
-                onClick = onBackfill,
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text(if (backfillBusy) "正在補齊收藏資訊…" else "補齊舊收藏地名／國旗／時區（每次最多 5 筆）") }
-            Text("僅點擊後查詢 Photon／TimeAPI；不改動你的收藏名稱、座標或 GPS。",
-                color = muted, fontSize = 11.sp)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("收藏地點與路線", color = foreground, fontWeight = FontWeight.SemiBold,
+                fontSize = 18.sp, modifier = Modifier.weight(1f))
+            IconButton(onClick = onAddPlace, enabled = canAddPlace && !savingPlace,
+                modifier = Modifier.semantics { contentDescription = "收藏目前選取的位置" }) {
+                Text(if (savingPlace) "…" else "+", fontSize = 25.sp, color = foreground)
+            }
+            Box {
+                IconButton(onClick = { headerMenuOpen = true },
+                    modifier = Modifier.semantics { contentDescription = "收藏說明與更多操作" }) {
+                    Text("?", fontSize = 21.sp, color = foreground)
+                }
+                DropdownMenu(expanded = headerMenuOpen, onDismissRequest = { headerMenuOpen = false }) {
+                    DropdownMenuItem(text = { Text("收藏操作說明") }, onClick = {
+                        headerMenuOpen = false; helpOpen = true
+                    })
+                    if (hasIncomplete) DropdownMenuItem(
+                        text = { Text("補齊舊收藏資料") }, enabled = !backfillBusy, onClick = {
+                            headerMenuOpen = false; onBackfill()
+                        })
+                }
+            }
         }
-        if (backfillMessage.isNotBlank()) {
-            Text(backfillMessage, color = muted, fontSize = 12.sp)
+        if (backfillBusy || backfillMessage.isNotBlank()) {
+            Text(if (backfillBusy) "正在補齊收藏資料…" else backfillMessage, color = muted, fontSize = 12.sp)
         }
         OutlinedTextField(
             value = search, onValueChange = { search = it.take(80) },
@@ -95,27 +127,33 @@ fun FavouritesPanel(
             label = { Text("搜尋收藏") }, singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (showingRoutes) {
+                OutlinedButton(onClick = { showingRoutes = false }, modifier = Modifier.weight(1f)) {
+                    Text("地點（${display.size}）")
+                }
+                Button(onClick = { showingRoutes = true }, modifier = Modifier.weight(1f)) {
+                    Text("路線（$routeCount）")
+                }
+            } else {
+                Button(onClick = { showingRoutes = false }, modifier = Modifier.weight(1f)) {
+                    Text("地點（${display.size}）")
+                }
+                OutlinedButton(onClick = { showingRoutes = true }, modifier = Modifier.weight(1f)) {
+                    Text("路線（$routeCount）")
+                }
+            }
+        }
         LazyColumn(Modifier.fillMaxWidth().heightIn(max = 520.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            item(key = "places-heading") {
-                Text("收藏地點（${display.size}）", color = foreground,
-                    fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-            }
-            if (display.isEmpty()) item(key = "places-empty") {
-                Text(if (search.isEmpty()) "尚無收藏地點" else "沒有符合搜尋條件的地點",
-                    color = muted, fontSize = 13.sp)
-            }
-            items(display, key = { "place-${it.id}" }) { place ->
-                Column(
-                    Modifier.fillMaxWidth()
-                        .background(LocalNaosVisualState.current.palette.soft,
-                            RoundedCornerShape(14.dp))
-                        .padding(11.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    Text(place.name, color = foreground, fontWeight = FontWeight.SemiBold,
-                        fontSize = 15.sp, maxLines = 1)
-                    val context = LocalContext.current
+            if (showingRoutes) {
+                item(key = "routes") { routeContent(search.trim()) }
+            } else {
+                if (display.isEmpty()) item(key = "places-empty") {
+                    Text(if (search.isEmpty()) "尚無收藏地點" else "沒有符合搜尋條件的地點",
+                        color = muted, fontSize = 13.sp)
+                }
+                items(display, key = { "place-${it.id}" }) { place ->
                     val flag = remember(context, place.countryCode) {
                         SavedPlaceTimePolicy.flagAssetPath(place.countryCode)?.let { path ->
                             runCatching {
@@ -123,54 +161,74 @@ fun FavouritesPanel(
                             }.getOrNull()
                         }
                     }
-                    val countryLine = listOfNotNull(
-                        place.countryName ?: place.countryCode, place.city,
-                    ).joinToString(" · ")
-                    Row(verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                        if (flag != null) Image(
-                            bitmap = flag,
-                            contentDescription = null,
-                            modifier = Modifier.size(width = 28.dp, height = 20.dp),
-                        )
-                        Text(countryLine.ifBlank { "國家／城市待確認，可補齊舊收藏" },
-                            color = muted, fontSize = 12.sp)
-                    }
-                    val local = SavedPlaceTimePolicy.localClock(place.timeZoneId, nowMillis)
-                    Text(if (local == null) "當地時間待確認，可補齊舊收藏"
-                        else "當地時間 $local",
-                        color = foreground, fontSize = 12.sp)
-                    TextButton(onClick = {
-                        detailId = if (detailId == place.id) null else place.id
-                    }) { Text(if (detailId == place.id) "收起詳細資訊" else "詳細資訊", fontSize = 12.sp) }
-                    if (detailId == place.id) {
-                        Text("GPS：${place.coordinate.label()}", color = muted, fontSize = 11.sp)
-                        Text("收藏 ${SavedPlaceTimePolicy.savedDate(place.createdAtMillis)}",
-                            color = muted, fontSize = 11.sp)
-                    }
-                    Row(Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = { onSelectPlace(place) },
-                            modifier = Modifier.weight(1f)) {
-                            NaosActionIcon(NaosActionGlyph.VIRTUAL_GPS, foreground)
-                            Text("地圖選取", fontSize = 12.sp)
+                    val local = SavedPlaceTimePolicy.localClock(place.timeZoneId, nowMillis, place.countryCode)
+                    val dateTime = local ?: "—/— —:—"
+                    Column(
+                        Modifier.fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(LocalNaosVisualState.current.palette.soft)
+                            .clickable { onSelectPlace(place) }
+                            .padding(start = 11.dp, end = 5.dp, top = 10.dp, bottom = 2.dp),
+                    ) {
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            if (flag != null) Image(
+                                bitmap = flag,
+                                contentDescription = place.countryName ?: place.countryCode,
+                                modifier = Modifier.size(width = 28.dp, height = 20.dp),
+                            ) else Text("—", color = muted, fontSize = 12.sp)
+                            Text(place.name, color = foreground, fontWeight = FontWeight.SemiBold,
+                                fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f).semantics { contentDescription = place.name })
+                            Row(verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                                NaosActionIcon(NaosActionGlyph.CLOCK, muted, Modifier.size(14.dp))
+                                Text(dateTime, color = foreground, fontSize = 12.sp,
+                                    modifier = Modifier.semantics { contentDescription =
+                                        if (local == null) "當地日期時間未知" else "當地日期時間 $dateTime" })
+                            }
                         }
-                        TextButton(onClick = { renaming = place; newName = place.name }) {
-                            Text("改名", fontSize = 12.sp)
-                        }
-                        TextButton(onClick = { deleting = place }) {
-                            Text("刪除", fontSize = 12.sp, color = Color(0xFFC45A4A))
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text(place.coordinate.label(), color = muted, fontSize = 12.sp,
+                                modifier = Modifier.weight(1f))
+                            Box {
+                                IconButton(onClick = { menuId = place.id },
+                                    modifier = Modifier.semantics {
+                                        contentDescription = "${place.name} 的更多操作"
+                                    }) {
+                                    NaosActionIcon(NaosActionGlyph.MORE, muted)
+                                }
+                                DropdownMenu(expanded = menuId == place.id, onDismissRequest = { menuId = null }) {
+                                    DropdownMenuItem(text = { Text("改名") }, onClick = {
+                                        menuId = null; renaming = place; newName = place.name
+                                    })
+                                    DropdownMenuItem(text = { Text("複製座標") }, onClick = {
+                                        menuId = null
+                                        val clipboard = context.getSystemService(ClipboardManager::class.java)
+                                        clipboard.setPrimaryClip(ClipData.newPlainText("PikminBee 座標", place.coordinate.label()))
+                                        Toast.makeText(context, "已複製座標", Toast.LENGTH_SHORT).show()
+                                    })
+                                    if (SavedPlaceMetadataPolicy.incomplete(place)) DropdownMenuItem(
+                                        text = { Text("補齊舊收藏資料") }, enabled = !backfillBusy, onClick = {
+                                            menuId = null; onBackfill()
+                                        })
+                                    DropdownMenuItem(text = { Text("刪除", color = Color(0xFFC45A4A)) }, onClick = {
+                                        menuId = null; deleting = place
+                                    })
+                                }
+                            }
                         }
                     }
                 }
             }
-            item(key = "routes") {
-                Text("已收藏路線", color = foreground,
-                    fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-                routeContent(search.trim())
-            }
         }
     }
+    if (helpOpen) AlertDialog(
+        onDismissRequest = { helpOpen = false },
+        title = { Text("收藏操作說明") },
+        text = { Text("點卡片只會選取地圖；⋯ 可改名、複製座標、刪除或補齊資料。當地日期時間依收藏地點時區，每分鐘更新；未知時區顯示 —/— —:—。僅明確收藏或補齊時才查詢地標與時區。") },
+        confirmButton = { TextButton(onClick = { helpOpen = false }) { Text("關閉") } },
+    )
     renaming?.let { place ->
         AlertDialog(
             onDismissRequest = { renaming = null },
