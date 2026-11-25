@@ -75,6 +75,7 @@ try{
   // Actual coordinate input in the packaged UI. Selection is explicit, and no
   // phone or external geocoding endpoint is involved.
   const paste=async text=>{
+    await until(()=>evaluate("!document.querySelector('#set-origin').disabled"),"previous route edit settled");
     await evaluate("(()=>{const field=document.querySelector('#coordinate');field.value="+JSON.stringify(text)+";field.dispatchEvent(new Event('input',{bubbles:true}));return field.value})()");
   };
   const dms="25°01′58.8″N 121°33′55.44″E";
