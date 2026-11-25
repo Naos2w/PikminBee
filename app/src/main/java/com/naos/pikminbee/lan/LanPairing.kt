@@ -11,7 +11,10 @@ class LanPairing(
     private val random: SecureRandom = SecureRandom(),
 ) {
     data class AuthResult(val pendingId: String? = null, val locked: Boolean = false)
-    data class ApprovalStatus(val state: String, val token: String? = null)
+    data class ApprovalStatus(
+        val state: String, val token: String? = null,
+        val sharePhysical: Boolean = false,
+    )
     data class PendingDevice(val address: String, val name: String)
     private data class Attempts(var count: Int = 0, var windowStart: Long = 0L, var blockedUntil: Long = 0L)
     private data class Session(val peer: String, val name: String, val expiresAt: Long, var lastActivityAt: Long? = null)
@@ -19,6 +22,8 @@ class LanPairing(
         val ticket: String, val peer: String, val name: String,
         val token: String, val createdAt: Long, var approved: Boolean = false,
         val renewFromToken: String? = null,
+        val approvalId: String,
+        var sharePhysical: Boolean = false,
     )
 
     private val attempts = ConcurrentHashMap<String, Attempts>()
@@ -71,6 +76,7 @@ class LanPairing(
         pending = Pending(
             ticket = newSecret(18), peer = remoteAddress,
             name = deviceName, token = newSecret(32), createdAt = now,
+            approvalId = newSecret(12),
         )
         return AuthResult(pendingId = pending?.ticket)
     }
@@ -85,13 +91,20 @@ class LanPairing(
             ticket = newSecret(18), peer = remoteAddress,
             name = "續期請求", token = newSecret(32),
             createdAt = clockMillis(), renewFromToken = token,
+            approvalId = newSecret(12),
         )
         return AuthResult(pendingId = pending?.ticket)
     }
 
-    @Synchronized fun approve(): Boolean {
+    @Synchronized fun approve(sharePhysical: Boolean = false, approvalId: String? = null): Boolean {
         clearExpiredPending()
         val current = pending ?: return false
+        // Precise data may be included only in an explicit phone approval
+        // bound to this exact visible pending request. Legacy plain approval
+        // remains control-only. A repeated/stale click cannot add consent.
+        if (current.approved || (approvalId != null && approvalId != current.approvalId) ||
+            (sharePhysical && approvalId != current.approvalId)) return false
+        current.sharePhysical = sharePhysical
         current.approved = true
         return true
     }
@@ -112,7 +125,7 @@ class LanPairing(
         tokens.clear() // Pairing a new browser revokes old access.
         tokens[current.token] = Session(current.peer, current.name, clockMillis() + tokenLifetimeMillis)
         pending = null
-        return ApprovalStatus("approved", current.token)
+        return ApprovalStatus("approved", current.token, current.sharePhysical)
     }
 
     /** Rotate the token only after the SAME authorised browser is approved on-phone. */
@@ -135,7 +148,7 @@ class LanPairing(
         tokens.clear()
         tokens[current.token] = Session(current.peer, device, clockMillis() + tokenLifetimeMillis)
         pending = null
-        return ApprovalStatus("approved", current.token)
+        return ApprovalStatus("approved", current.token, current.sharePhysical)
     }
 
     @Synchronized fun secondsRemaining(token: String?, remoteAddress: String): Int {
@@ -195,6 +208,8 @@ class LanPairing(
                 (if (it.renewFromToken != null) "續期目前裝置" else it.name) + " · " + it.peer
             }.orEmpty(),
             awaitingBrowser = request?.approved == true,
+            approvalId = request?.takeUnless { it.approved }?.approvalId.orEmpty(),
+            renewal = request?.renewFromToken != null,
         )
     }
 

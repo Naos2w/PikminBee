@@ -18,6 +18,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Button
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -133,16 +134,26 @@ fun WifiControlPanel(
                 "模擬 GPS 期間僅顯示歷史快照；分享不會自動啟動定位或行走。",
                 color = muted, fontSize = 11.sp)
         }
-        if (lan.pendingDevice.isNotBlank()) {
+        if (lan.pendingDevice.isNotBlank() && lan.connection.approvalId.isNotBlank()) {
+            val approvalId = lan.connection.approvalId
+            var shareOnApproval by remember(approvalId) {
+                mutableStateOf(!lan.connection.renewal || lan.physicalSharingAllowed)
+            }
             Text("待核准連線／續期：${lan.pendingDevice}",
                 color = foreground, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = shareOnApproval, onCheckedChange = { shareOnApproval = it })
+                Text("分享最近真實位置（可取消）", color = foreground, fontSize = 12.sp)
+            }
+            Text("僅限本次核准的瀏覽器，快照最多 30 分鐘；私人 Wi-Fi 的 HTTP 未加密。",
+                color = muted, fontSize = 11.sp)
             Row(Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = {
-                    context.startService(LanControlService.command(
-                        context, LanControlService.APPROVE))
+                    context.startService(LanControlService.approveCommand(
+                        context, approvalId, shareOnApproval))
                 }, modifier = Modifier.weight(1f)) {
-                    Text(if (lan.pendingDevice.startsWith("續期")) "核准續期" else "核准裝置",
+                    Text(if (shareOnApproval) "核准並分享" else if (lan.connection.renewal) "核准續期" else "核准裝置",
                         fontSize = 12.sp)
                 }
                 OutlinedButton(onClick = {

@@ -164,9 +164,9 @@ class LanController(private val context: Context) {
         refreshConnectionDisplay()
     }
 
-    fun approvePending() {
-        val renewal = LanStatus.display.value.pendingDevice.startsWith("續期")
-        val approved = pairing.approve()
+    fun approvePending(sharePhysical: Boolean = false, approvalId: String? = null) {
+        val renewal = pairing.connection().renewal
+        val approved = pairing.approve(sharePhysical, approvalId)
         LanStatus.display.value = LanStatus.display.value.copy(
             pendingDevice = "",
             note = if (!approved) "沒有待核准的裝置"
@@ -184,12 +184,15 @@ class LanController(private val context: Context) {
         refreshConnectionDisplay()
     }
 
-    /** Called only from the visible Android Settings consent confirmation. */
-    fun approvePhysicalSharing() {
-        val session = pairing.activeSessionToken()
+    /** Called from an explicit on-phone consent, not a browser or listener startup. */
+    @Synchronized fun approvePhysicalSharing() {
+        grantPhysicalSharing(pairing.activeSessionToken())
+    }
+
+    private fun grantPhysicalSharing(session: String?) {
         val fineGranted = ContextCompat.checkSelfPermission(context,
             Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        if (session == null || !fineGranted || server == null) {
+        if (session == null || session != pairing.activeSessionToken() || !fineGranted || server == null) {
             LanStatus.display.value = LanStatus.display.value.copy(
                 physicalSharingAllowed = false,
                 note = if (session == null) "請先完成網頁配對與手機核准，再同意分享真實位置"
@@ -208,8 +211,15 @@ class LanController(private val context: Context) {
             else "已允許分享，但尚無可信真實定位；請先切回真實 GPS 並取得定位")
     }
 
+    /** Apply the explicit choice only to the newly issued token. Never inherit consent. */
+    @Synchronized private fun applyPairingConsent(status: LanPairing.ApprovalStatus) {
+        if (status.token == null || status.token != pairing.activeSessionToken() || server == null) return
+        revokePhysicalSharing("網頁配對已核准；真實位置未分享")
+        if (status.sharePhysical) grantPhysicalSharing(status.token)
+    }
+
     /** Revocation also cancels in-flight GPS requests and removes precise data. */
-    fun revokePhysicalSharing(note: String = "已撤銷真實 GPS 分享") {
+    @Synchronized fun revokePhysicalSharing(note: String = "已撤銷真實 GPS 分享") {
         physicalShareSessionToken = null
         physicalSnapshot = null
         realRequestGeneration.incrementAndGet()
@@ -244,9 +254,11 @@ class LanController(private val context: Context) {
     fun checkNetwork() {
         if (server == null) return
         refreshConnectionDisplay()
-        if (physicalShareSessionToken != null &&
-            physicalShareSessionToken != pairing.activeSessionToken()) {
-            revokePhysicalSharing("配對工作階段已到期；真實 GPS 分享已關閉")
+        synchronized(this) {
+            if (physicalShareSessionToken != null &&
+                physicalShareSessionToken != pairing.activeSessionToken()) {
+                revokePhysicalSharing("配對工作階段已到期；真實 GPS 分享已關閉")
+            }
         }
         val now = android.os.SystemClock.elapsedRealtime()
         if (now - lastNetworkCheck < 10_000L) return
@@ -317,8 +329,8 @@ class LanController(private val context: Context) {
             val status = pairing.poll(req.remoteAddress, req.pendingId)
             return when (status.state) {
                 "approved" -> {
-                    // Approving another browser revokes ALL prior precise-data consent.
-                    revokePhysicalSharing("新的網頁配對已核准；真實位置必須重新授權")
+                    // The new browser gets only the choice explicitly confirmed for its request.
+                    applyPairingConsent(status)
                     refreshConnectionDisplay()
                     ok(JSONObject().put("token", status.token)
                         .put("expiresInSeconds", pairing.sessionDurationSeconds).toString())
@@ -345,8 +357,8 @@ class LanController(private val context: Context) {
             )
             return when (renewal.state) {
                 "approved" -> {
-                    // A rotated session never inherits consent to share precise GPS.
-                    revokePhysicalSharing("網頁已核准續期；真實 GPS 分享需要重新同意")
+                    // Renewed tokens get only the new explicit on-phone choice.
+                    applyPairingConsent(renewal)
                     refreshConnectionDisplay()
                     ok(JSONObject().put("token", renewal.token)
                         .put("expiresInSeconds", pairing.sessionDurationSeconds).toString())
