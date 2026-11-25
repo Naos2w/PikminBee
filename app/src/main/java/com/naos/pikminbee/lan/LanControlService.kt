@@ -36,6 +36,14 @@ class LanControlService : Service() {
         fun command(context: Context, action: String): Intent =
             Intent(context, LanControlService::class.java).setAction(action)
 
+        private const val EXTRA_SHARE_PHYSICAL = "share_physical_on_approval"
+        private const val EXTRA_APPROVAL_ID = "pending_approval_id"
+
+        /** Only the on-phone approval surface calls this; the service is not exported. */
+        fun approveCommand(context: Context, approvalId: String, sharePhysical: Boolean): Intent =
+            command(context, APPROVE).putExtra(EXTRA_APPROVAL_ID, approvalId)
+                .putExtra(EXTRA_SHARE_PHYSICAL, sharePhysical)
+
         /** Call from visible user gesture; starting in the background is prohibited. */
         fun enable(context: Context) =
             ContextCompat.startForegroundService(context, command(context, ENABLE))
@@ -99,7 +107,10 @@ class LanControlService : Service() {
                 START_NOT_STICKY
             }
             APPROVE -> {
-                controller?.approvePending()
+                controller?.approvePending(
+                    intent.getBooleanExtra(EXTRA_SHARE_PHYSICAL, false),
+                    intent.getStringExtra(EXTRA_APPROVAL_ID),
+                )
                 START_NOT_STICKY
             }
             DENY -> {
@@ -134,7 +145,7 @@ class LanControlService : Service() {
     private fun notification(): Notification {
         val open = PendingIntent.getActivity(
             this, 27, Intent(this, MainActivity::class.java)
-                .putExtra(MainActivity.EXTRA_OPEN_SETTINGS, true)
+                .putExtra(MainActivity.EXTRA_OPEN_WIFI_SETTINGS, true)
                 .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )

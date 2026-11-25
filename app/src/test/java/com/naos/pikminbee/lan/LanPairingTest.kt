@@ -25,6 +25,49 @@ class LanPairingTest {
         assertEquals("invalid", pairing.poll(ip, request.pendingId).state)
     }
 
+    @Test fun combinedApprovalGrantsOnlyTheExplicitRequestAndNeverInheritsConsent() {
+        val pair = pairer()
+        val peer = "192.168.1.12"
+        val ticket = pair.pair(peer, pair.currentPin(), "PC").pendingId
+        val id = pair.connection().approvalId
+        assertTrue(id.isNotBlank())
+        assertFalse(pair.poll(peer, ticket).sharePhysical)
+        assertFalse(pair.approve(sharePhysical = true))
+        assertFalse(pair.approve(sharePhysical = true, approvalId = "stale"))
+        assertTrue(pair.approve(sharePhysical = true, approvalId = id))
+        assertFalse(pair.approve(sharePhysical = false, approvalId = id))
+        assertFalse(pair.poll("192.168.1.13", ticket).sharePhysical)
+        val approved = pair.poll(peer, ticket)
+        assertTrue(approved.sharePhysical)
+        assertTrue(pair.authorised(approved.token, peer))
+        assertFalse(pair.poll(peer, ticket).sharePhysical)
+
+        val renewal = pair.requestRenewal(approved.token, peer).pendingId
+        val renewalId = pair.connection().approvalId
+        assertTrue(pair.connection().renewal)
+        assertNotEquals(id, renewalId)
+        assertFalse(pair.approve(sharePhysical = true, approvalId = id))
+        assertTrue(pair.approve(sharePhysical = false, approvalId = renewalId))
+        val renewed = pair.pollRenewal(peer, renewal, approved.token)
+        assertEquals("approved", renewed.state)
+        assertFalse(renewed.sharePhysical)
+        assertFalse(pair.authorised(approved.token, peer))
+    }
+
+    @Test fun expiredOrDeniedRequestCannotTransferItsSharingChoice() {
+        val pair = pairer()
+        val peer = "192.168.1.12"
+        val first = pair.pair(peer, pair.currentPin(), "PC").pendingId
+        val staleId = pair.connection().approvalId
+        assertTrue(pair.approve(sharePhysical = true, approvalId = staleId))
+        time.addAndGet(91_000)
+        assertEquals("invalid", pair.poll(peer, first).state)
+        val next = pair.pair(peer, pair.currentPin(), "PC").pendingId
+        assertFalse(pair.approve(sharePhysical = true, approvalId = staleId))
+        assertTrue(pair.approve())
+        assertFalse(pair.poll(peer, next).sharePhysical)
+    }
+
     @Test fun sharedConnectionStateTracksAuthenticatedPresenceAndRevocation() {
         val pairing = pairer()
         val peer = "192.168.50.15"

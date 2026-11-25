@@ -90,6 +90,12 @@ fun BeeSettingsScreen(
     val muted = palette.muted
     val lan by LanStatus.display.collectAsState()
     var section by rememberSaveable { mutableStateOf<String?>(if (showWifiPanel) "wifi" else null) }
+    LaunchedEffect(showWifiPanel) {
+        if (showWifiPanel) {
+            section = "wifi"
+            onToggleWifi()
+        }
+    }
     var helpOpen by rememberSaveable { mutableStateOf(false) }
     var customOpen by rememberSaveable { mutableStateOf(defaultSpeed.mode == WalkSpeedMode.FIXED) }
     var customValue by rememberSaveable { mutableStateOf(WalkSpeedProfile.number(defaultSpeed.fixedKmh)) }

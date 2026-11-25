@@ -12,7 +12,7 @@ import kotlin.math.sin
 /** Single low-contrast, vector-only icon language for the floating toolbar. */
 internal enum class OverlayGlyph {
     BEE, BEE_PAUSED, PLAY, PAUSE, RESUME, STOP, REAL, VIRTUAL, FLOWER, SPEED, MAP, CLOSE, MORE,
-    TELEPORT, ROUTE, BOOKMARK, WIFI
+    TELEPORT, ROUTE, BOOKMARK, WIFI, COPY, POWER, BACK, HELP
 }
 
 internal class NaosOverlayActionIcon(
@@ -115,6 +115,24 @@ internal class NaosOverlayActionIcon(
                 canvas.drawArc(-1f, 3f, 25f, 29f, 225f, 90f, false, pen)
                 canvas.drawArc(4f, 8f, 20f, 24f, 225f, 90f, false, pen)
                 canvas.drawCircle(12f, 17f, 1.4f, pen)
+            }
+            OverlayGlyph.COPY -> {
+                canvas.drawRoundRect(8f, 3f, 21f, 16f, 2f, 2f, pen)
+                canvas.drawRoundRect(3f, 8f, 16f, 21f, 2f, 2f, pen)
+            }
+            OverlayGlyph.POWER -> {
+                canvas.drawArc(3.5f, 4.5f, 20.5f, 21.5f, -48f, 276f, false, pen)
+                canvas.drawLine(12f, 2f, 12f, 11f, pen)
+            }
+            OverlayGlyph.BACK -> {
+                canvas.drawLine(15f, 5f, 8f, 12f, pen)
+                canvas.drawLine(8f, 12f, 15f, 19f, pen)
+            }
+            OverlayGlyph.HELP -> {
+                canvas.drawCircle(12f, 12f, 9f, pen)
+                canvas.drawArc(9f, 6.5f, 15f, 12.5f, 180f, 220f, false, pen)
+                canvas.drawLine(14f, 11.5f, 12f, 14f, pen)
+                canvas.drawCircle(12f, 17f, .6f, pen)
             }
             OverlayGlyph.CLOSE -> {
                 canvas.drawLine(6f, 6f, 18f, 18f, pen)

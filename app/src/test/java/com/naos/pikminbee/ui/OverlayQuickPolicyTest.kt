@@ -44,6 +44,16 @@ class OverlayQuickPolicyTest {
         }
     }
 
+    @Test fun wifiHighlightIsIndependentFromGpsAndUsesConfirmedListenerState() {
+        val actions = OverlayQuickPolicy.topRow + OverlayQuickPolicy.bottomRow
+        for (mock in listOf(false, true)) {
+            assertEquals(listOf(OverlayQuickPolicy.selectedGps(mock)),
+                actions.filter { OverlayQuickPolicy.isHighlighted(it, mock, false) })
+            assertEquals(listOf(OverlayQuickPolicy.selectedGps(mock), OverlayQuickAction.WIFI),
+                actions.filter { OverlayQuickPolicy.isHighlighted(it, mock, true) })
+        }
+    }
+
     @Test fun gpsButtonsActuallySwitchOnlyWhenOtherModeSelected() {
         assertEquals(OverlayGpsPress.SWITCH_REAL, OverlayQuickPolicy.gpsPress(
             OverlayQuickAction.REAL_GPS, mockActive = true, hasRememberedVirtual = true))

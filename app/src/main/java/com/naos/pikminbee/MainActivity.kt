@@ -146,14 +146,18 @@ private val darkGlass = Color(0xFF1E2B3C).copy(alpha = 0.985f)
 class MainActivity : ComponentActivity() {
     companion object {
         const val EXTRA_OPEN_SETTINGS = "com.naos.pikminbee.OPEN_SETTINGS"
+        const val EXTRA_OPEN_WIFI_SETTINGS = "com.naos.pikminbee.OPEN_WIFI_SETTINGS"
         const val EXTRA_OPEN_MODE = "com.naos.pikminbee.OPEN_MODE"
         val settingsRequests = MutableStateFlow(0L)
+        val wifiSettingsRequests = MutableStateFlow(0L)
         val mapModeRequests = MutableStateFlow(-1)
     }
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        if (intent.getBooleanExtra(EXTRA_OPEN_SETTINGS, false))
+        if (intent.getBooleanExtra(EXTRA_OPEN_WIFI_SETTINGS, false))
+            wifiSettingsRequests.value++
+        else if (intent.getBooleanExtra(EXTRA_OPEN_SETTINGS, false))
             settingsRequests.value++
         val selectedMode = intent.getIntExtra(EXTRA_OPEN_MODE, -1)
         if (selectedMode in 0..3) mapModeRequests.value = selectedMode
@@ -231,7 +235,10 @@ private fun PikminBeeScreen() {
         )
     }
     LaunchedEffect(tab) { controlsScroll.scrollTo(0) }
-    var showWifiPanel by remember { mutableStateOf(false) }
+    var showWifiPanel by remember {
+        mutableStateOf((context as? MainActivity)?.intent
+            ?.getBooleanExtra(MainActivity.EXTRA_OPEN_WIFI_SETTINGS, false) == true)
+    }
     var places by remember { mutableStateOf(prefs.places()) }
     var showFavourites by remember { mutableStateOf(false) }
     var backfillingPlaces by remember { mutableStateOf(false) }
@@ -514,6 +521,7 @@ private fun PikminBeeScreen() {
     var activePage by remember {
         mutableStateOf(if ((context as? MainActivity)?.intent?.let {
                 it.getBooleanExtra(MainActivity.EXTRA_OPEN_SETTINGS, false) ||
+                    it.getBooleanExtra(MainActivity.EXTRA_OPEN_WIFI_SETTINGS, false) ||
                     it.getIntExtra(MainActivity.EXTRA_OPEN_MODE, -1) == 3
             } == true) BeePage.SETTINGS
             else if (prefs.setupCompleted()) BeePage.MAP else BeePage.PERMISSIONS)
@@ -523,6 +531,7 @@ private fun PikminBeeScreen() {
         if (activePage == BeePage.MAP) mapMounted = true
     }
     val settingsRequest by MainActivity.settingsRequests.collectAsState()
+    val wifiSettingsRequest by MainActivity.wifiSettingsRequests.collectAsState()
     val modeRequest by MainActivity.mapModeRequests.collectAsState()
     var showOverlayGuide by remember { mutableStateOf(false) }
     var showOverlayAfterGuide by remember { mutableStateOf(false) }
@@ -657,6 +666,12 @@ private fun PikminBeeScreen() {
 
     LaunchedEffect(settingsRequest) {
         if (settingsRequest > 0L) activePage = BeePage.SETTINGS
+    }
+    LaunchedEffect(wifiSettingsRequest) {
+        if (wifiSettingsRequest > 0L) {
+            showWifiPanel = true
+            activePage = BeePage.SETTINGS
+        }
     }
     LaunchedEffect(modeRequest) {
         if (modeRequest == 3) {
@@ -1274,7 +1289,7 @@ private fun PikminBeeScreen() {
                     showOverlayGuide = true
                 },
                 onOverlay = { toggleOverlayControl() },
-                onToggleWifi = { showWifiPanel = !showWifiPanel },
+                onToggleWifi = { showWifiPanel = false },
                 onAskLocation = {
                     requestLocation.launch(Manifest.permission.ACCESS_FINE_LOCATION)
                 },
