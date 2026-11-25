@@ -12,7 +12,7 @@ import kotlin.math.sin
 /** Single low-contrast, vector-only icon language for the floating toolbar. */
 internal enum class OverlayGlyph {
     BEE, BEE_PAUSED, PLAY, PAUSE, RESUME, STOP, REAL, VIRTUAL, FLOWER, SPEED, MAP, CLOSE, MORE,
-    TELEPORT, ROUTE, BOOKMARK
+    TELEPORT, ROUTE, BOOKMARK, WIFI
 }
 
 internal class NaosOverlayActionIcon(
@@ -110,6 +110,11 @@ internal class NaosOverlayActionIcon(
                 canvas.drawPath(path, pen)
                 canvas.drawLine(9f, 3f, 9f, 19f, pen)
                 canvas.drawLine(15f, 5f, 15f, 21f, pen)
+            }
+            OverlayGlyph.WIFI -> {
+                canvas.drawArc(-1f, 3f, 25f, 29f, 225f, 90f, false, pen)
+                canvas.drawArc(4f, 8f, 20f, 24f, 225f, 90f, false, pen)
+                canvas.drawCircle(12f, 17f, 1.4f, pen)
             }
             OverlayGlyph.CLOSE -> {
                 canvas.drawLine(6f, 6f, 18f, 18f, pen)

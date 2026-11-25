@@ -1,4 +1,5 @@
-import { BRIGHT_STYLE_URL, samePosition, currentPosition, createCameraFocus, visibleMapPadding, countryFlagPath, destinationTime } from "/map-ui-policy.mjs";
+import {parseCoordinate} from "/coordinate-format.mjs";
+import { BRIGHT_STYLE_URL, samePosition, currentPosition, createCameraFocus, visibleMapPadding, countryFlagPath, destinationTime, routePresentation } from "/map-ui-policy.mjs";
 const $ = id => document.getElementById(id);
 let token = null;
 let sessionDeadlineMs = 0;
@@ -14,6 +15,7 @@ let speedEditing = false;
 let connected = false;
 let remoteLinkHealthy = true;
 let refreshing = false;
+let routeMutationPending = false, routeStateVersion = 0;
 let map = null, maplibre = null;
 let mapStyleReady = false, mapWatchdog = null, mapResizeObserver = null;
 let mapLastError = "";
@@ -189,27 +191,16 @@ function showCoordinate(point) {
   updateExternalMapLink(point);
 }
 function updateExternalMapLink(point = chosen || latest?.position || initialCenter) {
-  const lat = Math.max(-85, Math.min(85, Number(point?.lat) || initialCenter.lat));
-  const lon = Math.max(-180, Math.min(180, Number(point?.lon) || initialCenter.lon));
+  const lat = Math.max(-85, Math.min(85, Number.isFinite(point?.lat) ? point.lat : initialCenter.lat));
+  const lon = Math.max(-180, Math.min(180, Number.isFinite(point?.lon) ? point.lon : initialCenter.lon));
   $("external-map").href = "https://www.openstreetmap.org/#map=15/" +
     lat.toFixed(5) + "/" + lon.toFixed(5);
 }
 updateExternalMapLink();
 
 function readCoordinate() {
-  const raw = $("coordinate").value.trim();
-  if (!raw) throw Error("請先點地圖選位置或貼上緯度, 經度");
-  const numbers = raw.split(/[,，\s]+/).filter(Boolean);
-  if (numbers.length !== 2 ||
-      !numbers.every(part => /^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)$/.test(part))) {
-    throw Error("請輸入兩個數值，例如 25.033000, 121.565400");
-  }
-  const lat = Number(numbers[0]), lon = Number(numbers[1]);
-  if (!Number.isFinite(lat) || !Number.isFinite(lon) ||
-      lat < -90 || lat > 90 || lon < -180 || lon > 180) {
-    throw Error("座標超出範圍：緯度 -90～90、經度 -180～180");
-  }
-  const point = {lat,lon};
+  const point = parseCoordinate($("coordinate").value);
+  if (!point) throw Error("經緯度格式或範圍無效（支援 DD、DMS、DDM）");
   showCoordinate(point);
   renderMap();
   return point;
@@ -314,6 +305,13 @@ $("web-settings-close").addEventListener("click", () => {
   updateModeView();
   if (deviceKind() === "mobile") setSheetState("collapsed");
 });
+$("web-settings-route").addEventListener("click",()=>selectMode("ROUTE",true));
+$("mode-help").addEventListener("click",()=>{
+  $("mode-help-heading").textContent=settingsOpen?"設定說明":mode==="ROUTE"?"路徑操作說明":"瞬移操作說明";
+  $("mode-help-body").textContent=settingsOpen?"點分類查看設定；手機專屬權限與懸浮控制由 Android App 管理。Wi-Fi 僅限可信私人網路，HTTP 未加密。":mode==="ROUTE"?"選取起點及路點，按加入、規劃並確認道路，再開始。最多 15 點，循環 14 點；行走中路點唯讀。⋯ 可移動、重選、刪除路點。":"地圖選點或貼上 DD、DMS、DDM 座標。選點只改變選取位置，確認後才瞬移；恢復真實 GPS 會停止模擬。";
+  $("mode-help-dialog").showModal();
+});
+$("close-mode-help").addEventListener("click",()=>$("mode-help-dialog").close());
 $("panel-toggle").addEventListener("click", () => setSidePanel(!sideOpen, true));
 let ignoreNextHandleClick = false, handlePointerY = null;
 $("sheet-handle").addEventListener("pointerdown", event => {
@@ -361,6 +359,7 @@ $("loop").addEventListener("change", () => {
   if (mode === "ROUTE") loops.ROUTE = $("loop").value === "true";
   $("confirm-snap").checked = false;
   updateRouteControls();
+  renderMap();
 });
 $("confirm-snap").addEventListener("change", updateRouteControls);
 
@@ -405,10 +404,22 @@ function reconcileTeleport(state) {
   }
 }
 async function act(path, body, note = "") {
+  const editsRoute = path.startsWith("/api/points/") ||
+    ["/api/origin", "/api/saved/load", "/api/route/preview"].includes(path);
+  if (editsRoute) {
+    if (routeMutationPending) return false;
+    routeMutationPending = true;
+    routeStateVersion++;
+    // Clear the stale preview immediately; do not let a pre-edit poll restore it.
+    if (latest) latest = {...latest, previews:{}, planning:true};
+    $("confirm-snap").checked = false;
+    updateRouteControls();
+    renderMap();
+  }
   try {
     const reply = await call(path, "POST", body);
     setMessage(reply.message || note || "指令已送出");
-    await refresh();
+    if (!editsRoute) await refresh();
     return true;
   } catch (error) {
     if ((error.message || "").includes("無法連接手機")) {
@@ -417,6 +428,11 @@ async function act(path, body, note = "") {
     }
     setMessage(error.message || "手機無法完成操作");
     return false;
+  } finally {
+    if (editsRoute) {
+      routeMutationPending = false;
+      await refresh();
+    }
   }
 }
 $("teleport").addEventListener("click", async () => {
@@ -538,7 +554,7 @@ $("plan").addEventListener("click", async () => {
   } finally { updateRouteControls(); }
 });
 $("start").addEventListener("click", async () => {
-  const prepared = latest?.previews?.[mode];
+  const prepared = routePresentation(latest, mode, $("loop").value === "true").prepared;
   if (!prepared?.id) { setMessage("請先預覽路線，再按開始"); return; }
   if (prepared.loop !== ($("loop").value === "true")) {
     setMessage("循環設定已改變，請重新規劃"); return;
@@ -846,14 +862,9 @@ function renderMap() {
         .addTo(map));
     lastStopsKey = key;
   }
-  const active = latest?.phase === "MOVING" || latest?.phase === "PAUSED" ||
-    (latest?.phase === "PARKED" && latest?.geometry?.length >= 2);
-  const road = active ? (latest?.geometry || []) :
-    (latest?.previews?.[mode]?.geometry || []);
-  // Dashed draft order is only a sequence guide, never a pedestrian-road preview.
-  const previewReady = (latest?.previews?.[mode]?.geometry || []).length >= 2;
-  const draft = !active && !previewReady && origin && stops.length ?
-    [origin, ...stops] : [];
+  // Match Android: only moving/paused geometry is active. A parked road must
+  // never hide the new draft, and the summary uses the same valid preview.
+  const {road, draft} = routePresentation(latest, mode, $("loop").value === "true");
   const draftKey = mode + "|" + JSON.stringify(draft);
   if (mapStyleReady && draftKey !== lastDraftKey) {
     const guide = {type:"FeatureCollection",features:draft.length >= 2 ? [{
@@ -891,77 +902,58 @@ function renderRouteOrder() {
   const stops = mode === "ROUTE" ? (latest?.routeStops || []) : [];
   const origin = latest?.origin;
   const busy = latest?.planning || latest?.phase === "MOVING" || latest?.phase === "PAUSED";
-  const key = mode + "|" + JSON.stringify(stops) + "|" +
-    JSON.stringify(origin) + "|" + busy;
+  const key = mode + "|" + JSON.stringify(stops) + "|" + JSON.stringify(origin) + "|" + busy;
   if (key === lastOrderKey) return;
   lastOrderKey = key;
   const list = $("route-order");
   list.replaceChildren();
   if (mode !== "ROUTE") return;
-  const label = "路點";
-  const coordinates = point => point.lat.toFixed(5) + ", " + point.lon.toFixed(5);
-  function addRow(point, index) {
-    const li = document.createElement("li");
-    li.className = "stop-item";
-    const num = document.createElement("span");
-    num.className = "stop-number" + (index < 0 ? " is-origin" : "");
-    num.textContent = index < 0 ? "起" : String(index + 1);
-    const details = document.createElement("div");
-    details.className = "stop-detail";
-    const strong = document.createElement("strong");
-    strong.textContent = index < 0 ? "路線起點" : label + " " + (index + 1);
-    const small = document.createElement("small");
-    small.textContent = point ? coordinates(point) : "尚未指定起點";
-    details.append(strong, small);
-    li.append(num, details);
+  function iconButton(glyph, label, click) {
+    const button=document.createElement("button");button.type="button";
+    button.className="stop-icon";button.textContent=glyph;button.title=label;
+    button.setAttribute("aria-label",label);button.addEventListener("click",click);return button;
+  }
+  function addRow(point,index) {
+    const li=document.createElement("li");li.className="stop-item";
+    const label=index<0?"路線起點":"第 "+(index+1)+" 點";
+    const num=document.createElement("span");num.className="stop-number"+(index<0?" is-origin":index===0?" first":index===stops.length-1?" last":" via");
+    num.textContent=index<0?"起":String(index+1);num.setAttribute("aria-label",label);
+    const detail=document.createElement("span");detail.className="stop-detail";
+    detail.textContent=point?point.lat.toFixed(6)+", "+point.lon.toFixed(6):"尚未指定起點";
+    li.append(num,detail);
+    if(point) li.append(iconButton("◎","在地圖查看"+label,()=>focusMapPosition(point,16)));
     if (index >= 0 && !busy) {
-      const actions = document.createElement("div");
-      actions.className = "stop-actions";
-      for (const [caption,offset] of [["上移",-1],["下移",1]]) {
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.textContent = caption;
-        btn.setAttribute("aria-label", label + " " + (index + 1) + caption);
-        btn.disabled = index + offset < 0 || index + offset >= stops.length;
-        btn.addEventListener("click", () =>
-          act("/api/points/reorder",{mode,index,offset}));
-        actions.appendChild(btn);
-      }
-      const remove = document.createElement("button");
-      remove.type = "button";
-      remove.textContent = "刪除";
-      remove.setAttribute("aria-label", "刪除" + label + " " + (index + 1));
-      remove.addEventListener("click", () =>
-        act("/api/points/remove",{mode,index}));
-      actions.appendChild(remove);
-      li.append(actions);
-    }
-    if (point) {
-      const view = document.createElement("button");
-      view.type = "button";
-      view.textContent = "查看";
-      view.setAttribute("aria-label", "在地圖查看" + (index < 0 ? "路線起點" : label + " " + (index + 1)));
-      view.addEventListener("click", () => {
-        focusMapPosition(point,16);
+      const menu=document.createElement("div");menu.className="stop-menu hidden";
+      const more=iconButton("⋯",label+"更多操作",()=>{
+        const open=menu.classList.contains("hidden");
+        list.querySelectorAll(".stop-menu").forEach(el=>el.classList.add("hidden"));
+        list.querySelectorAll(".stop-more").forEach(el=>el.setAttribute("aria-expanded","false"));
+        menu.classList.toggle("hidden",!open);more.setAttribute("aria-expanded",String(open));
       });
-      li.append(view);
+      more.classList.add("stop-more");more.setAttribute("aria-expanded","false");
+      for(const [glyph,caption,offset] of [["↑","上移",-1],["↓","下移",1]]) {
+        const btn=iconButton(glyph,caption+label,()=>act("/api/points/reorder",{mode,index,offset}));
+        btn.disabled=index+offset<0||index+offset>=stops.length;menu.append(btn);
+      }
+      menu.append(iconButton("✎","以目前選取位置重選"+label,async()=>{
+        try {
+          const target=readCoordinate();
+          if(confirm("以目前選取的座標重選"+label+"？"))
+            await act("/api/points/replace",{mode,index,...target});
+        }catch(error){setMessage(error.message);}
+      }),iconButton("−","刪除"+label,()=>act("/api/points/remove",{mode,index})));
+      li.append(more,menu);
     }
-    list.appendChild(li);
+    list.append(li);
   }
-  addRow(origin, -1);
-  stops.forEach((point,index) => addRow(point,index));
-  if (!stops.length) {
-    const empty = document.createElement("li");
-    empty.className = "muted";
-    empty.textContent = "尚未加入路點。先點地圖選位置，再按「加入路點」。";
-    list.appendChild(empty);
-  }
+  addRow(origin,-1);stops.forEach((point,index)=>addRow(point,index));
+  if(!stops.length){const empty=document.createElement("li");empty.className="muted";empty.textContent="選取位置後加入路點";list.append(empty);}
 }
 
 function updateRouteControls() {
   const navigating = mode === "ROUTE";
   const stops = latest?.routeStops || [];
-  const prepared = latest?.previews?.[mode];
+  const prepared = routePresentation(latest, mode, $("loop").value === "true").prepared;
   const hasOrigin = !!latest?.origin;
   const moving = latest?.phase === "MOVING";
   const paused = latest?.phase === "PAUSED";
@@ -969,8 +961,8 @@ function updateRouteControls() {
   const loop = $("loop").value === "true";
   const ready = !!prepared?.id && prepared.loop === loop;
   const needSnap = ready && prepared.maxSnapMetres > 40;
-  const max = 15;
-  $("pointcount").textContent = stops.length + " / " + max + " 個路點 · 按清單順序行走";
+  const max = loop ? 14 : 15;
+  $("pointcount").textContent = stops.length + " / " + max + " 個路點";
   renderRouteOrder();
   $("originlabel").textContent = hasOrigin ? "目前起點：" +
     latest.origin.lat.toFixed(6) + ", " + latest.origin.lon.toFixed(6) :
@@ -979,7 +971,9 @@ function updateRouteControls() {
   $("set-origin").disabled = !navigating || busy;
   $("undo").disabled = !navigating || busy || stops.length === 0;
   $("clear").disabled = !navigating || busy || stops.length === 0;
-  $("plan").disabled = !navigating || busy || !hasOrigin || stops.length === 0;
+  $("plan").disabled = !navigating || busy || !hasOrigin || stops.length === 0 || stops.length > max;
+  $("plan").textContent = ready ? "重新規劃" : "規劃路徑";
+  $("start").closest(".row").classList.toggle("hidden",!ready);
   $("start").disabled = !navigating || busy || !ready ||
     (needSnap && !$("confirm-snap").checked) ||
     !latest?.mockPermissionReady;
@@ -1102,18 +1096,22 @@ function updateStatus() {
   if (latest?.note && /失敗|無法/.test(latest.note)) setMessage(latest.note);
 }
 async function refresh() {
-  if (!token || refreshing) return;
+  if (!token || refreshing || routeMutationPending) return;
   refreshing = true;
+  const requestedRouteVersion = routeStateVersion;
   try {
     const activeToken = token;
     const nextState = await call("/api/state");
-    if (token !== activeToken) return; // stale response after token rotation
+    if (token !== activeToken || requestedRouteVersion !== routeStateVersion) return;
     latest = nextState;
     remoteLinkHealthy = true;
     sessionDeadlineMs = Date.now() +
       Math.max(0, Number(latest.sessionExpiresInSeconds) || 0) * 1000;
     updateSessionExpiry();
-    $("connection").textContent = "已連結手機";
+    const connectionLabels={CONNECTED:"已連線",OFFLINE:"暫時離線",PENDING_APPROVAL:"待核准",WAITING_PAIR:"等待配對",EXPIRED:"已到期",REVOKED:"已撤銷",ERROR:"Wi-Fi 錯誤"};
+    $("connection").textContent=connectionLabels[latest.connectionPhase]||"已連線";
+    $("settings-lan-status").textContent=$("connection").textContent;
+    $("settings-app-version").textContent=latest.appVersionDisplay||"版本待確認";
     current = latest.mockActive ? latest.position : null;
     $("app-version").textContent = typeof latest.appVersionDisplay === "string" ?
       latest.appVersionDisplay : "版本待確認";
@@ -1157,7 +1155,8 @@ async function refresh() {
       remoteLinkHealthy = false;
       cameraFocus.clear();
       focusRealWhenReady = false;
-      $("connection").textContent = "手機連線中斷";
+      $("connection").textContent = "暫時離線";
+      $("settings-lan-status").textContent = "暫時離線";
       // Never continue to show previously received precise physical coordinates
       // after the authorised session or network connection is lost.
       if (latest) {
@@ -1169,7 +1168,11 @@ async function refresh() {
       renderMap();
       setMessage(error.message || "無法更新手機狀態");
     }
-  } finally { refreshing = false; }
+  } finally {
+    refreshing = false;
+    if (requestedRouteVersion !== routeStateVersion && !routeMutationPending && token)
+      void refresh();
+  }
 }
 async function focusTrustedReal() {
   if (!connected || !remoteLinkHealthy || !token) {
@@ -1212,109 +1215,141 @@ function labelledText(textValue, tag = "small") {
 }
 function countryFlag(countryCode) {
   const path = countryFlagPath(countryCode);
-  if (!path) return null;
+  const placeholder = () => {
+    const missing=labelledText("—","span"); missing.className="saved-flag-missing";
+    missing.setAttribute("aria-label","國旗未知");return missing;
+  };
+  if (!path) return placeholder();
   const image = document.createElement("img");
   image.className = "saved-country-flag";
-  image.alt = ""; // The adjacent country name/code is the accessible label.
-  image.addEventListener("error",()=>image.remove(),{once:true});
+  image.alt = String(countryCode).toUpperCase();
+  image.addEventListener("error",()=>image.replaceWith(placeholder()),{once:true});
   image.src = path;
   return image;
 }
 function refreshSavedClocks() {
   if (!$("saved-dialog").open) return;
+  const now=new Date();
   document.querySelectorAll(".saved-clock").forEach(clock => {
-    clock.textContent=destinationTime(clock.dataset.timeZone||"");
+    clock.textContent=destinationTime(clock.dataset.timeZone||"",now,clock.dataset.countryCode||"");
   });
+}
+let savedTab="places";
+function selectSavedTab(tab) {
+  savedTab=tab==="routes"?"routes":"places";
+  $("saved-list").scrollTop=0;
+  renderSaved();
+}
+function savedAction(text,handler) {
+  const button=document.createElement("button");button.type="button";
+  button.textContent=text;button.addEventListener("click",handler);return button;
+}
+async function copySavedCoordinate(value) {
+  try {
+    if (!navigator.clipboard?.writeText) throw Error("Clipboard unavailable on LAN");
+    await navigator.clipboard.writeText(value);
+  } catch (_) {
+    // Plain local HTTP cannot always use the async Clipboard API.
+    const field=document.createElement("textarea");field.value=value;
+    field.style.position="fixed";field.style.opacity="0";
+    $("saved-dialog").append(field);field.select();
+    let copied=false;try{copied=document.execCommand("copy");}catch(_){}
+    field.remove();
+    if(!copied){prompt("請複製座標",value);return;}
+  }
+  $("saved-enrich-status").textContent="已複製座標";
 }
 function renderSaved() {
   const list = $("saved-list");
   const previousScroll=list.scrollTop;
-  const openDetails=new Set([...list.querySelectorAll("details[data-place-id][open]")]
-    .map(item=>item.dataset.placeId));
+  const openMenus=new Set([...list.querySelectorAll(".saved-place-actions:not(.hidden)")].map(el=>el.dataset.placeId));
   list.replaceChildren();
-  if (!savedRecords) return;
   const query = $("saved-search").value.trim().toLocaleLowerCase();
-  const places = (savedRecords.places || []).filter(item =>
+  const places = (savedRecords?.places || []).filter(item =>
     [item.name,item.countryName,item.city,item.countryCode]
-      .some(value=>String(value||"").toLocaleLowerCase().includes(query)));
-  const routes = (savedRecords.routes||[]).filter(item=>
+      .some(value=>String(value||"").toLocaleLowerCase().includes(query)))
+      .sort((a,b)=>(b.createdAtMillis||0)-(a.createdAtMillis||0));
+  const routes = (savedRecords?.routes||[]).filter(item=>
     String(item.name||"").toLocaleLowerCase().includes(query));
-  list.append(labelledText("收藏地點（"+places.length+"）","strong"));
-  for (const place of places) {
-    if (!Number.isFinite(place?.position?.lat) ||
-        !Number.isFinite(place?.position?.lon)) continue;
-    const card=document.createElement("article"); card.className="saved-card";
-    card.append(labelledText(place.name||"未命名位置","strong"));
-    const flag = countryFlag(place.countryCode);
-    const countryRow = document.createElement("div");
-    countryRow.className = "saved-country-row";
-    if (flag) countryRow.append(flag);
-    countryRow.append(labelledText([place.countryName||place.countryCode,place.city]
-      .filter(Boolean).join(" · ") || "國家／城市待確認，可補齊舊收藏"));
-    card.append(countryRow);
-    const clock=labelledText(destinationTime(place.timeZoneId));
-    clock.className="saved-clock";
-    clock.dataset.timeZone=place.timeZoneId||"";
-    card.append(clock);
-    const details=document.createElement("details");details.className="saved-details";
-    details.dataset.placeId=String(place.id);
-    details.open=openDetails.has(String(place.id));
-    details.append(labelledText("座標及收藏日期","summary"));
-    details.append(labelledText("GPS: "+place.position.lat.toFixed(6)+", "+
-      place.position.lon.toFixed(6)));
-    if(Number.isFinite(place.createdAtMillis)&&place.createdAtMillis>0)
-      details.append(labelledText("收藏於 "+
-        new Date(place.createdAtMillis).toLocaleDateString("zh-TW")));
-    card.append(details);
-    const buttons=document.createElement("div");buttons.className="row";
-    const view=document.createElement("button");
-    view.textContent="選取";
-    view.setAttribute("aria-label","在地圖選取「"+place.name+"」位置，不會移動手機 GPS");
-    view.addEventListener("click",()=>{
-      showCoordinate(place.position);selectMode("TELEPORT");
-      $("saved-dialog").close();
-      focusMapPosition(place.position,15);
-      setMessage("已選取收藏位置；沒有自動瞬移");
-    });
-    const rename=document.createElement("button");rename.type="button";
-    rename.textContent="改名";
-    rename.addEventListener("click",async()=>{
-      const proposed=prompt("修改收藏地點名稱",place.name||"");
-      if(proposed===null)return;
-      const name=proposed.trim();
-      if(!name||name.length>80){setMessage("地點名稱需為 1 到 80 字");return;}
-      if(await act("/api/saved/place/rename",{id:place.id,name}))await refreshSaved();
-    });
-    const remove=document.createElement("button");remove.type="button";
-    remove.textContent="刪除";
-    remove.addEventListener("click",async()=>{
-      if(!confirm("確定刪除「"+place.name+"」？不會變更 GPS"))return;
-      if(await act("/api/saved/place/delete",{id:place.id}))await refreshSaved();
-    });
-    buttons.append(view,rename,remove);card.append(buttons);list.append(card);
+  $("saved-tab-places").textContent="地點（"+places.length+"）";
+  $("saved-tab-routes").textContent="路線（"+routes.length+"）";
+  for(const tab of ["places","routes"])
+    $("saved-tab-"+tab).setAttribute("aria-pressed",String(savedTab===tab));
+  if (!savedRecords) {list.textContent="正在讀取收藏…";return;}
+  if(savedTab==="places") {
+    for (const place of places) {
+      if (!Number.isFinite(place?.position?.lat) ||
+          !Number.isFinite(place?.position?.lon)) continue;
+      const card=document.createElement("article"); card.className="saved-card saved-place-card";
+      const name=place.name||"未命名位置";
+      const coordinate=place.position.lat.toFixed(6)+", "+place.position.lon.toFixed(6);
+      const view=document.createElement("button");view.type="button";view.className="saved-place-select";
+      view.setAttribute("aria-label","在地圖選取「"+name+"」，不會移動手機 GPS");
+      const top=document.createElement("span");top.className="saved-place-top";
+      top.append(countryFlag(place.countryCode));
+      const title=labelledText(name,"strong");title.className="saved-place-name";title.title=name;top.append(title);
+      const clockRow=document.createElement("span");clockRow.className="saved-clock-row";
+      const icon=labelledText("◷","span");icon.setAttribute("aria-hidden","true");
+      const clock=labelledText(destinationTime(place.timeZoneId,new Date(),place.countryCode),"span");
+      clock.className="saved-clock";clock.dataset.timeZone=place.timeZoneId||"";
+      clock.dataset.countryCode=place.countryCode||"";clock.title="收藏地點當地日期及時間";
+      clockRow.append(icon,clock);top.append(clockRow);
+      const bottom=labelledText(coordinate,"span");bottom.className="saved-place-coordinate";
+      view.append(top,bottom);
+      view.addEventListener("click",()=>{
+        showCoordinate(place.position);selectMode("TELEPORT");
+        $("saved-dialog").close();focusMapPosition(place.position,15);
+        setMessage("已選取收藏位置；沒有自動瞬移");
+      });
+      const more=document.createElement("button");more.type="button";more.className="saved-place-more";
+      more.textContent="⋯";more.setAttribute("aria-label",name+" 的更多操作");
+      const actions=document.createElement("div");actions.className="saved-place-actions";
+      actions.dataset.placeId=String(place.id);
+      const expanded=openMenus.has(String(place.id));actions.classList.toggle("hidden",!expanded);
+      more.setAttribute("aria-expanded",String(expanded));
+      more.addEventListener("click",()=>{
+        const open=actions.classList.contains("hidden");
+        list.querySelectorAll(".saved-place-actions").forEach(el=>el.classList.add("hidden"));
+        list.querySelectorAll(".saved-place-more").forEach(el=>el.setAttribute("aria-expanded","false"));
+        actions.classList.toggle("hidden",!open);more.setAttribute("aria-expanded",String(open));
+      });
+      actions.append(savedAction("改名",async()=>{
+        const proposed=prompt("修改收藏地點名稱",name);
+        if(proposed===null)return;
+        const next=proposed.trim();
+        if(!next||next.length>80){$("saved-enrich-status").textContent="地點名稱需為 1 到 80 字";return;}
+        if(await act("/api/saved/place/rename",{id:place.id,name:next}))await refreshSaved();
+      }),savedAction("複製座標",()=>copySavedCoordinate(coordinate)));
+      if(!place.countryCode||!place.countryName||!place.city||!place.timeZoneId||clock.textContent==="—/— —:—")
+        actions.append(savedAction("補齊舊收藏（批次）",()=>$("saved-enrich-button").click()));
+      const remove=savedAction("刪除",async()=>{
+        if(!confirm("確定刪除「"+name+"」？不會變更 GPS"))return;
+        if(await act("/api/saved/place/delete",{id:place.id}))await refreshSaved();
+      });
+      remove.classList.add("danger");actions.append(remove);card.append(view,more,actions);list.append(card);
+    }
+    if (!places.length) list.append(labelledText("沒有符合條件的收藏地點"));
+  } else {
+    for(const route of routes){
+      const card=document.createElement("article");card.className="saved-card";
+      card.append(labelledText(route.name||"未命名路線","strong"));
+      card.append(labelledText((route.stops||[]).length+" 個路點 · "+
+        (route.mode==="FLOWERS"?"舊巡花收藏 · 可轉一般路線":"道路")));
+      const button=document.createElement("button");
+      button.textContent="載入草稿（仍須預覽）";
+      button.addEventListener("click",async()=>{
+        if(await act("/api/saved/load",{id:route.id})){
+          $("saved-dialog").close();selectMode("ROUTE");
+          setMessage(route.mode==="FLOWERS"
+            ? "舊巡花收藏已轉成一般道路草稿；原收藏保留，請重新預覽"
+            : "收藏路線已載入，請先預覽步行道路");
+        }
+      });
+      card.append(button);list.append(card);
+    }
+    if (!routes.length) list.append(labelledText("沒有符合條件的收藏路線"));
   }
-  if (!places.length) list.append(labelledText("沒有符合條件的收藏地點"));
-  list.append(labelledText("收藏路線（"+routes.length+"）","strong"));
-  for(const route of routes){
-    const card=document.createElement("article");card.className="saved-card";
-    card.append(labelledText(route.name||"未命名路線","strong"));
-    card.append(labelledText((route.stops||[]).length+" 個路點 · "+
-      (route.mode==="FLOWERS"?"舊巡花收藏 · 可轉一般路線":"道路")));
-    const button=document.createElement("button");
-    button.textContent="載入草稿（仍須預覽）";
-    button.addEventListener("click",async()=>{
-      if(await act("/api/saved/load",{id:route.id})){
-        $("saved-dialog").close();
-        selectMode("ROUTE");
-        setMessage(route.mode==="FLOWERS"
-          ? "舊巡花收藏已轉成一般道路草稿；原收藏保留，請重新預覽"
-          : "收藏路線已載入，請先預覽步行道路");
-      }
-    });
-    card.append(button);list.append(card);
-  }
-  if (!routes.length) list.append(labelledText("沒有符合條件的收藏路線"));
-  list.scrollTop=previousScroll; // preserve position across refresh and long lists
+  list.scrollTop=previousScroll;
 }
 async function refreshSaved() {
   if (!token || !$("saved-dialog").open) return;
@@ -1343,7 +1378,8 @@ $("saved-add-button").addEventListener("click",async()=>{
     $("saved-new-position").textContent="GPS: "+point.lat.toFixed(6)+", "+point.lon.toFixed(6);
     $("saved-new-name").value=fallback;
     button.disabled = true;
-    button.textContent = "正在取得名稱並收藏…";
+    button.textContent = "…";
+    selectSavedTab("places");
     $("saved-enrich-status").textContent = "正在查詢地標、國家、城市與時區；完成後自動收藏";
     const request=await call("/api/saved/place/lookup","POST",point);
     if(generation!==savedLookupGeneration||!$("saved-dialog").open) return;
@@ -1441,15 +1477,30 @@ $("show-saved").addEventListener("click",()=>{
   $("saved-enrich-status").textContent="";
   $("saved-dialog").showModal();
   $("saved-search").value="";
+  $("saved-help").classList.add("hidden");
+  $("saved-help-toggle").setAttribute("aria-expanded","false");
+  selectSavedTab("places");
   refreshSaved();
 });
 $("close-saved").addEventListener("click",()=>$("saved-dialog").close());
 $("saved-search").addEventListener("input",renderSaved);
-// Update only the clock text once per minute. Rebuilding the list would reset
-// its scroll position and close expanded place details while the user reads them.
-setInterval(()=>{if(!document.hidden)refreshSavedClocks();},60000);
+$("saved-tab-places").addEventListener("click",()=>selectSavedTab("places"));
+$("saved-tab-routes").addEventListener("click",()=>selectSavedTab("routes"));
+$("saved-help-toggle").addEventListener("click",()=>{
+  const open=$("saved-help").classList.toggle("hidden")===false;
+  $("saved-help-toggle").setAttribute("aria-expanded",String(open));
+});
+// Update at the actual minute boundary without rebuilding the list.
+function scheduleSavedClockRefresh() {
+  setTimeout(()=>{if(!document.hidden)refreshSavedClocks();scheduleSavedClockRefresh();},
+    60000-Date.now()%60000);
+}
+scheduleSavedClockRefresh();
 setInterval(updateSessionExpiry,1000);
 setInterval(() => { if (!document.hidden && connected && token) refresh(); }, 2000);
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden && token) refresh();
+  if (!document.hidden) {
+    refreshSavedClocks();
+    if (token) refresh();
+  }
 });

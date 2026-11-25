@@ -7,7 +7,7 @@ object SavedPlaceMetadataPolicy {
         place.countryCode.isNullOrBlank() ||
             place.countryName.isNullOrBlank() ||
             place.city.isNullOrBlank() ||
-            place.timeZoneId.isNullOrBlank()
+            SavedPlaceTimePolicy.validatedZone(place.timeZoneId) == null
 
     fun enriched(place: SavedPlace, suggestion: PlaceSuggestion): SavedPlace {
         fun missing(stored: String?): Boolean = stored.isNullOrBlank()
@@ -28,7 +28,10 @@ object SavedPlaceMetadataPolicy {
             countryName = if (missing(place.countryName))
                 suggestion.countryName?.take(100) else place.countryName,
             city = if (missing(place.city)) suggestion.city?.take(100) else place.city,
-            timeZoneId = if (missing(place.timeZoneId)) timezone else place.timeZoneId,
+            // Repair invalid legacy identifiers on explicit backfill only. Preserve
+            // a valid resolved zone even when a later lookup returns no data.
+            timeZoneId = if (SavedPlaceTimePolicy.validatedZone(place.timeZoneId) == null)
+                timezone ?: place.timeZoneId else place.timeZoneId,
         )
     }
 }

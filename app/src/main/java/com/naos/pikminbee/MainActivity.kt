@@ -656,6 +656,57 @@ private fun PikminBeeScreen() {
     LaunchedEffect(selected, selectionExplicit) {
         coordinateInput = if (selectionExplicit) selected.label() else ""
     }
+    fun saveSelectedPlace() {
+        if (savingPlace) return
+        if (!selectionExplicit) {
+            message = "請先點地圖選取要收藏的位置"
+        } else {
+            val target = selected
+            val alreadySaved = prefs.places().firstOrNull {
+                it.coordinate == target
+            }
+            if (alreadySaved != null) {
+                message = "這個位置已收藏為「${alreadySaved.name}」；可在收藏清單改名"
+            } else {
+                savingPlace = true
+                message = "正在取得附近地標／商家名稱與國家、時區後收藏…"
+                // Only this explicit tap sends the selected
+                // coordinate to Photon / TimeAPI, not map pans.
+                work.launch {
+                    try {
+                        val suggestion = runCatching {
+                            placeLookup.suggest(target)
+                        }.getOrElse {
+                            PlaceSuggestion(PlaceSuggestionPolicy.pointLabel(target))
+                        }
+                        // A paired browser may have saved the same
+                        // coordinate while the lookup was running.
+                        if (prefs.places().none { it.coordinate == target }) {
+                            prefs.addPlace(
+                                suggestion.displayName, target,
+                                suggestion.countryCode,
+                                suggestion.countryName,
+                                suggestion.city,
+                                suggestion.timeZoneId,
+                            )
+                        }
+                        places = prefs.places()
+                        message = if (suggestion.displayName ==
+                            PlaceSuggestionPolicy.pointLabel(target))
+                            "地名查詢無結果，已用座標名稱收藏；可稍後補齊資訊"
+                        else "已自動命名並收藏「${suggestion.displayName}」 " +
+                            listOf(suggestion.city, suggestion.countryName ?: suggestion.countryCode)
+                                .filterNot { it.isNullOrBlank() }
+                                .joinToString(" · ")
+                    } catch (e: Exception) {
+                        message = "收藏失敗：${e.message ?: "請再試一次"}"
+                    } finally {
+                        savingPlace = false
+                    }
+                }
+            }
+        }
+    }
     fun teleportTo(coordinate: Coordinate) {
         selected = coordinate
         selectionExplicit = true
@@ -682,7 +733,7 @@ private fun PikminBeeScreen() {
     fun applyCoordinateInput() {
         val parsed = Coordinate.parseCombined(coordinateInput)
         if (parsed == null) {
-            message = "請輸入經緯度，例如 25.0330, 121.5654"
+            message = "經緯度格式或範圍無效（支援 DD、DMS、DDM）"
             return
         }
         teleportTo(parsed)
@@ -1073,8 +1124,7 @@ private fun PikminBeeScreen() {
                             ToolTab.TELEPORT -> {
                                 Text("瞬移到指定位置", fontWeight = FontWeight.Bold, color = foreground)
                                 Text("選取：" + selected.label(), color = muted, fontSize = 13.sp)
-                                Text("上方座標列可貼上經緯度；點地圖只會選取，不會自動瞬移。",
-                                    color = muted, fontSize = 12.sp)
+                                Text("選取座標後確認。", color = muted, fontSize = 12.sp)
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Button(
                                         onClick = {
@@ -1122,56 +1172,7 @@ private fun PikminBeeScreen() {
                                 }
                                 TextButton(
                                     enabled = !savingPlace,
-                                    onClick = {
-                                        if (!selectionExplicit) {
-                                            message = "請先點地圖選取要收藏的位置"
-                                        } else {
-                                            val target = selected
-                                            val alreadySaved = prefs.places().firstOrNull {
-                                                it.coordinate == target
-                                            }
-                                            if (alreadySaved != null) {
-                                                message = "這個位置已收藏為「${alreadySaved.name}」；可在收藏清單改名"
-                                            } else {
-                                                savingPlace = true
-                                                message = "正在取得附近地標／商家名稱與國家、時區後收藏…"
-                                                // Only this explicit tap sends the selected
-                                                // coordinate to Photon / TimeAPI, not map pans.
-                                                work.launch {
-                                                    try {
-                                                        val suggestion = runCatching {
-                                                            placeLookup.suggest(target)
-                                                        }.getOrElse {
-                                                            PlaceSuggestion(PlaceSuggestionPolicy.pointLabel(target))
-                                                        }
-                                                        // A paired browser may have saved the same
-                                                        // coordinate while the lookup was running.
-                                                        if (prefs.places().none { it.coordinate == target }) {
-                                                            prefs.addPlace(
-                                                                suggestion.displayName, target,
-                                                                suggestion.countryCode,
-                                                                suggestion.countryName,
-                                                                suggestion.city,
-                                                                suggestion.timeZoneId,
-                                                            )
-                                                        }
-                                                        places = prefs.places()
-                                                        message = if (suggestion.displayName ==
-                                                            PlaceSuggestionPolicy.pointLabel(target))
-                                                            "地名查詢無結果，已用座標名稱收藏；可稍後補齊資訊"
-                                                        else "已自動命名並收藏「${suggestion.displayName}」 " +
-                                                            listOf(suggestion.city, suggestion.countryName ?: suggestion.countryCode)
-                                                                .filterNot { it.isNullOrBlank() }
-                                                                .joinToString(" · ")
-                                                    } catch (e: Exception) {
-                                                        message = "收藏失敗：${e.message ?: "請再試一次"}"
-                                                    } finally {
-                                                        savingPlace = false
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
+                                    onClick = ::saveSelectedPlace
                                 ) {
                                     Row(horizontalArrangement = Arrangement.spacedBy(5.dp),
                                         verticalAlignment = Alignment.CenterVertically) {
@@ -1211,6 +1212,25 @@ private fun PikminBeeScreen() {
                                     onLoopChange = {},
                                     onRoutePrimary = { handleJourneyPrimary() },
                                     onRouteStop = ::requestStopWalk,
+                                    onLocateStop = { point ->
+                                        focusMapPoint(point)
+                                        closeDetailsRequest++
+                                    },
+                                    onEditStop = { index ->
+                                        if (!planning && walkPhase !in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)) {
+                                            routeEditingStopIndex = index
+                                            closeDetailsRequest++
+                                            message = "請在地圖重新選擇第 ${index + 1} 點"
+                                        }
+                                    },
+                                    onMoveStop = { index, offset ->
+                                        if (!planning && walkPhase !in listOf(WalkPhase.MOVING, WalkPhase.PAUSED))
+                                            prefs.saveRouteDraft(RoutePointDraft.move(roadStops, index, offset))
+                                    },
+                                    onDeleteStop = { index ->
+                                        if (!planning && walkPhase !in listOf(WalkPhase.MOVING, WalkPhase.PAUSED))
+                                            prefs.saveRouteDraft(RoutePointDraft.remove(roadStops, index))
+                                    },
                                 )
                             }
                         }
@@ -1227,8 +1247,12 @@ private fun PikminBeeScreen() {
             ) {
                 FavouritesPanel(
                     places = places,
+                    routeCount = savedRoutes.size,
                     foreground = foreground,
                     muted = muted,
+                    canAddPlace = selectionExplicit,
+                    savingPlace = savingPlace,
+                    onAddPlace = ::saveSelectedPlace,
                     onSelectPlace = { place ->
                         showFavourites = false
                         selected = place.coordinate

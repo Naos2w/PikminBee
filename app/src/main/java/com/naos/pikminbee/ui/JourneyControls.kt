@@ -1,6 +1,16 @@
 package com.naos.pikminbee.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.AlertDialog
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
@@ -59,7 +69,13 @@ fun JourneyControls(
     onLoopChange: (Boolean) -> Unit,
     onRoutePrimary: () -> Unit,
     onRouteStop: () -> Unit,
+    onLocateStop: (Coordinate) -> Unit = {},
+    onEditStop: (Int) -> Unit = {},
+    onMoveStop: (Int, Int) -> Unit = { _, _ -> },
+    onDeleteStop: (Int) -> Unit = {},
 ) {
+    var menuIndex by remember { mutableStateOf<Int?>(null) }
+    var confirmClear by remember { mutableStateOf(false) }
     val activeWalk = phase == WalkPhase.MOVING || phase == WalkPhase.PAUSED
     val controlling = activeWalk && activeMode == mode
     val otherWalking = activeWalk && activeMode != mode
@@ -77,14 +93,51 @@ fun JourneyControls(
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text(if (flower) "尋花路點" else "道路路點",
+        Text("路徑 · ${stops.size} 個路點",
             color = foreground, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-        Text("${stops.size} 個路點" + if (origin == null) " · 尚未設定起點"
-            else " · 起點 ${origin.label()}",
-            color = muted, fontSize = 12.sp)
-        if (stops.isNotEmpty()) {
-            Text("順序： " + stops.indices.joinToString("  →  ") { "${it + 1}" },
-                color = foreground, fontSize = 13.sp)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("起點  " + (origin?.label() ?: "尚未設定"), color = muted,
+                fontSize = 12.sp, modifier = Modifier.weight(1f))
+            if (origin != null) IconButton(onClick = { onLocateStop(origin) },
+                modifier = Modifier.size(48.dp).semantics { contentDescription = "查看起點" }) {
+                NaosActionIcon(NaosActionGlyph.REAL_GPS, foreground)
+            }
+        }
+        stops.forEachIndexed { index, point ->
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                val colour = when (index) {
+                    0 -> Color(0xFF159E5E)
+                    stops.lastIndex -> Color(0xFFD35C51)
+                    else -> Color(0xFF306EEE)
+                }
+                Box(Modifier.size(29.dp).background(colour, CircleShape), contentAlignment = Alignment.Center) {
+                    Text((index + 1).toString(), fontSize = 12.sp, color = Color.White,
+                        fontWeight = FontWeight.Bold)
+                }
+                Text(point.label(), fontSize = 12.sp, color = foreground,
+                    modifier = Modifier.weight(1f))
+                IconButton(onClick = { onLocateStop(point) },
+                    modifier = Modifier.size(48.dp).semantics { contentDescription = "查看第 ${index + 1} 點" }) {
+                    NaosActionIcon(NaosActionGlyph.REAL_GPS, foreground)
+                }
+                if (canEdit) Box {
+                    IconButton(onClick = { menuIndex = index },
+                        modifier = Modifier.size(48.dp).semantics { contentDescription = "第 ${index + 1} 點更多操作" }) {
+                        NaosActionIcon(NaosActionGlyph.MORE, muted)
+                    }
+                    DropdownMenu(expanded = menuIndex == index, onDismissRequest = { menuIndex = null }) {
+                        DropdownMenuItem(text = { Text("上移") }, enabled = index > 0,
+                            onClick = { menuIndex = null; onMoveStop(index, -1) })
+                        DropdownMenuItem(text = { Text("下移") }, enabled = index < stops.lastIndex,
+                            onClick = { menuIndex = null; onMoveStop(index, 1) })
+                        DropdownMenuItem(text = { Text("重新選點") },
+                            onClick = { menuIndex = null; onEditStop(index) })
+                        DropdownMenuItem(text = { Text("刪除") },
+                            onClick = { menuIndex = null; onDeleteStop(index) })
+                    }
+                }
+            }
         }
         if (flower) {
             FilterChip(
@@ -192,18 +245,22 @@ fun JourneyControls(
             }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            TextButton(
-                onClick = onUndo,
-                enabled = canEdit && stops.isNotEmpty(),
-                modifier = Modifier.semantics { contentDescription = "撤銷最後加入的路點" },
-            ) {
+            IconButton(onClick = onUndo, enabled = canEdit && stops.isNotEmpty(),
+                modifier = Modifier.size(48.dp).semantics { contentDescription = "撤銷最後加入的路點" }) {
                 NaosActionIcon(NaosActionGlyph.UNDO, foreground)
-                Text("撤銷上一點", color = foreground, fontSize = 12.sp)
             }
-            TextButton(
-                onClick = { onClear(); onMessage("所有路點已清除") },
-                enabled = canEdit && stops.isNotEmpty(),
-            ) { Text("清除全部", fontSize = 12.sp) }
+            TextButton(onClick = { confirmClear = true }, enabled = canEdit && stops.isNotEmpty()) {
+                Text("清除全部", fontSize = 12.sp)
+            }
         }
     }
+    if (confirmClear) AlertDialog(
+        onDismissRequest = { confirmClear = false },
+        title = { Text("清除全部路點？") },
+        text = { Text("不會移動目前位置。") },
+        confirmButton = { TextButton(enabled = canEdit, onClick = {
+            confirmClear = false; onClear(); onMessage("所有路點已清除")
+        }) { Text("清除") } },
+        dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("取消") } },
+    )
 }

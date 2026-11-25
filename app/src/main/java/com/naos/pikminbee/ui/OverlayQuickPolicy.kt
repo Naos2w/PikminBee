@@ -5,7 +5,7 @@ import com.naos.pikminbee.domain.WalkSpeedPreset
 
 /** First-level controls never edit routes or silently restart movement. */
 enum class OverlayQuickAction {
-    PRIMARY, STOP, REAL_GPS, VIRTUAL_GPS, SPEED, MAP, CLOSE
+    PRIMARY, STOP, REAL_GPS, VIRTUAL_GPS, SPEED, MAP, WIFI, CLOSE
 }
 
 enum class OverlayPrimaryState { START, PAUSE, RESUME }
@@ -21,7 +21,7 @@ object OverlayQuickPolicy {
         OverlayQuickAction.REAL_GPS, OverlayQuickAction.VIRTUAL_GPS,
     )
     val bottomRow = listOf(
-        OverlayQuickAction.SPEED, OverlayQuickAction.MAP, OverlayQuickAction.CLOSE,
+        OverlayQuickAction.SPEED, OverlayQuickAction.MAP, OverlayQuickAction.WIFI, OverlayQuickAction.CLOSE,
     )
 
     fun primary(phase: WalkPhase): OverlayPrimaryState = when (phase) {
