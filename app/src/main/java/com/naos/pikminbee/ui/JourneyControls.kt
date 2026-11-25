@@ -1,11 +1,6 @@
 package com.naos.pikminbee.ui
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.AlertDialog
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -50,12 +45,14 @@ import com.naos.pikminbee.domain.WalkingGeometry
 fun JourneyControls(
     mode: WalkMode,
     stops: List<Coordinate>,
+    draftRevision: Long,
     origin: Coordinate?,
     activeMode: WalkMode?,
     phase: WalkPhase,
     walkEstimatedSteps: Long,
     speedPreset: WalkSpeedPreset,
     speedProfile: WalkSpeedProfile,
+    appliedSpeedKmh: Double = 0.0,
     onSpeedSelected: (WalkSpeedProfile) -> Unit,
     foreground: Color,
     muted: Color,
@@ -70,12 +67,10 @@ fun JourneyControls(
     onRoutePrimary: () -> Unit,
     onRouteStop: () -> Unit,
     onLocateStop: (Coordinate) -> Unit = {},
-    onEditStop: (Int) -> Unit = {},
-    onMoveStop: (Int, Int) -> Unit = { _, _ -> },
-    onDeleteStop: (Int) -> Unit = {},
+    onMoveStop: (Long, Int, Int) -> Unit = { _, _, _ -> },
+    onDeleteStop: (Long, Int) -> Unit = { _, _ -> },
 ) {
-    var menuIndex by remember { mutableStateOf<Int?>(null) }
-    var confirmClear by remember { mutableStateOf(false) }
+    var confirmClear by remember(draftRevision) { mutableStateOf(false) }
     val activeWalk = phase == WalkPhase.MOVING || phase == WalkPhase.PAUSED
     val controlling = activeWalk && activeMode == mode
     val otherWalking = activeWalk && activeMode != mode
@@ -95,50 +90,17 @@ fun JourneyControls(
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("路徑 · ${stops.size} 個路點",
             color = foreground, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("起點  " + (origin?.label() ?: "尚未設定"), color = muted,
-                fontSize = 12.sp, modifier = Modifier.weight(1f))
-            if (origin != null) IconButton(onClick = { onLocateStop(origin) },
-                modifier = Modifier.size(48.dp).semantics { contentDescription = "查看起點" }) {
-                NaosActionIcon(NaosActionGlyph.REAL_GPS, foreground)
-            }
-        }
-        stops.forEachIndexed { index, point ->
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                val colour = when (index) {
-                    0 -> Color(0xFF159E5E)
-                    stops.lastIndex -> Color(0xFFD35C51)
-                    else -> Color(0xFF306EEE)
-                }
-                Box(Modifier.size(29.dp).background(colour, CircleShape), contentAlignment = Alignment.Center) {
-                    Text((index + 1).toString(), fontSize = 12.sp, color = Color.White,
-                        fontWeight = FontWeight.Bold)
-                }
-                Text(point.label(), fontSize = 12.sp, color = foreground,
-                    modifier = Modifier.weight(1f))
-                IconButton(onClick = { onLocateStop(point) },
-                    modifier = Modifier.size(48.dp).semantics { contentDescription = "查看第 ${index + 1} 點" }) {
-                    NaosActionIcon(NaosActionGlyph.REAL_GPS, foreground)
-                }
-                if (canEdit) Box {
-                    IconButton(onClick = { menuIndex = index },
-                        modifier = Modifier.size(48.dp).semantics { contentDescription = "第 ${index + 1} 點更多操作" }) {
-                        NaosActionIcon(NaosActionGlyph.MORE, muted)
-                    }
-                    DropdownMenu(expanded = menuIndex == index, onDismissRequest = { menuIndex = null }) {
-                        DropdownMenuItem(text = { Text("上移") }, enabled = index > 0,
-                            onClick = { menuIndex = null; onMoveStop(index, -1) })
-                        DropdownMenuItem(text = { Text("下移") }, enabled = index < stops.lastIndex,
-                            onClick = { menuIndex = null; onMoveStop(index, 1) })
-                        DropdownMenuItem(text = { Text("重新選點") },
-                            onClick = { menuIndex = null; onEditStop(index) })
-                        DropdownMenuItem(text = { Text("刪除") },
-                            onClick = { menuIndex = null; onDeleteStop(index) })
-                    }
-                }
-            }
-        }
+        RouteWaypointList(
+            stops = stops,
+            origin = origin,
+            revision = draftRevision,
+            editable = canEdit,
+            foreground = foreground,
+            muted = muted,
+            onLocate = onLocateStop,
+            onMove = onMoveStop,
+            onDelete = onDeleteStop,
+        )
         if (flower) {
             FilterChip(
                 selected = loop,
@@ -147,7 +109,10 @@ fun JourneyControls(
                 label = { Text("循環路線") },
             )
         }
-        Text("速度", color = muted, fontSize = 12.sp)
+        Text(if (controlling)
+            "速度 · " + com.naos.pikminbee.domain.RouteSurfaceStatusPolicy.appliedRouteSpeedLabel(phase, appliedSpeedKmh)
+            else "速度 · " + speedProfile.display,
+            color = muted, fontSize = 12.sp)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             WalkSpeedPreset.entries.forEach { option ->
                 FilterChip(
@@ -249,8 +214,9 @@ fun JourneyControls(
                 modifier = Modifier.size(48.dp).semantics { contentDescription = "撤銷最後加入的路點" }) {
                 NaosActionIcon(NaosActionGlyph.UNDO, foreground)
             }
-            TextButton(onClick = { confirmClear = true }, enabled = canEdit && stops.isNotEmpty()) {
-                Text("清除全部", fontSize = 12.sp)
+            IconButton(onClick = { confirmClear = true }, enabled = canEdit && stops.isNotEmpty(),
+                modifier = Modifier.size(48.dp).semantics { contentDescription = "清除全部路點" }) {
+                NaosActionIcon(NaosActionGlyph.DELETE, Color(BeeActionColors.STOP_RED))
             }
         }
     }
@@ -259,7 +225,7 @@ fun JourneyControls(
         title = { Text("清除全部路點？") },
         text = { Text("不會移動目前位置。") },
         confirmButton = { TextButton(enabled = canEdit, onClick = {
-            confirmClear = false; onClear(); onMessage("所有路點已清除")
+            confirmClear = false; onClear()
         }) { Text("清除") } },
         dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("取消") } },
     )

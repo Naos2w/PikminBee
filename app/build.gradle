@@ -32,6 +32,13 @@ if (devParts.any { it >= 1000 }) {
 // This separate, debug-only UAT package can coexist with older personal builds.
 // Its signing key comes from private GitHub Actions secrets, never from source.
 def isUat = System.getenv('PIKMINBEE_UAT') == 'true'
+// The target phone uses arm64. Keep ordinary DEV universal and allow a
+// deliberate alternative APK for other devices/emulators.
+def apkAbi = providers.gradleProperty('pikminbeeApkAbi')
+    .orElse(isUat ? 'arm64-v8a' : 'universal').get()
+if (!(apkAbi in ['universal', 'arm64-v8a', 'armeabi-v7a', 'x86', 'x86_64'])) {
+    throw new GradleException('Unsupported pikminbeeApkAbi: ' + apkAbi)
+}
 def uatStoreFile = System.getenv('PIKMINBEE_UAT_KEYSTORE_FILE')
 def uatStorePassword = System.getenv('PIKMINBEE_UAT_SIGN_PASSWORD')
 if (isUat && (!uatStoreFile || !uatStorePassword)) {
@@ -65,6 +72,11 @@ android {
         ]
         buildConfigField 'boolean', 'HAS_GOOGLE_MAPS_KEY', mapsKey.isBlank() ? 'false' : 'true'
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+        if (apkAbi != 'universal') {
+            ndk {
+                abiFilters apkAbi
+            }
+        }
     }
 
     buildFeatures {

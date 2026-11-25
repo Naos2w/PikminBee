@@ -1,7 +1,18 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
-import { BRIGHT_STYLE_URL, samePosition, currentPosition, createCameraFocus, visibleMapPadding, countryFlagPath, destinationTime, routePresentation } from "../app/src/main/assets/lan/map-ui-policy.mjs";
+import { BRIGHT_STYLE_URL, samePosition, currentPosition, createCameraFocus, visibleMapPadding, countryFlagPath, destinationTime, routePresentation, appliedSpeedLabel } from "../app/src/main/assets/lan/map-ui-policy.mjs";
+
+test("display only the confirmed applied speed and distinguish resume pace", () => {
+  const state = {phase:"MOVING", speedPreset:"WALK", speedKmh:1.4, speedAppliedKmh:5.2};
+  assert.equal(appliedSpeedLabel(state),"已套用 5.2 km/h");
+  assert.equal(appliedSpeedLabel({...state,phase:"PAUSED"}),"恢復速度 5.2 km/h");
+  assert.equal(appliedSpeedLabel({...state,speedAppliedDisplay:"已套用 5.2 km/h"}),"已套用 5.2 km/h");
+  assert.equal(appliedSpeedLabel({...state,speedAppliedKmh:0}),"速度待確認");
+  assert.equal(appliedSpeedLabel({...state,speedAppliedKmh:NaN}),"速度待確認");
+  assert.equal(appliedSpeedLabel({...state,phase:"PARKED"}),"");
+  assert.equal(appliedSpeedLabel({...state,phase:"IDLE"}),"");
+});
 
 test("country flags are local PNGs with safe two-letter names",()=>{
   for (const code of ["TW","jp","US","GB","NP","XK"]) {

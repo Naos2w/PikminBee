@@ -28,6 +28,12 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.runtime.LaunchedEffect
+import com.naos.pikminbee.domain.WalkSpeedProfile
+import com.naos.pikminbee.domain.WalkSpeedMode
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Switch
@@ -54,7 +60,7 @@ fun BeeSettingsScreen(
     dark: Boolean,
     provider: MapProvider,
     appearance: MapAppearance,
-    defaultSpeed: WalkSpeedPreset,
+    defaultSpeed: WalkSpeedProfile,
     virtualStrideMetres: Double,
     mockGpsJitterLevel: MockGpsJitterLevel,
     overlayVisible: Boolean,
@@ -63,7 +69,7 @@ fun BeeSettingsScreen(
     checkpoint: LocationCheckpoint?,
     onProvider: (MapProvider) -> Unit,
     onAppearance: (MapAppearance) -> Unit,
-    onDefaultSpeed: (WalkSpeedPreset) -> Unit,
+    onDefaultSpeed: (WalkSpeedProfile) -> Unit,
     onVirtualStrideMetres: (Double) -> Unit,
     onMockGpsJitterLevel: (MockGpsJitterLevel) -> Unit,
     onPermissions: () -> Unit,
@@ -84,11 +90,23 @@ fun BeeSettingsScreen(
     val muted = palette.muted
     val lan by LanStatus.display.collectAsState()
     var section by rememberSaveable { mutableStateOf<String?>(if (showWifiPanel) "wifi" else null) }
+    LaunchedEffect(showWifiPanel) {
+        if (showWifiPanel) {
+            section = "wifi"
+            onToggleWifi()
+        }
+    }
     var helpOpen by rememberSaveable { mutableStateOf(false) }
+    var customOpen by rememberSaveable { mutableStateOf(defaultSpeed.mode == WalkSpeedMode.FIXED) }
+    var customValue by rememberSaveable { mutableStateOf(WalkSpeedProfile.number(defaultSpeed.fixedKmh)) }
+    LaunchedEffect(defaultSpeed) {
+        customOpen = defaultSpeed.mode == WalkSpeedMode.FIXED
+        if (customOpen) customValue = WalkSpeedProfile.number(defaultSpeed.fixedKmh)
+    }
     val installed = InstalledAppVersion.read(LocalContext.current)
-    val titles = mapOf("map" to "地圖與外觀", "route" to "路徑與速度",
-        "gps" to "GPS 測試", "overlay" to "懸浮控制", "wifi" to "Wi-Fi 控制",
-        "permission" to "權限與健康資料", "about" to "關於 PikminBee")
+    val titles = mapOf("route" to "進階路徑設定",
+        "gps" to "GPS 測試", "overlay" to "懸浮控制教學", "wifi" to "Wi-Fi 控制",
+        "permission" to "權限與健康資料")
     BackHandler(enabled = section != null) { section = null }
     Column(
         Modifier.fillMaxSize().background(palette.bg)
@@ -110,15 +128,88 @@ fun BeeSettingsScreen(
             }
         }
         if (section == null) {
+            Surface(modifier = Modifier.fillMaxWidth(),
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+                color = palette.surface) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("介面外觀", fontWeight = FontWeight.SemiBold, color = foreground)
+                    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf(MapAppearance.SYSTEM to "系統", MapAppearance.LIGHT to "淺色",
+                            MapAppearance.DARK to "深色").forEach { (option, label) ->
+                            FilterChip(selected = appearance == option, onClick = { onAppearance(option) },
+                                label = { Text(label) })
+                        }
+                    }
+                    if (BuildConfig.HAS_GOOGLE_MAPS_KEY) {
+                        Text("地圖來源", fontSize = 12.sp, color = muted)
+                        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            MapBasemapPolicy.availableProviders(true).forEach { option ->
+                                FilterChip(selected = provider == option, onClick = { onProvider(option) },
+                                    label = { Text(if (option == MapProvider.OPEN_FREE_MAP) "OpenFreeMap" else "Google Maps") })
+                            }
+                        }
+                    }
+                }
+            }
+            Surface(modifier = Modifier.fillMaxWidth(),
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+                color = palette.surface) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("預設速度", fontWeight = FontWeight.SemiBold, color = foreground)
+                    androidx.compose.foundation.layout.FlowRow(
+                        Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        WalkSpeedPreset.entries.forEach { option ->
+                            FilterChip(selected = !customOpen && defaultSpeed.mode == WalkSpeedMode.PRESET &&
+                                defaultSpeed.preset == option, onClick = {
+                                    customOpen = false
+                                    onDefaultSpeed(WalkSpeedProfile.preset(option))
+                                }, label = {
+                                    Text(option.label + "\n" + WalkSpeedProfile.number(option.kilometresPerHour),
+                                        fontSize = 11.sp, lineHeight = 15.sp)
+                                })
+                        }
+                        FilterChip(selected = customOpen, onClick = { customOpen = true },
+                            label = { Text("自訂", fontSize = 11.sp) })
+                    }
+                    if (customOpen) {
+                        val valid = WalkSpeedProfile.tryFixed(customValue)
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            OutlinedTextField(value = customValue, onValueChange = { customValue = it },
+                                label = { Text("km/h") }, singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                isError = valid == null, modifier = Modifier.weight(1f))
+                            TextButton(enabled = valid != null, onClick = {
+                                valid?.let { onDefaultSpeed(it) }
+                            }) { Text("儲存") }
+                        }
+                        if (valid == null) Text("請輸入有效速度", color = palette.muted, fontSize = 12.sp)
+                    }
+                    Text("下次啟動 App：${defaultSpeed.display}", color = muted, fontSize = 12.sp)
+                }
+            }
+            Surface(modifier = Modifier.fillMaxWidth(),
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+                color = palette.surface) {
+                Column(Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
+                    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("懸浮控制", modifier = Modifier.weight(1f), color = foreground)
+                        Switch(checked = overlayVisible, onCheckedChange = { onOverlay() })
+                    }
+                    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("長按圖示提示", modifier = Modifier.weight(1f), color = foreground)
+                        Switch(checked = overlayHoldHints, onCheckedChange = onOverlayHoldHints)
+                    }
+                    if (statusMessage.contains("懸浮") || statusMessage.contains("授權")) {
+                        Text(statusMessage, color = muted, fontSize = 12.sp)
+                    }
+                }
+            }
             val rows = listOf(
-                Triple("map", NaosActionGlyph.EDIT, when (appearance) {
-                    MapAppearance.SYSTEM -> "跟隨系統"; MapAppearance.LIGHT -> "淺色"; MapAppearance.DARK -> "深色" }),
-                Triple("route", NaosActionGlyph.SPEED, defaultSpeed.label),
+                Triple("route", NaosActionGlyph.SPEED, "步幅"),
                 Triple("gps", NaosActionGlyph.REAL_GPS, if (mockActive) "模擬定位中" else "真實定位"),
-                Triple("overlay", NaosActionGlyph.MORE, if (overlayVisible) "開啟" else "關閉"),
+                Triple("overlay", NaosActionGlyph.MORE, "教學"),
                 Triple("wifi", NaosActionGlyph.WIFI, lan.connection.label),
                 Triple("permission", NaosActionGlyph.STEPS, ""),
-                Triple("about", NaosActionGlyph.CLOCK, installed.displayName),
             )
             rows.forEach { (id, glyph, value) ->
                 Surface(modifier = Modifier.fillMaxWidth().clickable { section = id },
@@ -135,6 +226,12 @@ fun BeeSettingsScreen(
                     }
                 }
             }
+            SelectionContainer {
+                Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(installed.displayName, color = muted, fontSize = 12.sp)
+                    Text("版本碼：${installed.code?.toString() ?: "待確認"}", color = muted, fontSize = 10.sp)
+                }
+            }
         } else Surface(
             modifier = Modifier.fillMaxWidth(),
             shape = androidx.compose.foundation.shape.RoundedCornerShape(22.dp),
@@ -142,56 +239,7 @@ fun BeeSettingsScreen(
         ) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 when (section) {
-                    "map" -> {
-                if (BuildConfig.HAS_GOOGLE_MAPS_KEY) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        MapBasemapPolicy.availableProviders(true).forEach { option ->
-                            FilterChip(
-                                selected = provider == option,
-                                onClick = { onProvider(option) },
-                                label = { Text(if (option == MapProvider.OPEN_FREE_MAP)
-                                    "OpenFreeMap" else "Google Maps") },
-                            )
-                        }
-                    }
-                }
-                if (provider == MapProvider.OPEN_FREE_MAP) {
-                    Text("Bright 地圖 · 隨介面主題切換明暗", fontSize = 12.sp, color = muted)
-                }
-                Text("介面外觀", color = foreground, fontSize = 12.sp)
-                androidx.compose.foundation.layout.FlowRow(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(7.dp),
-                ) {
-                    listOf(
-                        MapAppearance.SYSTEM to "跟隨系統",
-                        MapAppearance.LIGHT to "淺色",
-                        MapAppearance.DARK to "深色",
-                    ).forEach { (option, label) ->
-                        FilterChip(
-                            selected = appearance == option,
-                            onClick = { onAppearance(option) },
-                            label = { Text(label) },
-                        )
-                    }
-                }
-
-                    }
                     "route" -> {
-                androidx.compose.foundation.layout.FlowRow(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(7.dp),
-                ) {
-                    WalkSpeedPreset.entries.forEach { option ->
-                        FilterChip(
-                            selected = defaultSpeed == option,
-                            onClick = { onDefaultSpeed(option) },
-                            label = { Text(option.display) },
-                        )
-                    }
-                }
-                Text("路線中可使用自訂速度或速度區間；首次開啟仍使用你儲存的預設速度。",
-                    color = muted, fontSize = 12.sp)
                 VirtualStrideEditor(
                     strideMetres = virtualStrideMetres,
                     onApply = onVirtualStrideMetres,
@@ -226,14 +274,6 @@ fun BeeSettingsScreen(
 
                     }
                     "overlay" -> {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically) {
-                    Text("懸浮控制", color = foreground, fontSize = 14.sp)
-                    Switch(checked = overlayVisible, onCheckedChange = { onOverlay() })
-                }
-                if (statusMessage.contains("懸浮") || statusMessage.contains("授權")) {
-                    Text(statusMessage, color = muted, fontSize = 12.sp)
-                }
                 Text("懸浮控制教學", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically) {
@@ -241,13 +281,6 @@ fun BeeSettingsScreen(
                         Text("首次開啟顯示教學", color = foreground, fontSize = 14.sp)
                     }
                     Switch(checked = overlayGuideEnabled, onCheckedChange = onOverlayGuideEnabled)
-                }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("長按圖示顯示名稱", color = foreground, fontSize = 14.sp)
-                    }
-                    Switch(checked = overlayHoldHints, onCheckedChange = onOverlayHoldHints)
                 }
                 TextButton(onClick = onReplayOverlayGuide) {
                     Text("查看懸浮控制操作說明")

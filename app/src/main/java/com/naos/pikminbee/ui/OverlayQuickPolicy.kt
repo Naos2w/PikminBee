@@ -39,6 +39,10 @@ object OverlayQuickPolicy {
         which in listOf(OverlayQuickAction.REAL_GPS, OverlayQuickAction.VIRTUAL_GPS) &&
             which == selectedGps(mockActive)
 
+    /** Wi-Fi lighting follows the listener, independent of the selected GPS mode. */
+    fun isHighlighted(which: OverlayQuickAction, mockActive: Boolean, wifiActive: Boolean): Boolean =
+        isGpsHighlighted(which, mockActive) || (which == OverlayQuickAction.WIFI && wifiActive)
+
     fun gpsPress(
         action: OverlayQuickAction, mockActive: Boolean, hasRememberedVirtual: Boolean,
     ): OverlayGpsPress = when {

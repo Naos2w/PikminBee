@@ -21,6 +21,9 @@ data class LanConnection(
     val device: String = "",
     val pendingDevice: String = "",
     val awaitingBrowser: Boolean = false,
+    // Local-only request identity; not a bearer token or PIN.
+    val approvalId: String = "",
+    val renewal: Boolean = false,
 ) {
     val hasSession: Boolean get() = remainingSeconds > 0
     val showPin: Boolean get() = !hasSession && !awaitingBrowser && phase in listOf(

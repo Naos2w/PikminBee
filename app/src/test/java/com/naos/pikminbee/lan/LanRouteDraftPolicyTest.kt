@@ -71,6 +71,15 @@ class LanRouteDraftPolicyTest {
         assertEquals(initial, listOf(start, one, two)) // Source draft remains immutable.
     }
 
+    @Test fun remoteDragCanCrossMultipleRowsAndRejectInvalidTargets() {
+        val initial = listOf(start, one, two)
+        assertEquals(listOf(one, two, start), LanRouteDraftPolicy.moveTo(initial, 0, 2).stops)
+        assertTrue(LanRouteDraftPolicy.moveTo(initial, 2, 0).accepted)
+        assertEquals(listOf(two, start, one), LanRouteDraftPolicy.moveTo(initial, 2, 0).stops)
+        assertFalse(LanRouteDraftPolicy.moveTo(initial, 0, 3).accepted)
+        assertEquals(initial, LanRouteDraftPolicy.moveTo(initial, -1, 2).stops)
+    }
+
     @Test fun remoteFlowerLoopKeepsOriginalStartWithoutStraightLineFallback() {
         val stops = listOf(one, two)
         assertEquals(listOf(start, one, two, start),

@@ -95,7 +95,7 @@ try{
   console.log("Coordinate input: DD/DMS/DDM paste, explicit confirmation and invalid input verified in Chromium.");
   await evaluate("document.querySelector('.ordinal-pin[aria-label=\"路點 2\"]').click();true");
   await until(()=>evaluate("!!document.querySelector('.maplibregl-popup-content')"),"route popup");
-  const popupStyle=()=>evaluate("(()=>{const c=document.querySelector('.maplibregl-popup-content'), p=c.parentElement, t=p.querySelector('.maplibregl-popup-tip'), b=c.querySelector('button');return {text:c.textContent,bg:getComputedStyle(c).backgroundColor,fg:getComputedStyle(c).color,tip:[getComputedStyle(t).borderTopColor,getComputedStyle(t).borderBottomColor,getComputedStyle(t).borderLeftColor,getComputedStyle(t).borderRightColor],close:getComputedStyle(b).color,closeHeight:b.getBoundingClientRect().height}})()");
+  const popupStyle=()=>evaluate("(()=>{const c=document.querySelector('.maplibregl-popup-content'), p=c.parentElement, t=p.querySelector('.maplibregl-popup-tip'), b=c.querySelector('.maplibregl-popup-close-button');return {text:c.textContent,bg:getComputedStyle(c).backgroundColor,fg:getComputedStyle(c).color,tip:[getComputedStyle(t).borderTopColor,getComputedStyle(t).borderBottomColor,getComputedStyle(t).borderLeftColor,getComputedStyle(t).borderRightColor],close:getComputedStyle(b).color,closeHeight:b.getBoundingClientRect().height}})()");
   async function choose(theme){
     await evaluate("(()=>{const s=document.querySelector('#web-appearance');s.value="+JSON.stringify(theme)+";s.dispatchEvent(new Event('change'));return true})()");
   }
@@ -105,7 +105,51 @@ try{
   assert.equal(dark.bg,"rgb(28, 43, 52)");assert.equal(dark.fg,"rgb(234, 242, 242)");
   assert.equal(light.bg,"rgb(255, 255, 255)");assert.equal(light.fg,"rgb(32, 49, 58)");
   for(const p of [dark,light]){assert.ok(p.tip.includes(p.bg));assert.equal(p.close,p.fg);assert.equal(p.closeHeight,30);}
-  await evaluate("document.querySelector('.maplibregl-popup-close-button').click();document.querySelector('#show-saved').click();true");
+  await evaluate("document.querySelector('.maplibregl-popup-close-button').click();true");
+  // Settings is a small Web-only panel: no dead phone-only categories.
+  const mapBounds=()=>evaluate("(()=>{const r=document.querySelector('#map').getBoundingClientRect();return [r.x,r.y,r.width,r.height]})()");
+  const mapBeforeSettings=await mapBounds();
+  await evaluate("document.querySelector('#mode-settings').click();true");
+  await until(()=>evaluate("document.body.dataset.mode==='settings' && !document.querySelector('#web-settings').classList.contains('hidden')"),"compact settings open");
+  assert.equal(await evaluate("document.querySelectorAll('#web-settings [data-web-theme-option]').length"),3);
+  assert.equal(await evaluate("document.querySelectorAll('#web-settings .settings-group').length"),0);
+  await evaluate("document.querySelector('[data-web-theme-option=dark]').click();true");
+  assert.ok(await evaluate("document.documentElement.dataset.webTheme==='dark' && document.querySelector('[data-web-theme-option=dark]').getAttribute('aria-pressed')==='true' && localStorage.getItem('pikminbee-web-theme')==='dark'"));
+  await evaluate("document.querySelector('[data-web-theme-option=light]').click();true");
+  assert.deepEqual(await mapBounds(),mapBeforeSettings);
+  await evaluate("document.querySelector('#web-settings-close').click();true");
+  await until(()=>evaluate("document.body.dataset.mode==='route' && document.querySelector('#web-settings').classList.contains('hidden')"),"return to original route mode");
+  assert.deepEqual(await mapBounds(),mapBeforeSettings);
+  console.log("Compact Web settings: three theme actions, persistence and unchanged map canvas verified.");
+  // Real pointer input against the isolated synthetic server. No phone commands.
+  const fixtureState=()=>fetch(url+"/api/state").then(r=>r.json());
+  await until(()=>evaluate("document.querySelectorAll('#route-order .stop-grip').length===3"),"three editable waypoints");
+  const oldDraft=await fixtureState();
+  await evaluate("document.querySelector('#route-order').scrollIntoView({block:'center'});document.querySelector('#route-order').scrollTop=0;true");
+  const bounds=await evaluate("(()=>{const handles=[...document.querySelectorAll('#route-order .stop-grip')];return handles.map(h=>{const r=h.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})})()");
+  assert.equal(bounds.length,3);
+  await call("Input.dispatchMouseEvent",{type:"mouseMoved",x:bounds[0].x,y:bounds[0].y});
+  await call("Input.dispatchMouseEvent",{type:"mousePressed",x:bounds[0].x,y:bounds[0].y,button:"left",buttons:1,clickCount:1});
+  await until(()=>evaluate("!!document.querySelector('.stop-dragging')"),"pointer capture on drag grip");
+  await call("Input.dispatchMouseEvent",{type:"mouseMoved",x:bounds[2].x,y:bounds[2].y,button:"left",buttons:1});
+  await until(()=>evaluate("[...document.querySelectorAll('#route-order .stop-item[data-index]')].at(-1).dataset.index==='0'"),"live multi-row reorder");
+  assert.equal((await fixtureState()).routeRevision,oldDraft.routeRevision,"no request until pointer release");
+  await call("Input.dispatchMouseEvent",{type:"mouseReleased",x:bounds[2].x,y:bounds[2].y,button:"left",buttons:0,clickCount:1});
+  const moved=[...oldDraft.routeStops.slice(1),oldDraft.routeStops[0]];
+  await until(async()=>JSON.stringify((await fixtureState()).routeStops)===JSON.stringify(moved),"atomic drag commit");
+  assert.equal((await fixtureState()).routeRevision,oldDraft.routeRevision+1);
+  await until(()=>evaluate("document.querySelectorAll('#route-order .stop-grip').length===3"),"confirmed rows after drag");
+  const stale=await fetch(url+"/api/points/reorder",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({mode:"ROUTE",from:0,to:2,expectedRevision:oldDraft.routeRevision})});
+  assert.equal(stale.status,409);
+  assert.deepEqual((await fixtureState()).routeStops,moved);
+  await evaluate("window.confirm=()=>false;document.querySelector('#clear').click();true");
+  assert.deepEqual((await fixtureState()).routeStops,moved,"cancelled clear must not change draft");
+  await evaluate("document.querySelector('#route-order .stop-grip').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true}));true");
+  const keyboardMoved=[moved[1],moved[0],moved[2]];
+  await until(async()=>JSON.stringify((await fixtureState()).routeStops)===JSON.stringify(keyboardMoved),"keyboard reorder");
+  console.log("Route editing: pointer drag across multiple rows, one commit, stale revision rejection, cancelled clear and accessible keyboard reorder verified.");
+  await evaluate("document.querySelector('#show-saved').click();true");
   await until(()=>evaluate("document.querySelectorAll('.saved-country-flag').length===2 && [...document.querySelectorAll('.saved-country-flag')].every(i=>i.complete&&i.naturalWidth>0)"),"two decoded local flags");
   const saved=await evaluate("({flags:[...document.querySelectorAll('.saved-country-flag')].map(i=>[new URL(i.src).pathname,i.naturalWidth]),clocks:[...document.querySelectorAll('.saved-clock')].map(i=>i.textContent)})");
   assert.deepEqual(saved.flags.map(a=>a[0]).sort(),["/flags/jp.png","/flags/tw.png"]);
