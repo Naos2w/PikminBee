@@ -682,7 +682,7 @@ private fun PikminBeeScreen() {
     fun applyCoordinateInput() {
         val parsed = Coordinate.parseCombined(coordinateInput)
         if (parsed == null) {
-            message = "請輸入經緯度，例如 25.0330, 121.5654"
+            message = "經緯度格式或範圍無效（支援 DD、DMS、DDM）"
             return
         }
         teleportTo(parsed)
@@ -1073,7 +1073,9 @@ private fun PikminBeeScreen() {
                             ToolTab.TELEPORT -> {
                                 Text("瞬移到指定位置", fontWeight = FontWeight.Bold, color = foreground)
                                 Text("選取：" + selected.label(), color = muted, fontSize = 13.sp)
-                                Text("上方座標列可貼上經緯度；點地圖只會選取，不會自動瞬移。",
+                                Text("上方座標列可貼上 DD、DMS、DDM；點地圖只會選取，不會自動瞬移。",
+                                    color = muted, fontSize = 12.sp)
+                                Text("例如 25.033, 121.5654；25°01′58.8″N 121°33′55.44″E；25°1.980′N 121°33.924′E。",
                                     color = muted, fontSize = 12.sp)
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Button(

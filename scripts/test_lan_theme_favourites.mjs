@@ -72,6 +72,27 @@ try{
   }
   await evaluate("document.querySelector('#mode-route').click();true");
   await until(()=>evaluate("!!document.querySelector('.ordinal-pin[aria-label=\"路點 2\"]')"),"real MapLibre route marker",20000);
+  // Actual coordinate input in the packaged UI. Selection is explicit, and no
+  // phone or external geocoding endpoint is involved.
+  const paste=async text=>{
+    await until(()=>evaluate("!document.querySelector('#set-origin').disabled"),"previous route edit settled");
+    await evaluate("(()=>{const field=document.querySelector('#coordinate');field.value="+JSON.stringify(text)+";field.dispatchEvent(new Event('input',{bubbles:true}));return field.value})()");
+  };
+  const dms="25°01′58.8″N 121°33′55.44″E";
+  await paste(dms);
+  assert.equal(await evaluate("document.querySelector('#coordinate').value"),dms);
+  await evaluate("document.querySelector('#set-origin').click();true");
+  await until(()=>evaluate("document.querySelector('#coordinate').value==='25.033000, 121.565400'"),"DMS input normalisation");
+  await paste("33°30′S 70°40′W");
+  await evaluate("document.querySelector('#set-origin').click();true");
+  await until(()=>evaluate("document.querySelector('#coordinate').value==='-33.500000, -70.666667'"),"DDM input normalisation");
+  await paste("25°60′N 121°0′E");
+  await evaluate("document.querySelector('#set-origin').click();true");
+  await until(()=>evaluate("document.querySelector('#message').textContent.includes('經緯度格式或範圍無效')"),"invalid angular input rejected");
+  await paste("0, 0");
+  await evaluate("document.querySelector('#set-origin').click();true");
+  await until(()=>evaluate("document.querySelector('#coordinate').value==='0.000000, 0.000000' && document.querySelector('#external-map').href.includes('/0.00000/0.00000')"),"zero coordinate remains valid");
+  console.log("Coordinate input: DD/DMS/DDM paste, explicit confirmation and invalid input verified in Chromium.");
   await evaluate("document.querySelector('.ordinal-pin[aria-label=\"路點 2\"]').click();true");
   await until(()=>evaluate("!!document.querySelector('.maplibregl-popup-content')"),"route popup");
   const popupStyle=()=>evaluate("(()=>{const c=document.querySelector('.maplibregl-popup-content'), p=c.parentElement, t=p.querySelector('.maplibregl-popup-tip'), b=c.querySelector('button');return {text:c.textContent,bg:getComputedStyle(c).backgroundColor,fg:getComputedStyle(c).color,tip:[getComputedStyle(t).borderTopColor,getComputedStyle(t).borderBottomColor,getComputedStyle(t).borderLeftColor,getComputedStyle(t).borderRightColor],close:getComputedStyle(b).color,closeHeight:b.getBoundingClientRect().height}})()");
