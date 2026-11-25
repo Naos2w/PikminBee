@@ -47,6 +47,29 @@ def versions(contents: str) -> tuple[Version, Version]:
     return dev, uat
 
 
+def production_version(contents: str) -> Version:
+    version = Version.parse(property_value(contents, "pikminbeeProductionVersion"))
+    if version.major < 1:
+        raise ValueError("Production starts at 1.0.0")
+    return version
+
+
+def update_production(contents: str, target: str) -> str:
+    # DEV and UAT are independently managed, and must remain valid/unchanged.
+    versions(contents)
+    version = Version.parse(target)
+    if version.major < 1:
+        raise ValueError("Production starts at 1.0.0")
+    key = "pikminbeeProductionVersion"
+    if re.search(rf"^{key}=", contents, re.MULTILINE):
+        old = production_version(contents)
+        if version <= old:
+            raise ValueError("The next production version must increase")
+        return re.sub(rf"^{key}=[^\r\n]*$", f"{key}={version}", contents,
+                      count=1, flags=re.MULTILINE)
+    return contents.rstrip("\r\n") + f"\n\n# Independent production release version.\n{key}={version}\n"
+
+
 def updated_versions(dev: Version, uat: Version, channel: str) -> tuple[Version, Version]:
     if channel == "dev":
         next_dev, next_uat = Version(dev.major, dev.minor, dev.patch + 1), uat
@@ -80,12 +103,22 @@ def update(contents: str, channel: str) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Advance PikminBee semantic versions")
-    parser.add_argument("channel", choices=("check", "dev", "uat"))
+    parser.add_argument("channel", choices=("check", "dev", "uat", "production"))
+    parser.add_argument("--set-version", help="Explicit next production version (X.Y.Z)")
     parser.add_argument("--file", type=Path, default=ROOT / "gradle.properties")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     original = args.file.read_text(encoding="utf-8")
-    new = original if args.channel == "check" else update(original, args.channel)
+    if args.channel == "production":
+        if not args.set_version:
+            parser.error("production requires --set-version X.Y.Z")
+        new = update_production(original, args.set_version)
+    else:
+        if args.set_version:
+            parser.error("--set-version is only valid with production")
+        new = original if args.channel == "check" else update(original, args.channel)
+    if args.channel == "production" or re.search(r"^pikminbeeProductionVersion=", new, re.MULTILINE):
+        print(f"PROD {production_version(new)}")
     before_dev, before_uat = versions(original)
     after_dev, after_uat = versions(new)
     print(f"UAT {before_uat} -> {after_uat}; DEV {before_dev} -> {after_dev}")

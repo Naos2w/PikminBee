@@ -10,12 +10,18 @@ data class InstalledAppVersion(val name: String?, val code: Long?, val environme
     } ?: "版本待確認"
 
     companion object {
+        fun environmentFor(packageName: String): String = when {
+            packageName.endsWith(".uat") -> "UAT"
+            packageName.endsWith(".prod") -> "PROD"
+            else -> "DEV"
+        }
+
         @Suppress("DEPRECATION")
         fun read(context: Context): InstalledAppVersion {
             val info = runCatching {
                 context.packageManager.getPackageInfo(context.packageName, 0)
             }.getOrNull()
-            val environment = if (context.packageName.endsWith(".uat")) "UAT" else "DEV"
+            val environment = environmentFor(context.packageName)
             return InstalledAppVersion(info?.versionName, info?.let(PackageInfoCompat::getLongVersionCode),
                 environment)
         }

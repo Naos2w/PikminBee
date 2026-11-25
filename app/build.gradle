@@ -11,9 +11,10 @@ if (secretsFile.exists()) {
 def mapsKey = secrets.getProperty('GOOGLE_MAPS_API_KEY', '')
 
 // Visible semantic versions are separate from Android installation versionCodes.
-// Use scripts/bump_version.py dev|uat to advance each channel.
+// Use scripts/bump_version.py dev|uat|production to advance each channel.
 def devVersion = providers.gradleProperty('pikminbeeDevVersion').orNull
 def uatVersion = providers.gradleProperty('pikminbeeUatVersion').orNull
+def productionVersion = providers.gradleProperty('pikminbeeProductionVersion').orNull
 def semanticVersion = ~/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 if (devVersion == null || !(devVersion ==~ semanticVersion) ||
     uatVersion == null || !(uatVersion ==~ semanticVersion)) {
@@ -32,10 +33,31 @@ if (devParts.any { it >= 1000 }) {
 // This separate, debug-only UAT package can coexist with older personal builds.
 // Its signing key comes from private GitHub Actions secrets, never from source.
 def isUat = System.getenv('PIKMINBEE_UAT') == 'true'
+def isProduction = System.getenv('PIKMINBEE_PRODUCTION') == 'true'
+def unsignedProductionCheck = providers.gradleProperty('pikminbeeUnsignedProductionCheck').orNull == 'true'
+if (isUat && isProduction) {
+    throw new GradleException('UAT and production channels are mutually exclusive')
+}
+if (unsignedProductionCheck && !isProduction) {
+    throw new GradleException('Unsigned production checks require the production channel')
+}
+if (productionVersion == null || !(productionVersion ==~ semanticVersion)) {
+    throw new GradleException('Production version must be X.Y.Z')
+}
+def productionParts = productionVersion.tokenize('.').collect { it.toInteger() }
+if (productionParts[0] < 1 || productionParts.any { it >= 1000 }) {
+    throw new GradleException('Production starts at 1.0.0; version components must be below 1000')
+}
+def productionInstallCode = productionParts[0] * 1_000_000 + productionParts[1] * 1_000 + productionParts[2]
+def releaseStoreFile = System.getenv('PIKMINBEE_RELEASE_KEYSTORE_FILE')
+def releaseStorePassword = System.getenv('PIKMINBEE_RELEASE_SIGN_PASSWORD')
+if (isProduction && !unsignedProductionCheck && (!releaseStoreFile || !releaseStorePassword)) {
+    throw new GradleException('Missing dedicated production signing configuration')
+}
 // The target phone uses arm64. Keep ordinary DEV universal and allow a
 // deliberate alternative APK for other devices/emulators.
 def apkAbi = providers.gradleProperty('pikminbeeApkAbi')
-    .orElse(isUat ? 'arm64-v8a' : 'universal').get()
+    .orElse((isUat || isProduction) ? 'arm64-v8a' : 'universal').get()
 if (!(apkAbi in ['universal', 'arm64-v8a', 'armeabi-v7a', 'x86', 'x86_64'])) {
     throw new GradleException('Unsupported pikminbeeApkAbi: ' + apkAbi)
 }
@@ -64,8 +86,8 @@ android {
         applicationId 'com.naos.pikminbee'
         minSdk 28
         targetSdk 36
-        versionCode isUat ? uatInstallCode.toInteger() : devInstallCode
-        versionName isUat ? uatVersion : devVersion + "-dev"
+        versionCode isProduction ? productionInstallCode : (isUat ? uatInstallCode.toInteger() : devInstallCode)
+        versionName isProduction ? productionVersion : (isUat ? uatVersion : devVersion + "-dev")
         manifestPlaceholders = [
             googleMapsKey: mapsKey,
             appDisplayName: isUat ? 'PikminBee UAT' : 'PikminBee',
@@ -90,6 +112,14 @@ android {
     }
 
     signingConfigs {
+        if (isProduction && !unsignedProductionCheck) {
+            production {
+                storeFile file(releaseStoreFile)
+                storePassword releaseStorePassword
+                keyAlias 'pikminbee-release'
+                keyPassword releaseStorePassword
+            }
+        }
         if (isUat) {
             uat {
                 storeFile file(uatStoreFile)
@@ -108,8 +138,23 @@ android {
             }
         }
         release {
+            // Separate install identity keeps DEV/UAT data and certificates intact.
+            applicationIdSuffix '.prod'
+            debuggable false
             minifyEnabled false
+            if (isProduction && !unsignedProductionCheck) {
+                signingConfig signingConfigs.production
+            }
         }
+    }
+}
+
+androidComponents {
+    beforeVariants(selector().withBuildType("release")) { variant ->
+        variant.enable = isProduction
+    }
+    beforeVariants(selector().withBuildType("debug")) { variant ->
+        variant.enable = !isProduction
     }
 }
 

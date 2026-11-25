@@ -2,7 +2,7 @@
 
 import unittest
 
-from bump_version import Version, update, updated_versions, versions
+from bump_version import Version, update, updated_versions, versions, production_version, update_production
 
 
 BASE = (
@@ -48,6 +48,17 @@ class VersioningTests(unittest.TestCase):
             with self.subTest(invalid=invalid):
                 with self.assertRaises(ValueError):
                     versions(invalid)
+
+    def test_production_is_independent_and_strictly_monotonic(self):
+        first = update_production(BASE, "1.0.0")
+        self.assertEqual(Version(1, 0, 0), production_version(first))
+        self.assertEqual(versions(BASE), versions(first))
+        self.assertEqual(Version(1, 0, 0), production_version(update(first, "uat")))
+        second = update_production(first, "1.0.1")
+        self.assertEqual(Version(1, 0, 1), production_version(second))
+        for invalid in ("0.99.1", "1.0.0", "1.00.1", "1.0.1000", "1.0.1-dev"):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                update_production(first, invalid)
 
     def test_component_overflow_is_rejected(self):
         with self.assertRaises(ValueError):
