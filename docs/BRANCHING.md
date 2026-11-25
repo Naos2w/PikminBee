@@ -4,11 +4,11 @@ Three long-lived branches, because UAT is explicitly a separate release gate:
 
 ## Issue-first planning and design review
 
-- GitHub Issues are the canonical task ledger; GitHub Projects is the status/planning view when authorized. See [task navigation](TODO.md) and the [V4 design review epic #140](https://github.com/Naos2w/PikminBee/issues/140).
+- GitHub Issues are the canonical task ledger; [PikminBee Development (Project #1)](https://github.com/users/Naos2w/projects/1) is the verified status/planning view. See [task navigation](TODO.md) and the [V4 design review epic #140](https://github.com/Naos2w/PikminBee/issues/140).
 - Before opening a development branch, read the existing Issue, its latest review decisions, acceptance criteria and linked PRs. Do not recreate completed work or maintain a parallel TODO list.
 - Record visual/function assessment, proposed UI, mockups, dependencies and test evidence in the corresponding Issue. New visual direction requires user review before implementation; no private coordinates, account details, PINs or unauthorized screenshots in public artifacts.
 - Reference the Issue in the PR; avoid auto-closing a task merely on merge when physical UAT is required. A merged implementation, fixed-signer APK build and verified device acceptance are separate gates.
-- Status proposal for Projects: Backlog, Ready, In Progress, Review, UAT, Done, Blocked. Close an Issue only after its stated acceptance criteria actually pass; preserve cancelled/superseded history. No automatic APK, staging or production promotion.
+- Projects currently uses Todo / In Progress / Done with separate V4 design review, UAT and future backlog views. Expanded Status options (Backlog / Ready / Review / UAT / Blocked) and dedicated metadata fields remain pending; do not claim they are configured. Close an Issue only after its stated acceptance criteria actually pass; preserve cancelled/superseded history. No automatic APK, staging or production promotion.
 
 ## DEV / UAT semantic versions
 
