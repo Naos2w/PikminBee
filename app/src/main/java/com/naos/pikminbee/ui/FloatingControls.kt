@@ -4,6 +4,13 @@ import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.content.Context
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Intent
+import com.naos.pikminbee.MainActivity
+import com.naos.pikminbee.lan.LanControlService
+import com.naos.pikminbee.lan.LanStatus
+import kotlinx.coroutines.flow.collect
 import android.content.res.ColorStateList
 import androidx.compose.ui.graphics.toArgb
 import android.graphics.PixelFormat
@@ -76,6 +83,18 @@ class FloatingControls(
     private var logoRenderKey: String = ""
     private var quickSummary: TextView? = null
     private var quickSteps: TextView? = null
+    private var wifiPanelOpen = false
+    private var wifiPanel: LinearLayout? = null
+    private var wifiSummary: TextView? = null
+    private var wifiAddress: TextView? = null
+    private var wifiPin: TextView? = null
+    private var wifiPending: TextView? = null
+    private var wifiApprove: TextView? = null
+    private var wifiDeny: TextView? = null
+    private var wifiCopy: TextView? = null
+    private var wifiToggle: TextView? = null
+    private var wifiDisconnect: TextView? = null
+    private var wifiStatusJob: Job? = null
     private val quickActions = linkedMapOf<OverlayQuickAction, ImageView>()
     private var lastPhase: WalkPhase = WalkPhase.IDLE
     private var lastMode: WalkMode? = null
@@ -502,6 +521,7 @@ class FloatingControls(
         iconUpdate(OverlayQuickAction.SPEED, OverlayGlyph.SPEED,
             "切換行走速度，目前 ${currentSpeed.kilometresPerHour} km/h")
         iconUpdate(OverlayQuickAction.MAP, OverlayGlyph.MAP, "開啟 PikminBee 地圖")
+        iconUpdate(OverlayQuickAction.WIFI, OverlayGlyph.WIFI, "Wi-Fi 控制 · " + LanStatus.display.value.connection.label)
         iconUpdate(OverlayQuickAction.CLOSE, OverlayGlyph.CLOSE, "關閉懸浮視窗，不停止行走")
         refreshBeeLogo()
     }
@@ -636,6 +656,8 @@ class FloatingControls(
                     Triple(which, OverlayGlyph.SPEED, "切換三種速度預設；自訂與區間速度請在主畫面設定")
                 OverlayQuickAction.MAP ->
                     Triple(which, OverlayGlyph.MAP, "打開地圖")
+                OverlayQuickAction.WIFI ->
+                    Triple(which, OverlayGlyph.WIFI, "Wi-Fi 控制")
                 OverlayQuickAction.CLOSE ->
                     Triple(which, OverlayGlyph.CLOSE, "關閉懸浮")
             }
@@ -656,6 +678,7 @@ class FloatingControls(
                             refreshQuick()
                         }
                         OverlayQuickAction.MAP -> openMap()
+                        OverlayQuickAction.WIFI -> toggleWifiPanel()
                         OverlayQuickAction.CLOSE -> sendAction(HIDE)
                     }
                 }, LinearLayout.LayoutParams(0, dp(52), 1f).apply {
@@ -666,6 +689,7 @@ class FloatingControls(
             actions.addView(row)
         }
 
+        actions.addView(buildWifiPanel())
         val scroll = ScrollView(context).apply {
             visibility = View.GONE
             isVerticalScrollBarEnabled = true
@@ -744,12 +768,122 @@ class FloatingControls(
         }
         windows.addView(container, layout)
         root = container
+        wifiStatusJob = dailyReadScope.launch {
+            LanStatus.display.collect { refreshWifiPanel(); refreshQuick() }
+        }
         panel = scroll
         params = layout
         expanded = false
         stepsHandler.removeCallbacks(stepRefresh)
         stepsHandler.post(stepRefresh)
         container.post { keepVisible(container, layout) }
+    }
+
+    private fun wifiCommand(action: String) {
+        runCatching { context.startService(LanControlService.command(context, action)) }
+            .onFailure { Toast.makeText(context, "無法執行 Wi-Fi 操作，請回 App", Toast.LENGTH_SHORT).show() }
+    }
+
+    private fun openWifiSettings() {
+        runCatching {
+            context.startActivity(Intent(context, MainActivity::class.java)
+                .putExtra(MainActivity.EXTRA_OPEN_SETTINGS, true)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+        }.onFailure { Toast.makeText(context, "請從主 App 設定開啟 Wi-Fi", Toast.LENGTH_LONG).show() }
+    }
+
+    private fun enableWifi() {
+        // This method is invoked only by a visible user tap.
+        runCatching { LanControlService.enable(context) }.onFailure {
+            Toast.makeText(context, "系統限制背景啟動，請回 App 開啟 Wi-Fi", Toast.LENGTH_LONG).show()
+            openWifiSettings()
+        }
+    }
+
+    private fun toggleWifiPanel() {
+        wifiPanelOpen = !wifiPanelOpen
+        if (wifiPanelOpen && !LanStatus.display.value.active &&
+            LanStatus.display.value.connection.phase.name != "STARTING") enableWifi()
+        refreshWifiPanel()
+    }
+
+    private fun buildWifiPanel(): LinearLayout {
+        val box = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(6), dp(6), dp(6), dp(8))
+            visibility = View.GONE
+        }
+        fun line(size: Float): TextView = TextView(context).apply {
+            textSize = size
+            setTextColor(colors().ink.toArgb())
+            setPadding(dp(5), dp(3), dp(5), dp(3))
+        }
+        fun action(label: String, click: () -> Unit): TextView = line(13f).apply {
+            text = label
+            contentDescription = label
+            gravity = Gravity.CENTER
+            minHeight = dp(48)
+            background = softButtonBackground()
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { click() }
+        }
+        fun row(vararg views: View) {
+            val row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+            views.forEach { row.addView(it, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(4) }) }
+            box.addView(row)
+        }
+        wifiSummary = line(14f).also { box.addView(it) }
+        wifiAddress = line(12f).also { box.addView(it) }
+        wifiCopy = action("複製網址") {
+            val address = LanStatus.display.value.address
+            if (address.isNotBlank()) {
+                context.getSystemService(ClipboardManager::class.java)
+                    .setPrimaryClip(ClipData.newPlainText("PikminBee URL", address))
+                Toast.makeText(context, "已複製網址", Toast.LENGTH_SHORT).show()
+            }
+        }.also { box.addView(it) }
+        wifiPin = line(24f).apply { gravity = Gravity.CENTER; letterSpacing = .12f }.also { box.addView(it) }
+        wifiPending = line(12f).also { box.addView(it) }
+        wifiApprove = action("核准") { wifiCommand(LanControlService.APPROVE) }
+        wifiDeny = action("拒絕") { wifiCommand(LanControlService.DENY) }
+        row(requireNotNull(wifiDeny), requireNotNull(wifiApprove))
+        wifiDisconnect = action("中斷連線") { wifiCommand(LanControlService.DISCONNECT) }
+            .also { box.addView(it) }
+        wifiToggle = action("開啟 Wi-Fi") {
+            if (LanStatus.display.value.active) wifiCommand(LanControlService.DISABLE) else enableWifi()
+        }.also { box.addView(it) }
+        box.addView(action("? 配對說明") {
+            Toast.makeText(context, "同一可信私人 Wi-Fi：電腦開啟網址、輸入六位碼、手機核准。HTTP 未加密；請勿公開連接埠。收合懸浮不會斷線。", Toast.LENGTH_LONG).show()
+        })
+        wifiPanel = box
+        return box
+    }
+
+    private fun refreshWifiPanel() {
+        val box = wifiPanel ?: return
+        val lan = LanStatus.display.value
+        val state = lan.connection
+        fun show(view: View?, visible: Boolean) { view?.visibility = if (visible) View.VISIBLE else View.GONE }
+        fun update(view: TextView?, value: String) { if (view?.text?.toString() != value) view?.text = value }
+        wifiSummary?.setTextColor(colors().ink.toArgb())
+        update(wifiSummary, state.label + if (state.hasSession) " · " + state.countdown else "")
+        update(wifiAddress, lan.address)
+        show(wifiAddress, lan.active)
+        show(wifiCopy, lan.active)
+        update(wifiPin, if (state.showPin) lan.pairingPin.chunked(3).joinToString(" ") else "")
+        show(wifiPin, lan.active && state.showPin)
+        update(wifiPending, state.pendingDevice.ifBlank {
+            if (state.phase.name == "ERROR") lan.note else state.device
+        })
+        show(wifiPending, wifiPending?.text?.isNotBlank() == true)
+        show(wifiApprove, state.pendingDevice.isNotBlank())
+        show(wifiDeny, state.pendingDevice.isNotBlank())
+        show(wifiDisconnect, state.hasSession)
+        update(wifiToggle, if (lan.active) "關閉 Wi-Fi 控制" else "開啟 Wi-Fi 控制")
+        wifiToggle?.isEnabled = state.phase.name != "STARTING"
+        show(box, wifiPanelOpen)
+        if (expanded) root?.post { fitExpandedPanelToScreen() }
     }
 
     private fun toggleExpanded() {
@@ -818,6 +952,19 @@ class FloatingControls(
     }
 
     fun dismiss() {
+        wifiStatusJob?.cancel()
+        wifiStatusJob = null
+        wifiPanel = null
+        wifiSummary = null
+        wifiAddress = null
+        wifiPin = null
+        wifiPending = null
+        wifiApprove = null
+        wifiDeny = null
+        wifiCopy = null
+        wifiToggle = null
+        wifiDisconnect = null
+        wifiPanelOpen = false
         stepsHandler.removeCallbacks(stepRefresh)
         dailyReadJob?.cancel()
         dailyStepsCache.invalidate()

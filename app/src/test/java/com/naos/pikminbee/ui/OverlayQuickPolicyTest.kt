@@ -23,11 +23,11 @@ class OverlayQuickPolicyTest {
         )
         assertEquals(
             listOf(OverlayQuickAction.SPEED, OverlayQuickAction.MAP,
-                OverlayQuickAction.CLOSE),
+                OverlayQuickAction.WIFI, OverlayQuickAction.CLOSE),
             OverlayQuickPolicy.bottomRow,
         )
         assertFalse(OverlayQuickAction.entries.any { it.name == "FLOWER_VISION" })
-        assertEquals(7, (OverlayQuickPolicy.topRow + OverlayQuickPolicy.bottomRow).distinct().size)
+        assertEquals(8, (OverlayQuickPolicy.topRow + OverlayQuickPolicy.bottomRow).distinct().size)
     }
 
     @Test fun gpsModeIndicatorReflectsActualMockProviderNotLastClick() {

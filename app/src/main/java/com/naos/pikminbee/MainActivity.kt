@@ -1124,10 +1124,7 @@ private fun PikminBeeScreen() {
                             ToolTab.TELEPORT -> {
                                 Text("瞬移到指定位置", fontWeight = FontWeight.Bold, color = foreground)
                                 Text("選取：" + selected.label(), color = muted, fontSize = 13.sp)
-                                Text("上方座標列可貼上 DD、DMS、DDM；點地圖只會選取，不會自動瞬移。",
-                                    color = muted, fontSize = 12.sp)
-                                Text("例如 25.033, 121.5654；25°01′58.8″N 121°33′55.44″E；25°1.980′N 121°33.924′E。",
-                                    color = muted, fontSize = 12.sp)
+                                Text("選取座標後確認。", color = muted, fontSize = 12.sp)
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Button(
                                         onClick = {
@@ -1215,6 +1212,25 @@ private fun PikminBeeScreen() {
                                     onLoopChange = {},
                                     onRoutePrimary = { handleJourneyPrimary() },
                                     onRouteStop = ::requestStopWalk,
+                                    onLocateStop = { point ->
+                                        focusMapPoint(point)
+                                        closeDetailsRequest++
+                                    },
+                                    onEditStop = { index ->
+                                        if (!planning && walkPhase !in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)) {
+                                            routeEditingStopIndex = index
+                                            closeDetailsRequest++
+                                            message = "請在地圖重新選擇第 ${index + 1} 點"
+                                        }
+                                    },
+                                    onMoveStop = { index, offset ->
+                                        if (!planning && walkPhase !in listOf(WalkPhase.MOVING, WalkPhase.PAUSED))
+                                            prefs.saveRouteDraft(RoutePointDraft.move(roadStops, index, offset))
+                                    },
+                                    onDeleteStop = { index ->
+                                        if (!planning && walkPhase !in listOf(WalkPhase.MOVING, WalkPhase.PAUSED))
+                                            prefs.saveRouteDraft(RoutePointDraft.remove(roadStops, index))
+                                    },
                                 )
                             }
                         }

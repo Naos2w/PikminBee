@@ -27,6 +27,7 @@ class LanControlService : Service() {
         const val DISABLE = "com.naos.pikminbee.lan.DISABLE"
         const val APPROVE = "com.naos.pikminbee.lan.APPROVE"
         const val DENY = "com.naos.pikminbee.lan.DENY"
+        const val DISCONNECT = "com.naos.pikminbee.lan.DISCONNECT"
         const val SHARE_PHYSICAL = "com.naos.pikminbee.lan.SHARE_PHYSICAL"
         const val REVOKE_PHYSICAL = "com.naos.pikminbee.lan.REVOKE_PHYSICAL"
         private const val CHANNEL = "pikminbee_remote_control"
@@ -47,7 +48,7 @@ class LanControlService : Service() {
             controller?.checkNetwork()
             if (!LanStatus.display.value.active) {
                 stopSelf()
-            } else handler.postDelayed(this, 5_000L)
+            } else handler.postDelayed(this, 1_000L)
         }
     }
 
@@ -66,6 +67,8 @@ class LanControlService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         return when (intent?.action) {
             ENABLE -> {
+                if (!LanStatus.display.value.active) LanStatus.display.value = LanDisplay(
+                    note = "正在啟動 Wi-Fi 控制", connection = LanConnection(LanConnectionPhase.STARTING))
                 // Foreground notification must be created promptly after
                 // startForegroundService even if Wi-Fi is not available.
                 runCatching {
@@ -75,7 +78,8 @@ class LanControlService : Service() {
                     )
                 }.onFailure {
                     LanStatus.display.value = LanDisplay(note =
-                        "電腦控制服務無法啟動：" + (it.message ?: "系統限制"))
+                        "電腦控制服務無法啟動：" + (it.message ?: "系統限制"),
+                        connection = LanConnection(LanConnectionPhase.ERROR))
                     stopSelf()
                     return START_NOT_STICKY
                 }
@@ -85,11 +89,12 @@ class LanControlService : Service() {
                     // Preserve the actionable network failure for the Settings UI.
                     controller?.close()
                     controller = null
-                    LanStatus.display.value = LanDisplay(note = result)
+                    LanStatus.display.value = LanDisplay(note = result,
+                        connection = LanConnection(LanConnectionPhase.ERROR))
                     stopSelf()
                 } else {
                     handler.removeCallbacks(networkWatch)
-                    handler.postDelayed(networkWatch, 5_000L)
+                    handler.postDelayed(networkWatch, 1_000L)
                 }
                 START_NOT_STICKY
             }
@@ -99,6 +104,10 @@ class LanControlService : Service() {
             }
             DENY -> {
                 controller?.denyPending()
+                START_NOT_STICKY
+            }
+            DISCONNECT -> {
+                controller?.disconnectBrowser()
                 START_NOT_STICKY
             }
             SHARE_PHYSICAL -> {
