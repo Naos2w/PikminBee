@@ -60,14 +60,22 @@ object RouteDraftState {
 object WalkSpeedState {
     val selected = MutableStateFlow(WalkSpeedPreset.DEFAULT)
     val preferred = MutableStateFlow(WalkSpeedPreset.DEFAULT)
+    val preferredProfile = MutableStateFlow(WalkSpeedProfile.preset(WalkSpeedPreset.DEFAULT))
     val profile = MutableStateFlow(WalkSpeedProfile.preset(WalkSpeedPreset.DEFAULT))
     private var initialized = false
 
-    @Synchronized fun initialize(savedDefault: WalkSpeedPreset) {
+    fun resolvePreferred(savedDefault: WalkSpeedPreset, savedCustom: String?): WalkSpeedProfile =
+        savedCustom?.let(WalkSpeedProfile::tryFixed)?.let {
+            WalkSpeedProfile.fixed(it.fixedKmh, savedDefault)
+        } ?: WalkSpeedProfile.preset(savedDefault)
+
+    @Synchronized fun initialize(savedDefault: WalkSpeedPreset, savedCustom: String? = null) {
         if (!initialized) {
+            val initial = resolvePreferred(savedDefault, savedCustom)
             selected.value = savedDefault
             preferred.value = savedDefault
-            profile.value = WalkSpeedProfile.preset(savedDefault)
+            preferredProfile.value = initial
+            profile.value = initial
             initialized = true
         }
     }
@@ -77,7 +85,12 @@ object WalkSpeedState {
         profile.value = next
         if (next.mode == WalkSpeedMode.PRESET) selected.value = next.preset
     }
-    fun updatePreferred(next: WalkSpeedPreset) { preferred.value = next }
+    fun updatePreferred(next: WalkSpeedPreset) = updatePreferredProfile(WalkSpeedProfile.preset(next))
+    fun updatePreferredProfile(next: WalkSpeedProfile) {
+        require(next.mode != WalkSpeedMode.RANGE)
+        preferred.value = next.preset
+        preferredProfile.value = next
+    }
 }
 
 /** Saved routes are a distinct library from the currently edited map draft. */
@@ -104,7 +117,7 @@ class AppPreferences(private val context: Context) {
         WalkSpeedState.initialize(WalkSpeedPreset.fromSavedDefault(
             prefs.getString("walk_speed_default", null),
             prefs.getString("walk_speed_preset", null),
-        ))
+        ), prefs.getString("walk_speed_default_custom_kmh", null))
     }
 
     /** The first-launch wizard never requests permissions automatically. */
@@ -165,9 +178,18 @@ class AppPreferences(private val context: Context) {
     }
 
     /** Explicit user choice; only this changes the next App launch's default speed. */
-    fun setDefaultWalkSpeedPreset(next: WalkSpeedPreset) {
-        prefs.edit().putString("walk_speed_default", next.name).apply()
-        WalkSpeedState.updatePreferred(next)
+    fun setDefaultWalkSpeedPreset(next: WalkSpeedPreset) =
+        setDefaultWalkSpeedProfile(WalkSpeedProfile.preset(next))
+
+    /** The default is independent of an active test session. Preserve legacy preset as fallback. */
+    fun setDefaultWalkSpeedProfile(next: WalkSpeedProfile) {
+        require(next.mode != WalkSpeedMode.RANGE)
+        prefs.edit().putString("walk_speed_default", next.preset.name).apply {
+            if (next.mode == WalkSpeedMode.FIXED)
+                putString("walk_speed_default_custom_kmh", next.fixedKmh.toString())
+            else remove("walk_speed_default_custom_kmh")
+        }.apply()
+        WalkSpeedState.updatePreferredProfile(next)
     }
 
     fun provider(): MapProvider = MapBasemapPolicy.resolveProvider(

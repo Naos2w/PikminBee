@@ -218,6 +218,13 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
 .web-setting-row label{font-size:13px;color:var(--text);margin:0}
 .map-style-label{font-size:12px!important;margin:0!important;font-weight:650;flex:none!important}
 #web-settings h2{font-size:16px}
+.web-theme-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px}
+.web-theme-options button{min-height:44px;padding:6px 3px;font-size:12px}
+.web-theme-options button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
+.web-version{text-align:center;margin:12px 0 6px;font-size:11px}
+#web-settings-close{width:100%}
+body.remote-active[data-mode="settings"][data-device="mobile"] #control-panel:not([data-sheet="collapsed"]){height:min(235px,72dvh)}
+body.remote-active[data-mode="settings"]:not([data-device="mobile"]) #control-panel[data-panel="open"]{max-height:min(340px,75dvh);height:auto}
 .saved-dialog{width:min(530px,calc(100vw - 24px));max-height:min(86svh,900px);border:1px solid var(--rim);border-radius:20px;padding:17px;background:var(--surface);color:var(--text);box-shadow:var(--shadow);overflow:hidden}
 .saved-dialog::backdrop{background:rgba(0,0,0,.55)}
 .saved-dialog[open]{display:flex;flex-direction:column;gap:9px}
@@ -706,21 +713,16 @@ button.maplibregl-popup-close-button:focus-visible{outline:2px solid var(--accen
   <div class="row"><button id="start" class="primary" disabled>② 確認開始行走</button></div>
  </div>
  <section id="web-settings" class="hidden" aria-label="Web 控制設定">
-   <details class="settings-group"><summary>◐ 地圖與外觀</summary>
-    <div class="web-setting-row"><label for="web-appearance">網站介面主題</label>
-     <select id="web-appearance" aria-label="網站介面主題">
-      <option value="auto">跟隨系統</option><option value="light">淺色</option><option value="dark">深色</option>
-     </select></div>
-    <p>Bright 地圖隨網站主題切換，設定保存在此瀏覽器。</p>
-   </details>
-   <details class="settings-group"><summary>↗ 路徑與速度</summary>
-    <button id="web-settings-route" type="button">開啟路徑控制</button>
-   </details>
-   <details class="settings-group"><summary>◎ GPS 測試</summary><p>定位測試與系統權限由 Android App 管理。</p></details>
-   <details class="settings-group"><summary>⋯ 懸浮控制</summary><p>在手機設定管理懸浮快捷鍵。</p></details>
-   <details class="settings-group"><summary>◉ Wi-Fi 控制 <span id="settings-lan-status" class="muted"></span></summary><p>手機核准配對與續期；收合控制不會結束連線。</p></details>
-   <details class="settings-group"><summary>♡ 權限與健康資料</summary><p>真實 GPS 須在手機明確同意；快照有效 30 分鐘。健康資料僅由手機授權管理。HTTP 私人區網未加密。</p></details>
-   <details class="settings-group"><summary>ⓘ 關於 PikminBee</summary><p id="settings-app-version"></p></details>
+   <label id="web-theme-label">介面外觀</label>
+   <div class="web-theme-options" role="group" aria-labelledby="web-theme-label">
+    <button type="button" data-web-theme-option="auto" aria-pressed="true">跟隨系統</button>
+    <button type="button" data-web-theme-option="light" aria-pressed="false">淺色</button>
+    <button type="button" data-web-theme-option="dark" aria-pressed="false">深色</button>
+   </div>
+   <select id="web-appearance" class="hidden" aria-hidden="true" tabindex="-1" aria-label="網站介面主題">
+    <option value="auto">跟隨系統</option><option value="light">淺色</option><option value="dark">深色</option>
+   </select>
+   <p class="muted web-version" id="settings-app-version">版本待確認</p>
    <button type="button" id="web-settings-close">返回控制</button>
  </section>
  </div>

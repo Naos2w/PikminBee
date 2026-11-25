@@ -64,6 +64,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -241,7 +243,7 @@ private fun PikminBeeScreen() {
     var confirmStopWalk by remember { mutableStateOf(false) }
     val speedPreset by WalkSpeedState.selected.collectAsState()
     val speedProfile by WalkSpeedState.profile.collectAsState()
-    val defaultSpeedPreset by WalkSpeedState.preferred.collectAsState()
+    val defaultSpeedProfile by WalkSpeedState.preferredProfile.collectAsState()
     var mockGpsJitterLevel by remember { mutableStateOf(prefs.mockGpsJitterLevel()) }
     var virtualStrideMetres by remember { mutableStateOf(prefs.virtualStrideMetres()) }
     val work = rememberCoroutineScope()
@@ -456,8 +458,8 @@ private fun PikminBeeScreen() {
         message = "速度已選擇：${next.display}" +
             if (moving) " · 行走中已要求更新" else " · 下次行走時使用"
     }
-    fun setDefaultWalkSpeed(next: WalkSpeedPreset) {
-        prefs.setDefaultWalkSpeedPreset(next)
+    fun setDefaultWalkSpeed(next: WalkSpeedProfile) {
+        prefs.setDefaultWalkSpeedProfile(next)
         message = "已將 ${next.display} 設為下次開啟 App 的預設速度"
     }
     fun setMockGpsJitter(next: MockGpsJitterLevel) {
@@ -503,6 +505,10 @@ private fun PikminBeeScreen() {
                     it.getIntExtra(MainActivity.EXTRA_OPEN_MODE, -1) == 3
             } == true) BeePage.SETTINGS
             else if (prefs.setupCompleted()) BeePage.MAP else BeePage.PERMISSIONS)
+    }
+    var mapMounted by remember { mutableStateOf(activePage == BeePage.MAP) }
+    LaunchedEffect(activePage) {
+        if (activePage == BeePage.MAP) mapMounted = true
     }
     val settingsRequest by MainActivity.settingsRequests.collectAsState()
     val modeRequest by MainActivity.mapModeRequests.collectAsState()
@@ -894,72 +900,11 @@ private fun PikminBeeScreen() {
                 )
             }
         }
-        when (activePage) {
-            BeePage.PERMISSIONS -> BeePermissionWizard(
-                dark = dark,
-                initial = !prefs.setupCompleted(),
-                onFinish = {
-                    prefs.setSetupCompleted(true)
-                    phoneLocationRefresh++
-                    activePage = BeePage.MAP
-                },
-                onExit = { activePage = BeePage.MAP },
-            )
-            BeePage.SETTINGS -> BeeSettingsScreen(
-                dark = dark,
-                provider = provider,
-                appearance = appearance,
-                defaultSpeed = defaultSpeedPreset,
-                virtualStrideMetres = virtualStrideMetres,
-                mockGpsJitterLevel = mockGpsJitterLevel,
-                overlayVisible = overlayVisible,
-                mockActive = mockPosition != null,
-                showWifiPanel = showWifiPanel,
-                checkpoint = checkpoint,
-                onProvider = {
-                    provider = it
-                    prefs.setProvider(it)
-                },
-                onAppearance = {
-                    appearance = it
-                    prefs.setAppearance(it)
-                    if (overlayVisible) runCatching {
-                        context.startService(MockLocationService.command(
-                            context, MockLocationService.ACTION_REFRESH_OVERLAY_APPEARANCE))
-                    }.onFailure { message = "已切換主題，浮窗更新失敗：${it.message}" }
-                },
-                onDefaultSpeed = ::setDefaultWalkSpeed,
-                onVirtualStrideMetres = {
-                    prefs.setVirtualStrideMetres(it)
-                    virtualStrideMetres = it
-                    message = "虛擬步幅已設定為 ${String.format(java.util.Locale.US, "%.1f", it * 100).removeSuffix(".0")} 公分，下一次行走生效"
-                },
-                onMockGpsJitterLevel = ::setMockGpsJitter,
-                onPermissions = { activePage = BeePage.PERMISSIONS },
-                overlayGuideEnabled = guideEnabled,
-                overlayHoldHints = holdHints,
-                onOverlayGuideEnabled = {
-                    guideEnabled = it
-                    prefs.setOverlayFirstUseGuideEnabled(it)
-                },
-                onOverlayHoldHints = {
-                    holdHints = it
-                    prefs.setOverlayLongPressTips(it)
-                },
-                onReplayOverlayGuide = {
-                    showOverlayAfterGuide = false
-                    showOverlayGuide = true
-                },
-                onOverlay = { toggleOverlayControl() },
-                onToggleWifi = { showWifiPanel = !showWifiPanel },
-                onAskLocation = {
-                    requestLocation.launch(Manifest.permission.ACCESS_FINE_LOCATION)
-                },
-                onMessage = { message = it },
-                statusMessage = message,
-                onBack = { activePage = BeePage.MAP },
-            )
-            BeePage.MAP -> MapFirstShell(
+        // Keep one native map instance after the first map visit. Settings and
+        // permissions cover it in the same composition instead of destroying it.
+        Box(Modifier.fillMaxSize().background(semantic.bg)) {
+            if (mapMounted || activePage == BeePage.MAP) MapFirstShell(
+                controlsVisible = activePage == BeePage.MAP,
                 dark = dark,
                 modeIndex = tab.ordinal,
                 modeTitle = tab.label,
@@ -1028,6 +973,7 @@ private fun PikminBeeScreen() {
                 mapContent = {
             LocationMap(
                 provider = provider, dark = dark,
+                interactive = activePage == BeePage.MAP,
                 selected = if (selectionExplicit) selected
                     else mockPosition ?: phonePosition ?: selected,
                 selectionActive = selectionExplicit,
@@ -1236,6 +1182,82 @@ private fun PikminBeeScreen() {
                         }
                 },
             )
+            if (activePage != BeePage.MAP) {
+                Box(Modifier.fillMaxSize().background(semantic.bg)
+                    .pointerInput(Unit) {
+                        // Participate in hit testing even on blank settings space.
+                        // Do not consume children's events: switches, scrolling and
+                        // text editing must keep their normal gesture handling.
+                        awaitPointerEventScope {
+                            while (true) awaitPointerEvent(PointerEventPass.Final)
+                        }
+                    }) {
+            if (activePage == BeePage.PERMISSIONS) BeePermissionWizard(
+                dark = dark,
+                initial = !prefs.setupCompleted(),
+                onFinish = {
+                    prefs.setSetupCompleted(true)
+                    phoneLocationRefresh++
+                    activePage = BeePage.MAP
+                },
+                onExit = { activePage = BeePage.MAP },
+            )
+            if (activePage == BeePage.SETTINGS) BeeSettingsScreen(
+                dark = dark,
+                provider = provider,
+                appearance = appearance,
+                defaultSpeed = defaultSpeedProfile,
+                virtualStrideMetres = virtualStrideMetres,
+                mockGpsJitterLevel = mockGpsJitterLevel,
+                overlayVisible = overlayVisible,
+                mockActive = mockPosition != null,
+                showWifiPanel = showWifiPanel,
+                checkpoint = checkpoint,
+                onProvider = {
+                    provider = it
+                    prefs.setProvider(it)
+                },
+                onAppearance = {
+                    appearance = it
+                    prefs.setAppearance(it)
+                    if (overlayVisible) runCatching {
+                        context.startService(MockLocationService.command(
+                            context, MockLocationService.ACTION_REFRESH_OVERLAY_APPEARANCE))
+                    }.onFailure { message = "已切換主題，浮窗更新失敗：${it.message}" }
+                },
+                onDefaultSpeed = ::setDefaultWalkSpeed,
+                onVirtualStrideMetres = {
+                    prefs.setVirtualStrideMetres(it)
+                    virtualStrideMetres = it
+                    message = "虛擬步幅已設定為 ${String.format(java.util.Locale.US, "%.1f", it * 100).removeSuffix(".0")} 公分，下一次行走生效"
+                },
+                onMockGpsJitterLevel = ::setMockGpsJitter,
+                onPermissions = { activePage = BeePage.PERMISSIONS },
+                overlayGuideEnabled = guideEnabled,
+                overlayHoldHints = holdHints,
+                onOverlayGuideEnabled = {
+                    guideEnabled = it
+                    prefs.setOverlayFirstUseGuideEnabled(it)
+                },
+                onOverlayHoldHints = {
+                    holdHints = it
+                    prefs.setOverlayLongPressTips(it)
+                },
+                onReplayOverlayGuide = {
+                    showOverlayAfterGuide = false
+                    showOverlayGuide = true
+                },
+                onOverlay = { toggleOverlayControl() },
+                onToggleWifi = { showWifiPanel = !showWifiPanel },
+                onAskLocation = {
+                    requestLocation.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+                },
+                onMessage = { message = it },
+                statusMessage = message,
+                onBack = { activePage = BeePage.MAP },
+            )
+                }
+            }
         }
         if (showFavourites && activePage == BeePage.MAP) {
             ModalBottomSheet(

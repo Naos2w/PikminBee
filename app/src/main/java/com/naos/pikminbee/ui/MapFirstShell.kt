@@ -64,6 +64,7 @@ import androidx.compose.ui.unit.sp
 @Composable
 fun MapFirstShell(
     dark: Boolean,
+    controlsVisible: Boolean = true,
     modeIndex: Int,
     modeTitle: String,
     message: String,
@@ -103,8 +104,14 @@ fun MapFirstShell(
     var detailsOpen by rememberSaveable { mutableStateOf(false) }
     var helpOpen by rememberSaveable { mutableStateOf(false) }
     val lan by LanStatus.display.collectAsState()
+    LaunchedEffect(controlsVisible) {
+        if (!controlsVisible) {
+            detailsOpen = false
+            helpOpen = false
+        }
+    }
     LaunchedEffect(openDetailsRequest) {
-        if (openDetailsRequest > 0) detailsOpen = true
+        if (controlsVisible && openDetailsRequest > 0) detailsOpen = true
     }
     LaunchedEffect(closeDetailsRequest) {
         if (closeDetailsRequest > 0) detailsOpen = false
@@ -123,6 +130,7 @@ fun MapFirstShell(
 
     Box(Modifier.fillMaxSize().background(p.bg)) {
         mapContent()
+        if (controlsVisible) {
 
         // Bottom dock: 14dp side margins, 78dp body. The map remains fully
         // interactive above and to either side of the visible controls.
@@ -343,9 +351,10 @@ fun MapFirstShell(
                     bottom = if (showQuick) 224.dp else 132.dp),
             backdrop = backdrop,
         )
+        }
     }
 
-    if (helpOpen) AlertDialog(
+    if (controlsVisible && helpOpen) AlertDialog(
         onDismissRequest = { helpOpen = false },
         title = { Text("$modeTitle 操作說明") },
         text = { Text(if (active == 0)
@@ -353,7 +362,7 @@ fun MapFirstShell(
             else "依序點地圖加入路點，最多 15 點。先規劃道路並確認預覽，再開始。行走或暫停時路點唯讀；停止後才能編輯。") },
         confirmButton = { TextButton(onClick = { helpOpen = false }) { Text("關閉") } },
     )
-    if (detailsOpen) {
+    if (controlsVisible && detailsOpen) {
         ModalBottomSheet(
             onDismissRequest = { detailsOpen = false },
             sheetState = sheetState,

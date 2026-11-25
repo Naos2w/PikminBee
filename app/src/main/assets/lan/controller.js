@@ -305,10 +305,9 @@ $("web-settings-close").addEventListener("click", () => {
   updateModeView();
   if (deviceKind() === "mobile") setSheetState("collapsed");
 });
-$("web-settings-route").addEventListener("click",()=>selectMode("ROUTE",true));
 $("mode-help").addEventListener("click",()=>{
   $("mode-help-heading").textContent=settingsOpen?"設定說明":mode==="ROUTE"?"路徑操作說明":"瞬移操作說明";
-  $("mode-help-body").textContent=settingsOpen?"點分類查看設定；手機專屬權限與懸浮控制由 Android App 管理。Wi-Fi 僅限可信私人網路，HTTP 未加密。":mode==="ROUTE"?"選取起點及路點，按加入、規劃並確認道路，再開始。最多 15 點，循環 14 點；行走中路點唯讀。⋯ 可移動、重選、刪除路點。":"地圖選點或貼上 DD、DMS、DDM 座標。選點只改變選取位置，確認後才瞬移；恢復真實 GPS 會停止模擬。";
+  $("mode-help-body").textContent=settingsOpen?"外觀設定只套用到目前瀏覽器。手機專屬設定在 Android App 管理；真實位置需手機明確同意，快照有效 30 分鐘。Wi-Fi 僅限可信私人網路，HTTP 未加密。":mode==="ROUTE"?"選取起點及路點，按加入、規劃並確認道路，再開始。最多 15 點，循環 14 點；行走中路點唯讀。⋯ 可移動、重選、刪除路點。":"地圖選點或貼上 DD、DMS、DDM 座標。選點只改變選取位置，確認後才瞬移；恢復真實 GPS 會停止模擬。";
   $("mode-help-dialog").showModal();
 });
 $("close-mode-help").addEventListener("click",()=>$("mode-help-dialog").close());
@@ -504,7 +503,7 @@ function showSpeedFields() {
   $("speed-extra").classList.toggle("hidden", !["FIXED","RANGE"].includes(choice));
   $("speed-fixed-wrap").classList.toggle("hidden", choice !== "FIXED");
   $("speed-range-wrap").classList.toggle("hidden", choice !== "RANGE");
-  $("make-speed-default").disabled = ["FIXED","RANGE"].includes(choice);
+  $("make-speed-default").disabled = choice === "RANGE";
 }
 function speedPayload() {
   const selected = $("speed").value;
@@ -543,8 +542,10 @@ $("apply-speed").addEventListener("click", async () => {
   } catch (error) { setMessage(error.message); }
 });
 $("make-speed-default").addEventListener("click", () => {
-  if (["SLOW","WALK","FAST"].includes($("speed").value))
-    act("/api/speed/default",{speedPreset:$("speed").value});
+  try {
+    const profile = speedPayload();
+    if (profile.speedMode !== "RANGE") act("/api/speed/default", profile);
+  } catch (error) { setMessage(error.message); }
 });
 $("plan").addEventListener("click", async () => {
   $("confirm-snap").checked = false;
@@ -604,6 +605,11 @@ const webThemes = ["auto","light","dark"];
 const savedWebTheme = localStorage.getItem(webThemeStoreKey) || "auto";
 $("web-appearance").value = webThemes.includes(savedWebTheme) ? savedWebTheme : "auto";
 document.documentElement.dataset.webTheme = $("web-appearance").value;
+function updateThemeOptions() {
+  document.querySelectorAll("[data-web-theme-option]").forEach(button =>
+    button.setAttribute("aria-pressed", String(button.dataset.webThemeOption === $("web-appearance").value)));
+}
+updateThemeOptions();
 function webThemeIsDark() {
   const chosenTheme = $("web-appearance").value;
   return chosenTheme === "dark" || (chosenTheme === "auto" && darkQuery.matches);
@@ -695,9 +701,15 @@ function chooseWebAppearance() {
   const selectedTheme = webThemes.includes(choice) ? choice : "auto";
   document.documentElement.dataset.webTheme = selectedTheme;
   localStorage.setItem(webThemeStoreKey, selectedTheme);
+  updateThemeOptions();
   applyBrightPalette();
 }
 $("web-appearance").addEventListener("change", chooseWebAppearance);
+document.querySelectorAll("[data-web-theme-option]").forEach(button =>
+  button.addEventListener("click", () => {
+    $("web-appearance").value = button.dataset.webThemeOption;
+    chooseWebAppearance();
+  }));
 darkQuery.addEventListener?.("change", () => {
   if ($("web-appearance").value === "auto") applyBrightPalette();
 });
@@ -1110,7 +1122,6 @@ async function refresh() {
     updateSessionExpiry();
     const connectionLabels={CONNECTED:"已連線",OFFLINE:"暫時離線",PENDING_APPROVAL:"待核准",WAITING_PAIR:"等待配對",EXPIRED:"已到期",REVOKED:"已撤銷",ERROR:"Wi-Fi 錯誤"};
     $("connection").textContent=connectionLabels[latest.connectionPhase]||"已連線";
-    $("settings-lan-status").textContent=$("connection").textContent;
     $("settings-app-version").textContent=latest.appVersionDisplay||"版本待確認";
     current = latest.mockActive ? latest.position : null;
     $("app-version").textContent = typeof latest.appVersionDisplay === "string" ?
@@ -1128,10 +1139,11 @@ async function refresh() {
     showSpeedFields();
     const labels = {SLOW:"慢走 0.8",WALK:"走路 1.4",FAST:"快走 10.8"};
     $("default-speed").textContent = "預設：" +
-      (labels[latest.defaultSpeedPreset] || labels.WALK) + " km/h";
+      (latest.defaultSpeedDisplay || ((labels[latest.defaultSpeedPreset] || labels.WALK) + " km/h"));
     $("make-speed-default").disabled =
-      $("speed").value === "FIXED" || $("speed").value === "RANGE" ||
-      (latest.speedMode === "PRESET" && latest.speedPreset === latest.defaultSpeedPreset);
+      $("speed").value === "RANGE" ||
+      (!speedEditing && latest.speedMode === "PRESET" &&
+       latest.defaultSpeedMode !== "FIXED" && latest.speedPreset === latest.defaultSpeedPreset);
     $("speed-applied").textContent = (latest?.phase === "MOVING" || latest?.phase === "PAUSED") &&
         Number.isFinite(latest.speedAppliedKmh) && latest.speedAppliedKmh > 0
         ? "手機目前套用 " + latest.speedAppliedKmh.toFixed(1) + " km/h" : "";
@@ -1156,7 +1168,6 @@ async function refresh() {
       cameraFocus.clear();
       focusRealWhenReady = false;
       $("connection").textContent = "暫時離線";
-      $("settings-lan-status").textContent = "暫時離線";
       // Never continue to show previously received precise physical coordinates
       // after the authorised session or network connection is lost.
       if (latest) {
