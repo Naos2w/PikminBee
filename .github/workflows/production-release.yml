@@ -59,7 +59,7 @@ jobs:
         run: |
           node --test scripts/test_map_ui_policy.mjs scripts/test_coordinate_formats.mjs
           ./gradlew :app:testDebugUnitTest :app:lintDebug --no-daemon --console=plain
-          PIKMINBEE_PRODUCTION=true ./gradlew :app:testReleaseUnitTest :app:lintRelease -PpikminbeeUnsignedProductionCheck=true --no-daemon --console=plain
+          PIKMINBEE_PRODUCTION=true ./gradlew :app:compileReleaseKotlin :app:lintRelease -PpikminbeeUnsignedProductionCheck=true --no-daemon --console=plain
       - name: Restore owner-provisioned production signing key
         env:
           RELEASE_KEYSTORE_BASE64: ${{ secrets.PIKMINBEE_RELEASE_KEYSTORE_BASE64 }}
