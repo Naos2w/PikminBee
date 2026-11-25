@@ -922,7 +922,7 @@ function renderRouteOrder() {
     detail.textContent=point?point.lat.toFixed(6)+", "+point.lon.toFixed(6):"尚未指定起點";
     li.append(num,detail);
     if(point) li.append(iconButton("◎","在地圖查看"+label,()=>focusMapPosition(point,16)));
-    if(index>=0&&!busy) {
+    if (index >= 0 && !busy) {
       const menu=document.createElement("div");menu.className="stop-menu hidden";
       const more=iconButton("⋯",label+"更多操作",()=>{
         const open=menu.classList.contains("hidden");
