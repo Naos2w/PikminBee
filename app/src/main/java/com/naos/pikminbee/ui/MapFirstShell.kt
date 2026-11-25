@@ -31,6 +31,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.material3.AlertDialog
+import com.naos.pikminbee.lan.LanStatus
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -98,6 +101,8 @@ fun MapFirstShell(
     onRouteStop: () -> Unit = {},
 ) {
     var detailsOpen by rememberSaveable { mutableStateOf(false) }
+    var helpOpen by rememberSaveable { mutableStateOf(false) }
+    val lan by LanStatus.display.collectAsState()
     LaunchedEffect(openDetailsRequest) {
         if (openDetailsRequest > 0) detailsOpen = true
     }
@@ -319,6 +324,17 @@ fun MapFirstShell(
             backdrop = backdrop,
         )
 
+        if (lan.active || lan.connection.phase.name == "ERROR") {
+            Surface(
+                modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding()
+                    .padding(top = 85.dp, end = 16.dp).clickable { onSettings() },
+                color = p.surface, shape = RoundedCornerShape(12.dp),
+            ) {
+                Text("Wi-Fi · " + lan.connection.label, color = p.ink,
+                    fontSize = 11.sp, modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp))
+            }
+        }
+
         CurrentLocationMapButton(
             onClick = onCurrentLocation,
             dark = dark,
@@ -329,6 +345,14 @@ fun MapFirstShell(
         )
     }
 
+    if (helpOpen) AlertDialog(
+        onDismissRequest = { helpOpen = false },
+        title = { Text("$modeTitle 操作說明") },
+        text = { Text(if (active == 0)
+            "在地圖選點或貼上 DD、DMS、DDM 座標，確認後才會瞬移。書籤可收藏位置；恢復真實 GPS 會停止模擬。"
+            else "依序點地圖加入路點，最多 15 點。先規劃道路並確認預覽，再開始。行走或暫停時路點唯讀；停止後才能編輯。") },
+        confirmButton = { TextButton(onClick = { helpOpen = false }) { Text("關閉") } },
+    )
     if (detailsOpen) {
         ModalBottomSheet(
             onDismissRequest = { detailsOpen = false },
@@ -341,9 +365,13 @@ fun MapFirstShell(
                 Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 3.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("$modeTitle · 詳細操作",
+                Text(modeTitle,
                     modifier = Modifier.weight(1f), color = p.ink,
                     fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                IconButton(onClick = { helpOpen = true },
+                    modifier = Modifier.size(48.dp).semantics { contentDescription = "目前模式操作說明" }) {
+                    Text("?", fontSize = 20.sp, color = p.ink)
+                }
                 IconButton(
                     onClick = { detailsOpen = false; onSettings() },
                     modifier = Modifier.size(48.dp).semantics { contentDescription = "開啟設定" },

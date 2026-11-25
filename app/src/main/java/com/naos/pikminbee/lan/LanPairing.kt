@@ -14,7 +14,7 @@ class LanPairing(
     data class ApprovalStatus(val state: String, val token: String? = null)
     data class PendingDevice(val address: String, val name: String)
     private data class Attempts(var count: Int = 0, var windowStart: Long = 0L, var blockedUntil: Long = 0L)
-    private data class Session(val peer: String, val expiresAt: Long)
+    private data class Session(val peer: String, val name: String, val expiresAt: Long, var lastActivityAt: Long? = null)
     private data class Pending(
         val ticket: String, val peer: String, val name: String,
         val token: String, val createdAt: Long, var approved: Boolean = false,
@@ -30,6 +30,7 @@ class LanPairing(
     private val attemptWindowMillis = 60_000L
     private var pin = newPin()
     private var pending: Pending? = null
+    private var endedPhase: LanConnectionPhase? = null
 
     @Synchronized fun currentPin(): String = pin
     @Synchronized fun pendingDevice(): PendingDevice? {
@@ -43,6 +44,7 @@ class LanPairing(
         attempts.clear()
         tokens.clear()
         pending = null
+        endedPhase = null
     }
 
     @Synchronized fun pair(remoteAddress: String, candidate: String, name: String): AuthResult {
@@ -106,8 +108,9 @@ class LanPairing(
             return ApprovalStatus("invalid")
         }
         if (!current.approved) return ApprovalStatus("pending")
+        endedPhase = null
         tokens.clear() // Pairing a new browser revokes old access.
-        tokens[current.token] = Session(current.peer, clockMillis() + tokenLifetimeMillis)
+        tokens[current.token] = Session(current.peer, current.name, clockMillis() + tokenLifetimeMillis)
         pending = null
         return ApprovalStatus("approved", current.token)
     }
@@ -127,8 +130,10 @@ class LanPairing(
             return ApprovalStatus("invalid")
         }
         if (!current.approved) return ApprovalStatus("pending")
+        endedPhase = null
+        val device = tokens[oldToken]?.name ?: "網頁裝置"
         tokens.clear()
-        tokens[current.token] = Session(current.peer, clockMillis() + tokenLifetimeMillis)
+        tokens[current.token] = Session(current.peer, device, clockMillis() + tokenLifetimeMillis)
         pending = null
         return ApprovalStatus("approved", current.token)
     }
@@ -143,7 +148,7 @@ class LanPairing(
     /** Only one pairing session is active: a new browser approval revokes the old one. */
     @Synchronized fun activeSessionToken(): String? {
         val now = clockMillis()
-        tokens.entries.removeIf { now >= it.value.expiresAt }
+        if (tokens.entries.removeIf { now >= it.value.expiresAt }) endedPhase = LanConnectionPhase.EXPIRED
         return tokens.keys.firstOrNull()
     }
 
@@ -151,16 +156,60 @@ class LanPairing(
         if (token == null || token.length !in 40..64) return false
         val session = tokens[token] ?: return false
         if (remoteAddress != session.peer || clockMillis() >= session.expiresAt) {
-            if (clockMillis() >= session.expiresAt) tokens.remove(token)
+            if (clockMillis() >= session.expiresAt) {
+                tokens.remove(token)
+                endedPhase = LanConnectionPhase.EXPIRED
+            }
             return false
         }
         return true
+    }
+
+    /** Only successful authenticated state polling establishes browser presence. */
+    @Synchronized fun markStatePoll(token: String?, remoteAddress: String): Boolean {
+        if (!authorised(token, remoteAddress)) return false
+        tokens[token]?.lastActivityAt = clockMillis()
+        return true
+    }
+
+    /** Safe device-side status. Never includes token, PIN or a pending ticket. */
+    @Synchronized fun connection(): LanConnection {
+        clearExpiredPending()
+        val token = activeSessionToken()
+        val session = token?.let(tokens::get)
+        val now = clockMillis()
+        val seconds = session?.let { ((it.expiresAt - now).coerceAtLeast(0L) + 999L).div(1000L).toInt() } ?: 0
+        val request = pending
+        val phase = when {
+            request != null -> LanConnectionPhase.PENDING_APPROVAL
+            session == null -> endedPhase ?: LanConnectionPhase.WAITING_PAIR
+            session.lastActivityAt == null -> LanConnectionPhase.OFFLINE
+            now - session.lastActivityAt!! in 0L..LAN_ONLINE_WINDOW_MILLIS -> LanConnectionPhase.CONNECTED
+            else -> LanConnectionPhase.OFFLINE
+        }
+        return LanConnection(
+            phase = phase,
+            remainingSeconds = seconds,
+            device = session?.name.orEmpty(),
+            pendingDevice = request?.takeUnless { it.approved }?.let {
+                (if (it.renewFromToken != null) "續期目前裝置" else it.name) + " · " + it.peer
+            }.orEmpty(),
+            awaitingBrowser = request?.approved == true,
+        )
+    }
+
+    @Synchronized fun disconnect() {
+        tokens.clear()
+        pending = null
+        endedPhase = LanConnectionPhase.REVOKED
+        pin = newPin()
     }
 
     @Synchronized fun revoke() {
         tokens.clear()
         attempts.clear()
         pending = null
+        endedPhase = null
     }
 
     private fun clearExpiredPending() {

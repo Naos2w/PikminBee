@@ -32,6 +32,12 @@ object RoutePointDraft {
         return Update(stops + picked, Outcome.ADDED, stops.size)
     }
 
+    fun move(stops: List<Coordinate>, index: Int, offset: Int): List<Coordinate> {
+        if (index !in stops.indices || offset !in listOf(-1, 1) ||
+            index + offset !in stops.indices) return stops
+        return stops.toMutableList().apply { add(index + offset, removeAt(index)) }
+    }
+
     fun undo(stops: List<Coordinate>): List<Coordinate> =
         if (stops.isEmpty()) stops else stops.dropLast(1)
 

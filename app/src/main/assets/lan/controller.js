@@ -305,6 +305,13 @@ $("web-settings-close").addEventListener("click", () => {
   updateModeView();
   if (deviceKind() === "mobile") setSheetState("collapsed");
 });
+$("web-settings-route").addEventListener("click",()=>selectMode("ROUTE",true));
+$("mode-help").addEventListener("click",()=>{
+  $("mode-help-heading").textContent=settingsOpen?"設定說明":mode==="ROUTE"?"路徑操作說明":"瞬移操作說明";
+  $("mode-help-body").textContent=settingsOpen?"點分類查看設定；手機專屬權限與懸浮控制由 Android App 管理。Wi-Fi 僅限可信私人網路，HTTP 未加密。":mode==="ROUTE"?"選取起點及路點，按加入、規劃並確認道路，再開始。最多 15 點，循環 14 點；行走中路點唯讀。⋯ 可移動、重選、刪除路點。":"地圖選點或貼上 DD、DMS、DDM 座標。選點只改變選取位置，確認後才瞬移；恢復真實 GPS 會停止模擬。";
+  $("mode-help-dialog").showModal();
+});
+$("close-mode-help").addEventListener("click",()=>$("mode-help-dialog").close());
 $("panel-toggle").addEventListener("click", () => setSidePanel(!sideOpen, true));
 let ignoreNextHandleClick = false, handlePointerY = null;
 $("sheet-handle").addEventListener("pointerdown", event => {
@@ -895,71 +902,52 @@ function renderRouteOrder() {
   const stops = mode === "ROUTE" ? (latest?.routeStops || []) : [];
   const origin = latest?.origin;
   const busy = latest?.planning || latest?.phase === "MOVING" || latest?.phase === "PAUSED";
-  const key = mode + "|" + JSON.stringify(stops) + "|" +
-    JSON.stringify(origin) + "|" + busy;
+  const key = mode + "|" + JSON.stringify(stops) + "|" + JSON.stringify(origin) + "|" + busy;
   if (key === lastOrderKey) return;
   lastOrderKey = key;
   const list = $("route-order");
   list.replaceChildren();
   if (mode !== "ROUTE") return;
-  const label = "路點";
-  const coordinates = point => point.lat.toFixed(5) + ", " + point.lon.toFixed(5);
-  function addRow(point, index) {
-    const li = document.createElement("li");
-    li.className = "stop-item";
-    const num = document.createElement("span");
-    num.className = "stop-number" + (index < 0 ? " is-origin" : "");
-    num.textContent = index < 0 ? "起" : String(index + 1);
-    const details = document.createElement("div");
-    details.className = "stop-detail";
-    const strong = document.createElement("strong");
-    strong.textContent = index < 0 ? "路線起點" : label + " " + (index + 1);
-    const small = document.createElement("small");
-    small.textContent = point ? coordinates(point) : "尚未指定起點";
-    details.append(strong, small);
-    li.append(num, details);
+  function iconButton(glyph, label, click) {
+    const button=document.createElement("button");button.type="button";
+    button.className="stop-icon";button.textContent=glyph;button.title=label;
+    button.setAttribute("aria-label",label);button.addEventListener("click",click);return button;
+  }
+  function addRow(point,index) {
+    const li=document.createElement("li");li.className="stop-item";
+    const label=index<0?"路線起點":"第 "+(index+1)+" 點";
+    const num=document.createElement("span");num.className="stop-number"+(index<0?" is-origin":index===0?" first":index===stops.length-1?" last":" via");
+    num.textContent=index<0?"起":String(index+1);num.setAttribute("aria-label",label);
+    const detail=document.createElement("span");detail.className="stop-detail";
+    detail.textContent=point?point.lat.toFixed(6)+", "+point.lon.toFixed(6):"尚未指定起點";
+    li.append(num,detail);
+    if(point) li.append(iconButton("◎","在地圖查看"+label,()=>focusMapPosition(point,16)));
     if (index >= 0 && !busy) {
-      const actions = document.createElement("div");
-      actions.className = "stop-actions";
-      for (const [caption,offset] of [["上移",-1],["下移",1]]) {
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.textContent = caption;
-        btn.setAttribute("aria-label", label + " " + (index + 1) + caption);
-        btn.disabled = index + offset < 0 || index + offset >= stops.length;
-        btn.addEventListener("click", () =>
-          act("/api/points/reorder",{mode,index,offset}));
-        actions.appendChild(btn);
-      }
-      const remove = document.createElement("button");
-      remove.type = "button";
-      remove.textContent = "刪除";
-      remove.setAttribute("aria-label", "刪除" + label + " " + (index + 1));
-      remove.addEventListener("click", () =>
-        act("/api/points/remove",{mode,index}));
-      actions.appendChild(remove);
-      li.append(actions);
-    }
-    if (point) {
-      const view = document.createElement("button");
-      view.type = "button";
-      view.textContent = "查看";
-      view.setAttribute("aria-label", "在地圖查看" + (index < 0 ? "路線起點" : label + " " + (index + 1)));
-      view.addEventListener("click", () => {
-        focusMapPosition(point,16);
+      const menu=document.createElement("div");menu.className="stop-menu hidden";
+      const more=iconButton("⋯",label+"更多操作",()=>{
+        const open=menu.classList.contains("hidden");
+        list.querySelectorAll(".stop-menu").forEach(el=>el.classList.add("hidden"));
+        list.querySelectorAll(".stop-more").forEach(el=>el.setAttribute("aria-expanded","false"));
+        menu.classList.toggle("hidden",!open);more.setAttribute("aria-expanded",String(open));
       });
-      li.append(view);
+      more.classList.add("stop-more");more.setAttribute("aria-expanded","false");
+      for(const [glyph,caption,offset] of [["↑","上移",-1],["↓","下移",1]]) {
+        const btn=iconButton(glyph,caption+label,()=>act("/api/points/reorder",{mode,index,offset}));
+        btn.disabled=index+offset<0||index+offset>=stops.length;menu.append(btn);
+      }
+      menu.append(iconButton("✎","以目前選取位置重選"+label,async()=>{
+        try {
+          const target=readCoordinate();
+          if(confirm("以目前選取的座標重選"+label+"？"))
+            await act("/api/points/replace",{mode,index,...target});
+        }catch(error){setMessage(error.message);}
+      }),iconButton("−","刪除"+label,()=>act("/api/points/remove",{mode,index})));
+      li.append(more,menu);
     }
-    list.appendChild(li);
+    list.append(li);
   }
-  addRow(origin, -1);
-  stops.forEach((point,index) => addRow(point,index));
-  if (!stops.length) {
-    const empty = document.createElement("li");
-    empty.className = "muted";
-    empty.textContent = "尚未加入路點。先點地圖選位置，再按「加入路點」。";
-    list.appendChild(empty);
-  }
+  addRow(origin,-1);stops.forEach((point,index)=>addRow(point,index));
+  if(!stops.length){const empty=document.createElement("li");empty.className="muted";empty.textContent="選取位置後加入路點";list.append(empty);}
 }
 
 function updateRouteControls() {
@@ -973,8 +961,8 @@ function updateRouteControls() {
   const loop = $("loop").value === "true";
   const ready = !!prepared?.id && prepared.loop === loop;
   const needSnap = ready && prepared.maxSnapMetres > 40;
-  const max = 15;
-  $("pointcount").textContent = stops.length + " / " + max + " 個路點 · 按清單順序行走";
+  const max = loop ? 14 : 15;
+  $("pointcount").textContent = stops.length + " / " + max + " 個路點";
   renderRouteOrder();
   $("originlabel").textContent = hasOrigin ? "目前起點：" +
     latest.origin.lat.toFixed(6) + ", " + latest.origin.lon.toFixed(6) :
@@ -983,7 +971,9 @@ function updateRouteControls() {
   $("set-origin").disabled = !navigating || busy;
   $("undo").disabled = !navigating || busy || stops.length === 0;
   $("clear").disabled = !navigating || busy || stops.length === 0;
-  $("plan").disabled = !navigating || busy || !hasOrigin || stops.length === 0;
+  $("plan").disabled = !navigating || busy || !hasOrigin || stops.length === 0 || stops.length > max;
+  $("plan").textContent = ready ? "重新規劃" : "規劃路徑";
+  $("start").closest(".row").classList.toggle("hidden",!ready);
   $("start").disabled = !navigating || busy || !ready ||
     (needSnap && !$("confirm-snap").checked) ||
     !latest?.mockPermissionReady;
@@ -1118,7 +1108,10 @@ async function refresh() {
     sessionDeadlineMs = Date.now() +
       Math.max(0, Number(latest.sessionExpiresInSeconds) || 0) * 1000;
     updateSessionExpiry();
-    $("connection").textContent = "已連結手機";
+    const connectionLabels={CONNECTED:"已連線",OFFLINE:"暫時離線",PENDING_APPROVAL:"待核准",WAITING_PAIR:"等待配對",EXPIRED:"已到期",REVOKED:"已撤銷",ERROR:"Wi-Fi 錯誤"};
+    $("connection").textContent=connectionLabels[latest.connectionPhase]||"已連線";
+    $("settings-lan-status").textContent=$("connection").textContent;
+    $("settings-app-version").textContent=latest.appVersionDisplay||"版本待確認";
     current = latest.mockActive ? latest.position : null;
     $("app-version").textContent = typeof latest.appVersionDisplay === "string" ?
       latest.appVersionDisplay : "版本待確認";
@@ -1162,7 +1155,8 @@ async function refresh() {
       remoteLinkHealthy = false;
       cameraFocus.clear();
       focusRealWhenReady = false;
-      $("connection").textContent = "手機連線中斷";
+      $("connection").textContent = "暫時離線";
+      $("settings-lan-status").textContent = "暫時離線";
       // Never continue to show previously received precise physical coordinates
       // after the authorised session or network connection is lost.
       if (latest) {

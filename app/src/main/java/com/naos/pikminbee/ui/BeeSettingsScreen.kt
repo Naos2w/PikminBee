@@ -1,6 +1,21 @@
 package com.naos.pikminbee.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Surface
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import com.naos.pikminbee.lan.LanStatus
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -67,28 +82,67 @@ fun BeeSettingsScreen(
     val palette = NaosDesignSystem.palette(NaosThemeFamily.MINERAL, dark)
     val foreground = palette.ink
     val muted = palette.muted
+    val lan by LanStatus.display.collectAsState()
+    var section by rememberSaveable { mutableStateOf<String?>(if (showWifiPanel) "wifi" else null) }
+    var helpOpen by rememberSaveable { mutableStateOf(false) }
+    val installed = InstalledAppVersion.read(LocalContext.current)
+    val titles = mapOf("map" to "地圖與外觀", "route" to "路徑與速度",
+        "gps" to "GPS 測試", "overlay" to "懸浮控制", "wifi" to "Wi-Fi 控制",
+        "permission" to "權限與健康資料", "about" to "關於 PikminBee")
+    BackHandler(enabled = section != null) { section = null }
     Column(
-        Modifier.fillMaxSize()
-            .background(palette.bg)
+        Modifier.fillMaxSize().background(palette.bg)
             .statusBarsPadding().navigationBarsPadding()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 13.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-            TextButton(onClick = onBack, modifier = Modifier.align(Alignment.CenterStart)) {
-                Text("‹ 返回地圖")
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = { if (section != null) section = null else onBack() },
+                modifier = Modifier.size(48.dp).semantics { contentDescription = "返回" }) {
+                Text("‹", fontSize = 27.sp, color = foreground)
             }
-            Text("設定", fontSize = 22.sp, fontWeight = FontWeight.Bold,
-                color = foreground)
+            Text(section?.let { titles[it] } ?: "設定", fontSize = 20.sp, fontWeight = FontWeight.Bold,
+                color = foreground, modifier = Modifier.weight(1f))
+            IconButton(onClick = { helpOpen = true },
+                modifier = Modifier.size(48.dp).semantics { contentDescription = "設定說明" }) {
+                Text("?", fontSize = 21.sp, color = foreground)
+            }
         }
-        androidx.compose.material3.Surface(
+        if (section == null) {
+            val rows = listOf(
+                Triple("map", NaosActionGlyph.EDIT, when (appearance) {
+                    MapAppearance.SYSTEM -> "跟隨系統"; MapAppearance.LIGHT -> "淺色"; MapAppearance.DARK -> "深色" }),
+                Triple("route", NaosActionGlyph.SPEED, defaultSpeed.label),
+                Triple("gps", NaosActionGlyph.REAL_GPS, if (mockActive) "模擬定位中" else "真實定位"),
+                Triple("overlay", NaosActionGlyph.MORE, if (overlayVisible) "開啟" else "關閉"),
+                Triple("wifi", NaosActionGlyph.WIFI, lan.connection.label),
+                Triple("permission", NaosActionGlyph.STEPS, ""),
+                Triple("about", NaosActionGlyph.CLOCK, installed.displayName),
+            )
+            rows.forEach { (id, glyph, value) ->
+                Surface(modifier = Modifier.fillMaxWidth().clickable { section = id },
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp), color = palette.surface) {
+                    Row(Modifier.fillMaxWidth().heightIn(min = 58.dp).padding(horizontal = 14.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        NaosActionIcon(glyph, foreground)
+                        Text(titles.getValue(id), color = foreground, fontSize = 15.sp,
+                            modifier = Modifier.weight(1f))
+                        if (value.isNotBlank()) Text(value, color = muted, fontSize = 11.sp,
+                            maxLines = 2)
+                        Text("›", color = muted, fontSize = 23.sp)
+                    }
+                }
+            }
+        } else Surface(
             modifier = Modifier.fillMaxWidth(),
             shape = androidx.compose.foundation.shape.RoundedCornerShape(22.dp),
             color = palette.surface,
         ) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("地圖與外觀", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+                when (section) {
+                    "map" -> {
                 if (BuildConfig.HAS_GOOGLE_MAPS_KEY) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         MapBasemapPolicy.availableProviders(true).forEach { option ->
@@ -121,15 +175,9 @@ fun BeeSettingsScreen(
                         )
                     }
                 }
-            }
-        }
-        androidx.compose.material3.Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shape = androidx.compose.foundation.shape.RoundedCornerShape(22.dp),
-            color = palette.surface,
-        ) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("行走預設", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+
+                    }
+                    "route" -> {
                 androidx.compose.foundation.layout.FlowRow(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(7.dp),
@@ -150,6 +198,9 @@ fun BeeSettingsScreen(
                     onMessage = onMessage,
                     muted = muted,
                 )
+
+                    }
+                    "gps" -> {
                 Text("模擬定位微幅漂移 · 測試用",
                     fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = foreground)
                 Text("只讓模擬 GPS 回報座標有小幅波動，不改路線、步數或真實 GPS；預設關閉。",
@@ -172,16 +223,9 @@ fun BeeSettingsScreen(
                         )
                     }
                 }
-            }
-        }
-        androidx.compose.material3.Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shape = androidx.compose.foundation.shape.RoundedCornerShape(22.dp),
-            color = palette.surface,
-        ) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("權限與控制", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
-                TextButton(onClick = onPermissions) { Text("檢查 Android 權限與模擬位置") }
+
+                    }
+                    "overlay" -> {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically) {
                     Text("懸浮控制", color = foreground, fontSize = 14.sp)
@@ -208,6 +252,12 @@ fun BeeSettingsScreen(
                 TextButton(onClick = onReplayOverlayGuide) {
                     Text("查看懸浮控制操作說明")
                 }
+
+                    }
+                    "wifi" -> WifiControlPanel(isMockActive = mockActive,
+                        foreground = foreground, muted = muted, onMessage = onMessage)
+                    "permission" -> {
+                        TextButton(onClick = onPermissions) { Text("檢查 Android 權限與模擬位置") }
                 BackgroundSessionPanel(
                     isMockActive = mockActive,
                     checkpoint = checkpoint,
@@ -216,47 +266,32 @@ fun BeeSettingsScreen(
                     onMessage = onMessage,
                     onAskLocationPermission = onAskLocation,
                 )
-            }
-        }
-        androidx.compose.material3.Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shape = androidx.compose.foundation.shape.RoundedCornerShape(22.dp),
-            color = palette.surface,
-        ) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Wi-Fi 遠端控制 · 選用", fontSize = 18.sp,
-                    fontWeight = FontWeight.SemiBold, color = foreground)
-                Text("只在你主動開啟時於私人 Wi-Fi 使用，需配對碼及手機核准。" +
-                    "關閉後立即撤銷連線；不影響路徑行走。",
-                    fontSize = 12.sp, color = muted)
-                TextButton(onClick = onToggleWifi) {
-                    Text(if (showWifiPanel) "收起 Wi-Fi 控制設定" else "設定 Wi-Fi 控制")
-                }
-                if (showWifiPanel) WifiControlPanel(
-                    isMockActive = mockActive,
-                    foreground = foreground,
-                    muted = muted,
-                    onMessage = onMessage,
-                )
-            }
-        }
-        HealthConnectSettings(dark = dark, onMessage = onMessage)
-        val installed = InstalledAppVersion.read(LocalContext.current)
-        androidx.compose.material3.Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shape = androidx.compose.foundation.shape.RoundedCornerShape(22.dp),
-            color = palette.surface,
-        ) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("關於 PikminBee", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
-                SelectionContainer {
-                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Text(installed.displayName, color = foreground, fontSize = 16.sp)
-                        Text("版本碼：${installed.code?.toString() ?: "待確認"}",
-                            color = muted, fontSize = 12.sp)
+
+                        HealthConnectSettings(dark = dark, onMessage = onMessage)
                     }
+                    "about" -> SelectionContainer {
+                        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text(installed.displayName, color = foreground, fontSize = 16.sp)
+                            Text("版本碼：${installed.code?.toString() ?: "待確認"}", color = muted, fontSize = 12.sp)
+                        }
+                    }
+                    else -> Unit
                 }
             }
         }
     }
+    if (helpOpen) AlertDialog(
+        onDismissRequest = { helpOpen = false },
+        title = { Text("設定說明") },
+        text = { Text(when (section) {
+            "map" -> "選擇地圖與介面主題，設定保存在手機。"
+            "route" -> "設定預設速度及估算步幅；路徑仍須先預覽才能開始。"
+            "gps" -> "僅供授權測試；不改變真實 GPS 或既有路徑。"
+            "overlay" -> "懸浮只提供快捷控制；關閉視窗不停止路徑或 Wi-Fi。"
+            "wifi" -> "只在可信私人 Wi-Fi 開啟，電腦輸入配對碼後須由手機核准。HTTP 未加密，勿公開連接埠。"
+            "permission" -> "Android 定位、背景與健康資料權限需由你明確授權，可隨時撤銷。"
+            else -> "點分類查看及修改相關設定；返回可回到設定首頁。"
+        }) },
+        confirmButton = { TextButton(onClick = { helpOpen = false }) { Text("關閉") } },
+    )
 }

@@ -93,9 +93,21 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
 .stop-detail{min-width:100px;flex:1 1 115px}
 .stop-detail strong,.stop-detail small{display:block}
 .stop-detail small{font-size:11px;color:var(--sub);overflow-wrap:anywhere}
-.stop-actions{display:flex;gap:4px;flex:0 0 auto}
-.stop-actions button{min-width:36px;min-height:42px;padding:6px 8px;font-size:12px}
-.stop-actions button:disabled{opacity:.35}
+.stop-icon{flex:0 0 auto;width:44px;height:44px;min-height:44px;padding:0;font-size:18px;text-align:center}
+.stop-menu{flex:1 0 100%;display:flex;justify-content:flex-end;gap:5px}
+.stop-menu.hidden{display:none}
+.stop-number.first{background:#159e5e;color:white}
+.stop-number.via{background:#306eee;color:white}
+.stop-number.last{background:#d35c51;color:white}
+.stop-detail{font-size:12px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere;min-width:0}
+.stop-item{gap:5px;padding:5px 8px}
+.stop-icon:disabled{opacity:.35}
+.mode-help-button{width:44px;min-width:44px;height:44px;padding:0;font-size:20px}
+.settings-group{border:1px solid var(--line);border-radius:12px;padding:0 10px;margin:6px 0;background:var(--soft)}
+.settings-group summary{min-height:48px;display:flex;align-items:center;gap:8px;cursor:pointer;color:var(--text);font-size:14px;font-weight:600;list-style:none}
+.settings-group summary::after{content:"›";margin-left:auto;font-size:20px}
+.settings-group[open] summary::after{transform:rotate(90deg)}
+.settings-group p{font-size:12px;color:var(--sub)}
 .ordinal-pin{display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:50%;border:3px solid #fff;background:#306eee;color:#fff;box-shadow:0 1px 4px #0006;font-size:12px;font-weight:800}
 .ordinal-pin.first{background:#159e5e}
 .ordinal-pin.via{background:#306eee}
@@ -630,6 +642,7 @@ button.maplibregl-popup-close-button:focus-visible{outline:2px solid var(--accen
  </button>
  <div class="control-title">
   <div><span class="eyebrow">ANDROID · REMOTE</span><h2 id="mode-panel-title">瞬移</h2></div>
+  <button type="button" id="mode-help" class="mode-help-button" aria-label="目前模式操作說明">?</button>
   <button type="button" id="panel-toggle" aria-label="收合或展開右側控制面板" aria-expanded="false">❮</button>
  </div>
  <div id="status" class="muted" aria-live="polite">正在讀取…</div>
@@ -645,7 +658,7 @@ button.maplibregl-popup-close-button:focus-visible{outline:2px solid var(--accen
   <input type="text" id="coordinate" inputmode="text" autocomplete="off"
    spellcheck="false" placeholder="25.033000, 121.565400"
    aria-label="緯度與經度，支援 DD、DMS、DDM" maxlength="160">
-  <small class="muted">支援一次貼上兩個座標。點地圖只會選取，按確認後才會瞬移。</small>
+  <small class="muted">選取座標後確認。</small>
   <div id="teleport-panel" class="row"><button id="teleport" class="primary">確認瞬移</button></div>
   <div class="row"><button id="real">恢復真實 GPS（停止模擬）</button></div>
  </div>
@@ -681,9 +694,9 @@ button.maplibregl-popup-close-button:focus-visible{outline:2px solid var(--accen
   <div id="pointcount" class="muted">0 個路點</div>
   <ol id="route-order" class="route-order" tabindex="0"
     aria-label="路點順序，可捲動查看全部路點" aria-live="polite"></ol>
-  <div class="sub">清單與虛線只表示行走順序；須按「規劃並預覽道路」取得道路線。</div>
+  <div class="sub">虛線為路點順序。</div>
   <div id="routehint" class="sub">選擇起點及目的地，先規劃道路再開始。</div>
-  <div class="row"><button id="add">加入路點</button><button id="undo">撤銷上一點</button><button id="clear">清除全部</button></div>
+  <div class="row"><button id="add">＋ 加入路點</button><button id="undo" aria-label="撤銷上一點" title="撤銷上一點">↶</button><button id="clear" aria-label="清除全部" title="清除全部">清除</button></div>
   <div class="row"><button id="plan" class="primary">① 規劃並預覽道路</button></div>
   <div id="previewinfo" class="hint hidden" aria-live="polite"></div>
   <label id="snapconfirmrow" class="hint warning hidden">
@@ -693,17 +706,21 @@ button.maplibregl-popup-close-button:focus-visible{outline:2px solid var(--accen
   <div class="row"><button id="start" class="primary" disabled>② 確認開始行走</button></div>
  </div>
  <section id="web-settings" class="hidden" aria-label="Web 控制設定">
-   <h2>Web 控制設定</h2>
-   <div class="web-setting-row">
-    <label for="web-appearance">網站介面主題</label>
-    <select id="web-appearance" aria-label="網站介面主題">
-     <option value="auto">跟隨系統</option>
-     <option value="light">淺色</option>
-     <option value="dark">深色</option>
-    </select>
-   </div>
-   <p class="muted">地圖使用 Bright，深淺色隨網站主題切換。設定保存在目前瀏覽器，不影響 Android App 外觀。</p>
-   <p class="muted">真實 GPS 必須先在手機 Wi-Fi 控制設定中為目前配對瀏覽器同意分享。只有可信、非模擬的最近 30 分鐘快照會顯示；HTTP 私人區網尚未加密。</p>
+   <details class="settings-group"><summary>◐ 地圖與外觀</summary>
+    <div class="web-setting-row"><label for="web-appearance">網站介面主題</label>
+     <select id="web-appearance" aria-label="網站介面主題">
+      <option value="auto">跟隨系統</option><option value="light">淺色</option><option value="dark">深色</option>
+     </select></div>
+    <p>Bright 地圖隨網站主題切換，設定保存在此瀏覽器。</p>
+   </details>
+   <details class="settings-group"><summary>↗ 路徑與速度</summary>
+    <button id="web-settings-route" type="button">開啟路徑控制</button>
+   </details>
+   <details class="settings-group"><summary>◎ GPS 測試</summary><p>定位測試與系統權限由 Android App 管理。</p></details>
+   <details class="settings-group"><summary>⋯ 懸浮控制</summary><p>在手機設定管理懸浮快捷鍵。</p></details>
+   <details class="settings-group"><summary>◉ Wi-Fi 控制 <span id="settings-lan-status" class="muted"></span></summary><p>手機核准配對與續期；收合控制不會結束連線。</p></details>
+   <details class="settings-group"><summary>♡ 權限與健康資料</summary><p>真實 GPS 須在手機明確同意；快照有效 30 分鐘。健康資料僅由手機授權管理。HTTP 私人區網未加密。</p></details>
+   <details class="settings-group"><summary>ⓘ 關於 PikminBee</summary><p id="settings-app-version"></p></details>
    <button type="button" id="web-settings-close">返回控制</button>
  </section>
  </div>
@@ -714,6 +731,10 @@ button.maplibregl-popup-close-button:focus-visible{outline:2px solid var(--accen
 </section>
 </div>
 
+<dialog id="mode-help-dialog" class="saved-dialog" aria-labelledby="mode-help-heading">
+ <div class="saved-header"><h2 id="mode-help-heading">操作說明</h2><button id="close-mode-help" type="button" aria-label="關閉說明">✕</button></div>
+ <p id="mode-help-body"></p>
+</dialog>
 <dialog id="saved-dialog" class="saved-dialog" aria-labelledby="saved-heading">
  <div class="saved-header"><h2 id="saved-heading">收藏地點與路線</h2>
   <button id="saved-add-button" type="button" aria-label="收藏目前選取的位置" title="收藏所選位置（自動命名）">+</button>
