@@ -61,6 +61,13 @@ object LanRouteDraftPolicy {
         return Addition(reordered, true, "路點順序已更新，請重新預覽道路")
     }
 
+    fun moveTo(current: List<Coordinate>, from: Int, to: Int): Addition {
+        if (from !in current.indices || to !in current.indices)
+            return reject(current, "路點順序無效")
+        return Addition(RoutePointDraft.moveTo(current, from, to), true,
+            "路點順序已更新，請重新預覽道路")
+    }
+
     fun replace(current: List<Coordinate>, index: Int, point: Coordinate, origin: Coordinate?): Addition {
         val result = RoutePointDraft.select(current, origin, point, index)
         return if (result.outcome == RoutePointDraft.Outcome.REPLACED)

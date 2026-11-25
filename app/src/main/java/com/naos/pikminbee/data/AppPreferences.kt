@@ -42,15 +42,51 @@ data class SavedPlace(
     val createdAtMillis: Long = id,
 )
 
-/** One in-process draft state, observed by the phone UI, web API and GPS planner. */
+data class RouteDraftSnapshot(val stops: List<Coordinate>, val revision: Long)
+
+/** One in-process draft state, observed by the phone UI, web API and planner. */
 object RouteDraftState {
     val routeStops = MutableStateFlow<List<Coordinate>>(emptyList())
+    private val mutableSnapshot = MutableStateFlow(RouteDraftSnapshot(emptyList(), 0))
+    val routeSnapshot: kotlinx.coroutines.flow.StateFlow<RouteDraftSnapshot> = mutableSnapshot
+    @Synchronized fun snapshot(): RouteDraftSnapshot = mutableSnapshot.value
+    private val mutablePlanning = MutableStateFlow(false)
+    val planning: kotlinx.coroutines.flow.StateFlow<Boolean> = mutablePlanning
+    private var planningSequence = 0L
+    private var planningOwner: Long? = null
+
+    @Synchronized fun beginPlanning(revision: Long): Long? {
+        if (planningOwner != null || mutableSnapshot.value.revision != revision) return null
+        val owner = ++planningSequence
+        planningOwner = owner
+        mutablePlanning.value = true
+        return owner
+    }
+
+    @Synchronized internal fun canCommit(expectedRevision: Long): Boolean =
+        planningOwner == null && mutableSnapshot.value.revision == expectedRevision
+
+    @Synchronized fun finishPlanning(owner: Long) {
+        if (planningOwner != owner) return
+        planningOwner = null
+        mutablePlanning.value = false
+    }
+
+    /** All callers hold the same draft lock while persisting and publishing. */
+    @Synchronized internal fun publish(points: List<Coordinate>) {
+        val previous = mutableSnapshot.value
+        if (previous.stops == points) return
+        val immutable = points.toList()
+        PreparedRouteState.route.value = null
+        mutableSnapshot.value = RouteDraftSnapshot(immutable, previous.revision + 1)
+        routeStops.value = immutable
+    }
     val flowerStops = MutableStateFlow<List<Coordinate>>(emptyList())
     private var initialized = false
 
     @Synchronized fun initialize(route: List<Coordinate>, flowers: List<Coordinate>) {
         if (initialized) return
-        routeStops.value = route
+        publish(route)
         flowerStops.value = flowers
         initialized = true
     }
@@ -324,10 +360,20 @@ class AppPreferences(private val context: Context) {
     fun flowerDraft(): List<Coordinate> = RouteDraftState.flowerStops.value
     fun saveRouteDraft(points: List<Coordinate>) {
         synchronized(RouteDraftState) {
-            savePoints("route_draft", points)
-            RouteDraftState.routeStops.value = points
+            if (RouteDraftState.snapshot().stops != points) {
+                savePoints("route_draft", points)
+                RouteDraftState.publish(points)
+            }
         }
     }
+
+    /** Compare and commit under the same lock; reject stale phone or browser edits. */
+    fun saveRouteDraftIfCurrent(expectedRevision: Long, points: List<Coordinate>): Boolean =
+        synchronized(RouteDraftState) {
+            if (!RouteDraftState.canCommit(expectedRevision)) return@synchronized false
+            saveRouteDraft(points)
+            true
+        }
     fun saveFlowerDraft(points: List<Coordinate>) {
         synchronized(RouteDraftState) {
             savePoints("flower_draft", points)

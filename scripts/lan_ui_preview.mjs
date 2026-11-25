@@ -38,6 +38,7 @@ let state = {
   realTimeZoneId:null,
   realTimeZoneExpiresAtMillis:null,
   // Synthetic numbered draft for visual QA only; this never reaches a phone.
+  routeRevision: 1,
   routeStops: [
     {lat:25.0441,lon:121.4661},{lat:25.0478,lon:121.4702},
     {lat:25.0494,lon:121.4650}
@@ -120,6 +121,7 @@ createServer(async (req,res)=>{
       distanceMetres:1000,maxSnapMetres:0});
     state={...state,origin,geometry:[origin,a],mode:'ROUTE',
       phase:scenario==='active'?'MOVING':'PARKED',
+      routeRevision:state.routeRevision+1,
       routeStops:scenario==='cleared'?[]:[scenario==='active'?a:b],
       planning:scenario==='planning',
       previews:scenario==='ready'?{ROUTE:preview('B',b)}:
@@ -228,25 +230,33 @@ createServer(async (req,res)=>{
     // Synthetic historical physical coordinate stays only until its original TTL.
     send(res,{message:'合成虛擬位置已啟用（未操控手機）'},202);return;
   }
-  if(req.method==='POST'&&(url==='/api/points/reorder'||url==='/api/points/remove')){
+  if(req.method==='POST'&&['/api/points/reorder','/api/points/remove','/api/points/replace','/api/points/clear','/api/points/undo'].includes(url)){
     let body='';
     for await(const chunk of req)body+=chunk;
     const request=JSON.parse(body||'{}');
-    const items=request.mode==='FLOWERS'?'flowerStops':'routeStops';
+    if(state.planning||['MOVING','PAUSED'].includes(state.phase)||
+        (request.expectedRevision!==undefined&&request.expectedRevision!==state.routeRevision)){
+      send(res,{error:'路點已變更或目前不可編輯'},409);return;
+    }
+    const items='routeStops';
     const old=state[items].slice();
     const index=request.index;
+    const valid=i=>Number.isInteger(i)&&i>=0&&i<old.length;
     if(url.endsWith('reorder')){
-      const next=index+request.offset;
-      if(![-1,1].includes(request.offset)||index<0||next<0||
-          index>=old.length||next>=old.length){
+      const from=request.from, to=request.to;
+      if(!valid(from)||!valid(to)||request.expectedRevision!==state.routeRevision){
         send(res,{error:'路點順序無效'},409);return;
       }
-      [old[index],old[next]]=[old[next],old[index]];
-    } else {
-      if(index<0||index>=old.length){send(res,{error:'路點無效'},409);return;}
-      old.splice(index,1);
+      old.splice(to,0,old.splice(from,1)[0]);
+    } else if(url.endsWith('clear')) old.length=0;
+    else if(url.endsWith('undo')) old.pop();
+    else {
+      if(!valid(index)){send(res,{error:'路點無效'},409);return;}
+      if(url.endsWith('replace')) old[index]={lat:request.lat,lon:request.lon};
+      else old.splice(index,1);
     }
     state[items]=old;
+    state.routeRevision++;
     state.previews={};
     send(res,{message:'本機測試草稿順序已更新；沒有操控手機'},202);return;
   }

@@ -359,7 +359,7 @@ fun MapFirstShell(
         title = { Text("$modeTitle 操作說明") },
         text = { Text(if (active == 0)
             "在地圖選點或貼上 DD、DMS、DDM 座標，確認後才會瞬移。書籤可收藏位置；恢復真實 GPS 會停止模擬。"
-            else "依序點地圖加入路點，最多 15 點。先規劃道路並確認預覽，再開始。行走或暫停時路點唯讀；停止後才能編輯。") },
+            else "依序點地圖加入路點，最多 15 點。先規劃道路並確認預覽，再開始。長按左側手柄拖移路點，點座標查看，右側刪除。規劃、行走或暫停時路點唯讀。") },
         confirmButton = { TextButton(onClick = { helpOpen = false }) { Text("關閉") } },
     )
     if (controlsVisible && detailsOpen) {

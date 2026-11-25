@@ -94,8 +94,17 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
 .stop-detail strong,.stop-detail small{display:block}
 .stop-detail small{font-size:11px;color:var(--sub);overflow-wrap:anywhere}
 .stop-icon{flex:0 0 auto;width:44px;height:44px;min-height:44px;padding:0;font-size:18px;text-align:center}
-.stop-menu{flex:1 0 100%;display:flex;justify-content:flex-end;gap:5px}
-.stop-menu.hidden{display:none}
+.stop-item{flex-wrap:nowrap}
+.stop-grip{touch-action:none;cursor:grab}
+.stop-dragging{outline:2px solid var(--accent);cursor:grabbing}
+.stop-spacer{flex:0 0 44px;width:44px}
+.stop-icon svg,.stop-number svg,#clear svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-linecap:round;stroke-linejoin:round;vertical-align:middle}
+.stop-detail{min-height:44px;text-align:left;background:transparent;border:0;padding:4px 0;box-shadow:none;white-space:normal}
+.stop-detail:active{background:var(--button)}
+.waypoint-reselect{display:block;margin-top:4px;font-size:11px;min-height:44px}
+#clear{flex:0 0 44px;min-width:44px;padding:0;color:var(--danger,#d35c51)}
+#clear svg{stroke-width:1.8}
+body[data-mode="route"]:has(#routehint) .maplibregl-popup .waypoint-reselect{margin-top:4px}
 .stop-number.first{background:#159e5e;color:white}
 .stop-number.via{background:#306eee;color:white}
 .stop-number.last{background:#d35c51;color:white}
@@ -703,7 +712,7 @@ button.maplibregl-popup-close-button:focus-visible{outline:2px solid var(--accen
     aria-label="路點順序，可捲動查看全部路點" aria-live="polite"></ol>
   <div class="sub">虛線為路點順序。</div>
   <div id="routehint" class="sub">選擇起點及目的地，先規劃道路再開始。</div>
-  <div class="row"><button id="add">＋ 加入路點</button><button id="undo" aria-label="撤銷上一點" title="撤銷上一點">↶</button><button id="clear" aria-label="清除全部" title="清除全部">清除</button></div>
+  <div class="row"><button id="add">＋ 加入路點</button><button id="undo" aria-label="撤銷上一點" title="撤銷上一點">↶</button><button id="clear" aria-label="清除全部" title="清除全部"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 6h16 M9 3h6 M6 6l1.5 14h9L18 6 M10 10v6 M14 10v6"/></svg></button></div>
   <div class="row"><button id="plan" class="primary">① 規劃並預覽道路</button></div>
   <div id="previewinfo" class="hint hidden" aria-live="polite"></div>
   <label id="snapconfirmrow" class="hint warning hidden">

@@ -52,6 +52,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
@@ -237,9 +238,10 @@ private fun PikminBeeScreen() {
     var backfillResult by remember { mutableStateOf("") }
     var savingPlace by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("地圖點一下就能選擇位置") }
-    val roadStops by RouteDraftState.routeStops.collectAsState()
+    val routeDraft by RouteDraftState.routeSnapshot.collectAsState()
+    val roadStops by remember { derivedStateOf { routeDraft.stops } }
     val savedRoutes by SavedRouteState.routes.collectAsState()
-    var planning by remember { mutableStateOf(false) }
+    val planning by RouteDraftState.planning.collectAsState()
     var confirmStopWalk by remember { mutableStateOf(false) }
     val speedPreset by WalkSpeedState.selected.collectAsState()
     val speedProfile by WalkSpeedState.profile.collectAsState()
@@ -259,8 +261,19 @@ private fun PikminBeeScreen() {
         if (!WalkStopUiPolicy.canRequest(walkMode, walkPhase))
             confirmStopWalk = false
     }
-    // Draft edits invalidate their previous preview.
-    LaunchedEffect(roadStops) { PreparedRouteState.route.value = null }
+    fun commitDraft(expected: Long, points: List<Coordinate>): Boolean {
+        if (LocationStatus.phase.value in listOf(WalkPhase.MOVING, WalkPhase.PAUSED) ||
+            !prefs.saveRouteDraftIfCurrent(expected, points)) {
+            message = "路點已變更，或目前無法編輯，請重新確認"
+            return false
+        }
+        return true
+    }
+    // The draft store invalidates previews atomically with a committed edit.
+    LaunchedEffect(routeDraft.revision) {
+        routeEditingStopIndex = null
+        routeStopActionIndex = null
+    }
 
     var phoneLocationRefresh by remember { mutableIntStateOf(0) }
     val requestLocation = rememberLauncherForActivityResult(
@@ -412,14 +425,13 @@ private fun PikminBeeScreen() {
         }.onFailure { message = "無法改名：" + (it.message ?: "儲存錯誤") }.isSuccess
 
     fun loadRoute(route: SavedRoute) {
+        if (!commitDraft(routeDraft.revision, route.stops)) return
         if (route.mode == WalkMode.FLOWERS) {
             // Migrate only the *draft*, never mutate/delete the user's saved legacy route.
-            prefs.saveRouteDraft(route.stops)
             tab = ToolTab.ROUTE
             message = "舊尋花收藏已載入一般路徑草稿；原收藏保留，請重新預覽道路"
             return
         }
-        prefs.loadSavedRouteIntoDraft(route)
         tab = ToolTab.ROUTE
         message = "已載入「" + route.name + "」的路點，沒有啟動行走"
     }
@@ -605,13 +617,16 @@ private fun PikminBeeScreen() {
                 val capturedStops = stops.toList()
                 val capturedOrigin = origin
                 val capturedLoop = loop
-                planning = true
+                val capturedRevision = routeDraft.revision
+                val owner = RouteDraftState.beginPlanning(capturedRevision)
+                    ?: run { message = "路點已變更或仍在規劃，請稍後重試"; return }
                 message = "正在規劃可步行道路…"
                 work.launch {
                     try {
                         val plan = ValhallaPlanner.planDetailed(listOf(capturedOrigin) + capturedStops)
                         val currentOrigin = mockPosition ?: phonePosition
-                        if (currentOrigin == null || roadStops != capturedStops ||
+                        if (currentOrigin == null || RouteDraftState.snapshot().revision != capturedRevision ||
+                            RouteDraftState.snapshot().stops != capturedStops ||
                             WalkingGeometry.distanceMeters(capturedOrigin, currentOrigin) > 30.0) {
                             message = "規劃期間路點或起點已變更，請重新規劃"
                         } else {
@@ -633,9 +648,9 @@ private fun PikminBeeScreen() {
                     } catch (error: Exception) {
                         message = "道路規劃失敗：" + (error.message ?: "請檢查網路或路點")
                     } finally {
-                        planning = false
+                        RouteDraftState.finishPlanning(owner)
                     }
-                }
+                }.invokeOnCompletion { RouteDraftState.finishPlanning(owner) }
             }
         }
     }
@@ -875,7 +890,8 @@ private fun PikminBeeScreen() {
                     confirmButton = {
                         TextButton(onClick = {
                             routeStopActionIndex = null
-                            if (index in roadStops.indices &&
+                            if (index in roadStops.indices && !RouteDraftState.planning.value &&
+                                RouteDraftState.snapshot().revision == routeDraft.revision &&
                                 walkPhase !in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)) {
                                 routeEditingStopIndex = index
                                 message = "請點地圖重新選擇第 ${index + 1} 點"
@@ -889,8 +905,7 @@ private fun PikminBeeScreen() {
                                 routeStopActionIndex = null
                                 if (walkPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)) {
                                     message = "行走中不能刪除路點，請先停止"
-                                } else {
-                                    prefs.saveRouteDraft(RoutePointDraft.remove(roadStops, index))
+                                } else if (commitDraft(routeDraft.revision, RoutePointDraft.remove(roadStops, index))) {
                                     routeEditingStopIndex = null
                                     message = "已刪除第 ${index + 1} 點；其餘路點已重新編號"
                                 }
@@ -960,12 +975,13 @@ private fun PikminBeeScreen() {
                     if (walkPhase !in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)) {
                         when (tab) {
                             ToolTab.ROUTE -> {
-                                prefs.saveRouteDraft(RoutePointDraft.undo(roadStops))
-                                routeEditingStopIndex = null
+                                if (commitDraft(routeDraft.revision, RoutePointDraft.undo(roadStops))) {
+                                    routeEditingStopIndex = null
+                                    message = "已移除最後一個路點，請點地圖重新選取"
+                                }
                             }
                             else -> Unit
                         }
-                        message = "已移除最後一個路點，請點地圖重新選取"
                     }
                 },
                 onRoutePrimary = { handleJourneyPrimary() },
@@ -999,8 +1015,9 @@ private fun PikminBeeScreen() {
                     when (tab) {
                         ToolTab.ROUTE -> {
                             selected = point
-                            if (walkPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)) {
-                                message = "行走中不可修改路點，請先停止行走"
+                            if (RouteDraftState.planning.value ||
+                                walkPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)) {
+                                message = "規劃或行走中不可修改路點"
                             } else {
                                 val edit = RoutePointDraft.select(
                                     roadStops, mockPosition ?: phonePosition, point,
@@ -1008,13 +1025,14 @@ private fun PikminBeeScreen() {
                                 )
                                 when (edit.outcome) {
                                     RoutePointDraft.Outcome.ADDED -> {
-                                        prefs.saveRouteDraft(edit.stops)
-                                        message = "已加入第 ${edit.index + 1} 點，請選第 ${edit.stops.size + 1} 點"
+                                        if (commitDraft(routeDraft.revision, edit.stops))
+                                            message = "已加入第 ${edit.index + 1} 點，請選第 ${edit.stops.size + 1} 點"
                                     }
                                     RoutePointDraft.Outcome.REPLACED -> {
-                                        prefs.saveRouteDraft(edit.stops)
-                                        routeEditingStopIndex = null
-                                        message = "已重新選擇第 ${edit.index + 1} 點"
+                                        if (commitDraft(routeDraft.revision, edit.stops)) {
+                                            routeEditingStopIndex = null
+                                            message = "已重新選擇第 ${edit.index + 1} 點"
+                                        }
                                     }
                                     RoutePointDraft.Outcome.DUPLICATE ->
                                         message = "該位置已經是路點，請選擇其他位置"
@@ -1130,7 +1148,8 @@ private fun PikminBeeScreen() {
                             ToolTab.ROUTE -> {
                                 JourneyControls(
                                     mode = WalkMode.ROUTE,
-                                    stops = roadStops,
+                                    stops = routeDraft.stops,
+                                    draftRevision = routeDraft.revision,
                                     origin = mockPosition ?: phonePosition,
                                     activeMode = walkMode,
                                     phase = walkPhase,
@@ -1140,15 +1159,17 @@ private fun PikminBeeScreen() {
                                     onSpeedSelected = ::chooseSpeedProfile,
                                     foreground = foreground, muted = muted,
                                     onUndo = {
-                                        if (roadStops.isNotEmpty()) {
-                                            prefs.saveRouteDraft(RoutePointDraft.undo(roadStops))
+                                        if (roadStops.isNotEmpty() &&
+                                            commitDraft(routeDraft.revision, RoutePointDraft.undo(roadStops))) {
                                             routeEditingStopIndex = null
-                                            message = "已回到第 ${roadStops.size} 點，請點地圖重選"
+                                            message = "已撤銷最後一個路點"
                                         }
                                     },
                                     onClear = {
-                                        prefs.saveRouteDraft(emptyList())
-                                        routeEditingStopIndex = null
+                                        if (commitDraft(routeDraft.revision, emptyList())) {
+                                            routeEditingStopIndex = null
+                                            message = "所有路點已清除"
+                                        }
                                     },
                                     onMessage = { message = it },
                                     preparedRoad = if (routePreviewReady) routeRoadPreview else emptyList(),
@@ -1162,20 +1183,25 @@ private fun PikminBeeScreen() {
                                         focusMapPoint(point)
                                         closeDetailsRequest++
                                     },
-                                    onEditStop = { index ->
-                                        if (!planning && walkPhase !in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)) {
-                                            routeEditingStopIndex = index
-                                            closeDetailsRequest++
-                                            message = "請在地圖重新選擇第 ${index + 1} 點"
+                                    onMoveStop = { expectedRevision, from, to ->
+                                        val current = RouteDraftState.snapshot()
+                                        if (planning || LocationStatus.phase.value in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)) {
+                                            message = "路線規劃或行走中，不能排序路點"
+                                        } else if (current.revision != expectedRevision ||
+                                            !prefs.saveRouteDraftIfCurrent(expectedRevision,
+                                                RoutePointDraft.moveTo(current.stops, from, to))) {
+                                            message = "路點已在其他介面變更，請重新排序"
+                                        } else {
+                                            message = "路點順序已更新，請重新預覽道路"
                                         }
                                     },
-                                    onMoveStop = { index, offset ->
-                                        if (!planning && walkPhase !in listOf(WalkPhase.MOVING, WalkPhase.PAUSED))
-                                            prefs.saveRouteDraft(RoutePointDraft.move(roadStops, index, offset))
-                                    },
-                                    onDeleteStop = { index ->
-                                        if (!planning && walkPhase !in listOf(WalkPhase.MOVING, WalkPhase.PAUSED))
-                                            prefs.saveRouteDraft(RoutePointDraft.remove(roadStops, index))
+                                    onDeleteStop = { expectedRevision, index ->
+                                        val current = RouteDraftState.snapshot()
+                                        if (!planning && LocationStatus.phase.value !in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)) {
+                                            if (current.revision != expectedRevision ||
+                                                !prefs.saveRouteDraftIfCurrent(expectedRevision, RoutePointDraft.remove(current.stops, index)))
+                                                message = "路點已變更，請重新確認"
+                                        }
                                     },
                                 )
                             }

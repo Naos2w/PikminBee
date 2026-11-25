@@ -137,7 +137,7 @@ fun NaosModeIcon(index: Int, tint: Color, modifier: Modifier = Modifier) {
 
 /** Shared lightweight vector glyphs; only major actions keep a short text label. */
 enum class NaosActionGlyph {
-    PLAN, PLAY, PAUSE, STOP, UNDO, REAL_GPS, VIRTUAL_GPS, FLOWER, SPEED, STEPS, REFRESH, EDIT, DONE, CLOCK, MORE, WIFI
+    PLAN, PLAY, PAUSE, STOP, UNDO, REAL_GPS, VIRTUAL_GPS, FLOWER, SPEED, STEPS, REFRESH, EDIT, DONE, CLOCK, MORE, WIFI, GRIP, DELETE
 }
 
 @Composable
@@ -251,6 +251,18 @@ fun NaosActionIcon(
                 drawArc(tint, 225f, 90f, false, topLeft = pt(-1f, 3f), size = Size(26f*scale, 26f*scale), style = Stroke(pen, cap = StrokeCap.Round))
                 drawArc(tint, 225f, 90f, false, topLeft = pt(4f, 8f), size = Size(16f*scale, 16f*scale), style = Stroke(pen, cap = StrokeCap.Round))
                 drawCircle(tint, 1.6f*scale, pt(12f, 17f))
+            }
+            NaosActionGlyph.GRIP -> {
+                for (x in listOf(9f, 15f)) for (y in listOf(5f, 12f, 19f))
+                    drawCircle(tint, 1.5f * scale, pt(x, y))
+            }
+            NaosActionGlyph.DELETE -> {
+                drawLine(tint, pt(4f, 6f), pt(20f, 6f), pen, StrokeCap.Round)
+                drawLine(tint, pt(9f, 3f), pt(15f, 3f), pen, StrokeCap.Round)
+                drawLine(tint, pt(6f, 6f), pt(7.5f, 20f), pen, StrokeCap.Round)
+                drawLine(tint, pt(18f, 6f), pt(16.5f, 20f), pen, StrokeCap.Round)
+                drawLine(tint, pt(7.5f, 20f), pt(16.5f, 20f), pen, StrokeCap.Round)
+                for (x in listOf(10f, 14f)) drawLine(tint, pt(x, 10f), pt(x, 16f), pen, StrokeCap.Round)
             }
             NaosActionGlyph.MORE -> {
                 for (x in listOf(5f, 12f, 19f)) drawCircle(tint, 1.7f * scale, pt(x, 12f))
