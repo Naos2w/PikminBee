@@ -19,6 +19,7 @@ const csp = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inl
 const assets = {
   '/': ['index.html', 'text/html; charset=utf-8'],
   '/controller.js': ['controller.js', 'application/javascript; charset=utf-8'],
+  '/coordinate-format.mjs': ['coordinate-format.mjs', 'application/javascript; charset=utf-8'],
   '/map-ui-policy.mjs': ['map-ui-policy.mjs', 'application/javascript; charset=utf-8'],
   '/bright-dark-palette.json': ['bright-dark-palette.json', 'application/json; charset=utf-8'],
   '/vendor/maplibre-gl.mjs': ['vendor/maplibre-gl/maplibre-gl.mjs', 'application/javascript; charset=utf-8'],

@@ -251,6 +251,9 @@ class LanController(private val context: Context) {
         if (req.method == "GET" && req.path == "/map-ui-policy.mjs") {
             return asset("lan/map-ui-policy.mjs", "application/javascript; charset=utf-8")
         }
+        if (req.method == "GET" && req.path == "/coordinate-format.mjs") {
+            return asset("lan/coordinate-format.mjs", "application/javascript; charset=utf-8")
+        }
         // Only two-letter flag filenames are served; no arbitrary asset paths.
         if (req.method == "GET" && req.path.matches(Regex("/flags/[a-z]{2}\\.png"))) {
             return runCatching {

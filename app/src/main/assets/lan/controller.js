@@ -1,3 +1,4 @@
+import {parseCoordinate} from "/coordinate-format.mjs";
 import { BRIGHT_STYLE_URL, samePosition, currentPosition, createCameraFocus, visibleMapPadding, countryFlagPath, destinationTime, routePresentation } from "/map-ui-policy.mjs";
 const $ = id => document.getElementById(id);
 let token = null;
@@ -190,27 +191,16 @@ function showCoordinate(point) {
   updateExternalMapLink(point);
 }
 function updateExternalMapLink(point = chosen || latest?.position || initialCenter) {
-  const lat = Math.max(-85, Math.min(85, Number(point?.lat) || initialCenter.lat));
-  const lon = Math.max(-180, Math.min(180, Number(point?.lon) || initialCenter.lon));
+  const lat = Math.max(-85, Math.min(85, Number.isFinite(point?.lat) ? point.lat : initialCenter.lat));
+  const lon = Math.max(-180, Math.min(180, Number.isFinite(point?.lon) ? point.lon : initialCenter.lon));
   $("external-map").href = "https://www.openstreetmap.org/#map=15/" +
     lat.toFixed(5) + "/" + lon.toFixed(5);
 }
 updateExternalMapLink();
 
 function readCoordinate() {
-  const raw = $("coordinate").value.trim();
-  if (!raw) throw Error("請先點地圖選位置或貼上緯度, 經度");
-  const numbers = raw.split(/[,，\s]+/).filter(Boolean);
-  if (numbers.length !== 2 ||
-      !numbers.every(part => /^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)$/.test(part))) {
-    throw Error("請輸入兩個數值，例如 25.033000, 121.565400");
-  }
-  const lat = Number(numbers[0]), lon = Number(numbers[1]);
-  if (!Number.isFinite(lat) || !Number.isFinite(lon) ||
-      lat < -90 || lat > 90 || lon < -180 || lon > 180) {
-    throw Error("座標超出範圍：緯度 -90～90、經度 -180～180");
-  }
-  const point = {lat,lon};
+  const point = parseCoordinate($("coordinate").value);
+  if (!point) throw Error("經緯度格式或範圍無效（支援 DD、DMS、DDM）");
   showCoordinate(point);
   renderMap();
   return point;
