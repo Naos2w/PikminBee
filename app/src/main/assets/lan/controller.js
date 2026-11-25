@@ -1221,109 +1221,141 @@ function labelledText(textValue, tag = "small") {
 }
 function countryFlag(countryCode) {
   const path = countryFlagPath(countryCode);
-  if (!path) return null;
+  const placeholder = () => {
+    const missing=labelledText("—","span"); missing.className="saved-flag-missing";
+    missing.setAttribute("aria-label","國旗未知");return missing;
+  };
+  if (!path) return placeholder();
   const image = document.createElement("img");
   image.className = "saved-country-flag";
-  image.alt = ""; // The adjacent country name/code is the accessible label.
-  image.addEventListener("error",()=>image.remove(),{once:true});
+  image.alt = String(countryCode).toUpperCase();
+  image.addEventListener("error",()=>image.replaceWith(placeholder()),{once:true});
   image.src = path;
   return image;
 }
 function refreshSavedClocks() {
   if (!$("saved-dialog").open) return;
+  const now=new Date();
   document.querySelectorAll(".saved-clock").forEach(clock => {
-    clock.textContent=destinationTime(clock.dataset.timeZone||"");
+    clock.textContent=destinationTime(clock.dataset.timeZone||"",now,clock.dataset.countryCode||"");
   });
+}
+let savedTab="places";
+function selectSavedTab(tab) {
+  savedTab=tab==="routes"?"routes":"places";
+  $("saved-list").scrollTop=0;
+  renderSaved();
+}
+function savedAction(text,handler) {
+  const button=document.createElement("button");button.type="button";
+  button.textContent=text;button.addEventListener("click",handler);return button;
+}
+async function copySavedCoordinate(value) {
+  try {
+    if (!navigator.clipboard?.writeText) throw Error("Clipboard unavailable on LAN");
+    await navigator.clipboard.writeText(value);
+  } catch (_) {
+    // Plain local HTTP cannot always use the async Clipboard API.
+    const field=document.createElement("textarea");field.value=value;
+    field.style.position="fixed";field.style.opacity="0";
+    $("saved-dialog").append(field);field.select();
+    let copied=false;try{copied=document.execCommand("copy");}catch(_){}
+    field.remove();
+    if(!copied){prompt("請複製座標",value);return;}
+  }
+  $("saved-enrich-status").textContent="已複製座標";
 }
 function renderSaved() {
   const list = $("saved-list");
   const previousScroll=list.scrollTop;
-  const openDetails=new Set([...list.querySelectorAll("details[data-place-id][open]")]
-    .map(item=>item.dataset.placeId));
+  const openMenus=new Set([...list.querySelectorAll(".saved-place-actions:not(.hidden)")].map(el=>el.dataset.placeId));
   list.replaceChildren();
-  if (!savedRecords) return;
   const query = $("saved-search").value.trim().toLocaleLowerCase();
-  const places = (savedRecords.places || []).filter(item =>
+  const places = (savedRecords?.places || []).filter(item =>
     [item.name,item.countryName,item.city,item.countryCode]
-      .some(value=>String(value||"").toLocaleLowerCase().includes(query)));
-  const routes = (savedRecords.routes||[]).filter(item=>
+      .some(value=>String(value||"").toLocaleLowerCase().includes(query)))
+      .sort((a,b)=>(b.createdAtMillis||0)-(a.createdAtMillis||0));
+  const routes = (savedRecords?.routes||[]).filter(item=>
     String(item.name||"").toLocaleLowerCase().includes(query));
-  list.append(labelledText("收藏地點（"+places.length+"）","strong"));
-  for (const place of places) {
-    if (!Number.isFinite(place?.position?.lat) ||
-        !Number.isFinite(place?.position?.lon)) continue;
-    const card=document.createElement("article"); card.className="saved-card";
-    card.append(labelledText(place.name||"未命名位置","strong"));
-    const flag = countryFlag(place.countryCode);
-    const countryRow = document.createElement("div");
-    countryRow.className = "saved-country-row";
-    if (flag) countryRow.append(flag);
-    countryRow.append(labelledText([place.countryName||place.countryCode,place.city]
-      .filter(Boolean).join(" · ") || "國家／城市待確認，可補齊舊收藏"));
-    card.append(countryRow);
-    const clock=labelledText(destinationTime(place.timeZoneId));
-    clock.className="saved-clock";
-    clock.dataset.timeZone=place.timeZoneId||"";
-    card.append(clock);
-    const details=document.createElement("details");details.className="saved-details";
-    details.dataset.placeId=String(place.id);
-    details.open=openDetails.has(String(place.id));
-    details.append(labelledText("座標及收藏日期","summary"));
-    details.append(labelledText("GPS: "+place.position.lat.toFixed(6)+", "+
-      place.position.lon.toFixed(6)));
-    if(Number.isFinite(place.createdAtMillis)&&place.createdAtMillis>0)
-      details.append(labelledText("收藏於 "+
-        new Date(place.createdAtMillis).toLocaleDateString("zh-TW")));
-    card.append(details);
-    const buttons=document.createElement("div");buttons.className="row";
-    const view=document.createElement("button");
-    view.textContent="選取";
-    view.setAttribute("aria-label","在地圖選取「"+place.name+"」位置，不會移動手機 GPS");
-    view.addEventListener("click",()=>{
-      showCoordinate(place.position);selectMode("TELEPORT");
-      $("saved-dialog").close();
-      focusMapPosition(place.position,15);
-      setMessage("已選取收藏位置；沒有自動瞬移");
-    });
-    const rename=document.createElement("button");rename.type="button";
-    rename.textContent="改名";
-    rename.addEventListener("click",async()=>{
-      const proposed=prompt("修改收藏地點名稱",place.name||"");
-      if(proposed===null)return;
-      const name=proposed.trim();
-      if(!name||name.length>80){setMessage("地點名稱需為 1 到 80 字");return;}
-      if(await act("/api/saved/place/rename",{id:place.id,name}))await refreshSaved();
-    });
-    const remove=document.createElement("button");remove.type="button";
-    remove.textContent="刪除";
-    remove.addEventListener("click",async()=>{
-      if(!confirm("確定刪除「"+place.name+"」？不會變更 GPS"))return;
-      if(await act("/api/saved/place/delete",{id:place.id}))await refreshSaved();
-    });
-    buttons.append(view,rename,remove);card.append(buttons);list.append(card);
+  $("saved-tab-places").textContent="地點（"+places.length+"）";
+  $("saved-tab-routes").textContent="路線（"+routes.length+"）";
+  for(const tab of ["places","routes"])
+    $("saved-tab-"+tab).setAttribute("aria-pressed",String(savedTab===tab));
+  if (!savedRecords) {list.textContent="正在讀取收藏…";return;}
+  if(savedTab==="places") {
+    for (const place of places) {
+      if (!Number.isFinite(place?.position?.lat) ||
+          !Number.isFinite(place?.position?.lon)) continue;
+      const card=document.createElement("article"); card.className="saved-card saved-place-card";
+      const name=place.name||"未命名位置";
+      const coordinate=place.position.lat.toFixed(6)+", "+place.position.lon.toFixed(6);
+      const view=document.createElement("button");view.type="button";view.className="saved-place-select";
+      view.setAttribute("aria-label","在地圖選取「"+name+"」，不會移動手機 GPS");
+      const top=document.createElement("span");top.className="saved-place-top";
+      top.append(countryFlag(place.countryCode));
+      const title=labelledText(name,"strong");title.className="saved-place-name";title.title=name;top.append(title);
+      const clockRow=document.createElement("span");clockRow.className="saved-clock-row";
+      const icon=labelledText("◷","span");icon.setAttribute("aria-hidden","true");
+      const clock=labelledText(destinationTime(place.timeZoneId,new Date(),place.countryCode),"span");
+      clock.className="saved-clock";clock.dataset.timeZone=place.timeZoneId||"";
+      clock.dataset.countryCode=place.countryCode||"";clock.title="收藏地點當地日期及時間";
+      clockRow.append(icon,clock);top.append(clockRow);
+      const bottom=labelledText(coordinate,"span");bottom.className="saved-place-coordinate";
+      view.append(top,bottom);
+      view.addEventListener("click",()=>{
+        showCoordinate(place.position);selectMode("TELEPORT");
+        $("saved-dialog").close();focusMapPosition(place.position,15);
+        setMessage("已選取收藏位置；沒有自動瞬移");
+      });
+      const more=document.createElement("button");more.type="button";more.className="saved-place-more";
+      more.textContent="⋯";more.setAttribute("aria-label",name+" 的更多操作");
+      const actions=document.createElement("div");actions.className="saved-place-actions";
+      actions.dataset.placeId=String(place.id);
+      const expanded=openMenus.has(String(place.id));actions.classList.toggle("hidden",!expanded);
+      more.setAttribute("aria-expanded",String(expanded));
+      more.addEventListener("click",()=>{
+        const open=actions.classList.contains("hidden");
+        list.querySelectorAll(".saved-place-actions").forEach(el=>el.classList.add("hidden"));
+        list.querySelectorAll(".saved-place-more").forEach(el=>el.setAttribute("aria-expanded","false"));
+        actions.classList.toggle("hidden",!open);more.setAttribute("aria-expanded",String(open));
+      });
+      actions.append(savedAction("改名",async()=>{
+        const proposed=prompt("修改收藏地點名稱",name);
+        if(proposed===null)return;
+        const next=proposed.trim();
+        if(!next||next.length>80){$("saved-enrich-status").textContent="地點名稱需為 1 到 80 字";return;}
+        if(await act("/api/saved/place/rename",{id:place.id,name:next}))await refreshSaved();
+      }),savedAction("複製座標",()=>copySavedCoordinate(coordinate)));
+      if(!place.countryCode||!place.countryName||!place.city||!place.timeZoneId||clock.textContent==="—/— —:—")
+        actions.append(savedAction("補齊舊收藏（批次）",()=>$("saved-enrich-button").click()));
+      const remove=savedAction("刪除",async()=>{
+        if(!confirm("確定刪除「"+name+"」？不會變更 GPS"))return;
+        if(await act("/api/saved/place/delete",{id:place.id}))await refreshSaved();
+      });
+      remove.classList.add("danger");actions.append(remove);card.append(view,more,actions);list.append(card);
+    }
+    if (!places.length) list.append(labelledText("沒有符合條件的收藏地點"));
+  } else {
+    for(const route of routes){
+      const card=document.createElement("article");card.className="saved-card";
+      card.append(labelledText(route.name||"未命名路線","strong"));
+      card.append(labelledText((route.stops||[]).length+" 個路點 · "+
+        (route.mode==="FLOWERS"?"舊巡花收藏 · 可轉一般路線":"道路")));
+      const button=document.createElement("button");
+      button.textContent="載入草稿（仍須預覽）";
+      button.addEventListener("click",async()=>{
+        if(await act("/api/saved/load",{id:route.id})){
+          $("saved-dialog").close();selectMode("ROUTE");
+          setMessage(route.mode==="FLOWERS"
+            ? "舊巡花收藏已轉成一般道路草稿；原收藏保留，請重新預覽"
+            : "收藏路線已載入，請先預覽步行道路");
+        }
+      });
+      card.append(button);list.append(card);
+    }
+    if (!routes.length) list.append(labelledText("沒有符合條件的收藏路線"));
   }
-  if (!places.length) list.append(labelledText("沒有符合條件的收藏地點"));
-  list.append(labelledText("收藏路線（"+routes.length+"）","strong"));
-  for(const route of routes){
-    const card=document.createElement("article");card.className="saved-card";
-    card.append(labelledText(route.name||"未命名路線","strong"));
-    card.append(labelledText((route.stops||[]).length+" 個路點 · "+
-      (route.mode==="FLOWERS"?"舊巡花收藏 · 可轉一般路線":"道路")));
-    const button=document.createElement("button");
-    button.textContent="載入草稿（仍須預覽）";
-    button.addEventListener("click",async()=>{
-      if(await act("/api/saved/load",{id:route.id})){
-        $("saved-dialog").close();
-        selectMode("ROUTE");
-        setMessage(route.mode==="FLOWERS"
-          ? "舊巡花收藏已轉成一般道路草稿；原收藏保留，請重新預覽"
-          : "收藏路線已載入，請先預覽步行道路");
-      }
-    });
-    card.append(button);list.append(card);
-  }
-  if (!routes.length) list.append(labelledText("沒有符合條件的收藏路線"));
-  list.scrollTop=previousScroll; // preserve position across refresh and long lists
+  list.scrollTop=previousScroll;
 }
 async function refreshSaved() {
   if (!token || !$("saved-dialog").open) return;
@@ -1352,7 +1384,8 @@ $("saved-add-button").addEventListener("click",async()=>{
     $("saved-new-position").textContent="GPS: "+point.lat.toFixed(6)+", "+point.lon.toFixed(6);
     $("saved-new-name").value=fallback;
     button.disabled = true;
-    button.textContent = "正在取得名稱並收藏…";
+    button.textContent = "…";
+    selectSavedTab("places");
     $("saved-enrich-status").textContent = "正在查詢地標、國家、城市與時區；完成後自動收藏";
     const request=await call("/api/saved/place/lookup","POST",point);
     if(generation!==savedLookupGeneration||!$("saved-dialog").open) return;
@@ -1450,15 +1483,30 @@ $("show-saved").addEventListener("click",()=>{
   $("saved-enrich-status").textContent="";
   $("saved-dialog").showModal();
   $("saved-search").value="";
+  $("saved-help").classList.add("hidden");
+  $("saved-help-toggle").setAttribute("aria-expanded","false");
+  selectSavedTab("places");
   refreshSaved();
 });
 $("close-saved").addEventListener("click",()=>$("saved-dialog").close());
 $("saved-search").addEventListener("input",renderSaved);
-// Update only the clock text once per minute. Rebuilding the list would reset
-// its scroll position and close expanded place details while the user reads them.
-setInterval(()=>{if(!document.hidden)refreshSavedClocks();},60000);
+$("saved-tab-places").addEventListener("click",()=>selectSavedTab("places"));
+$("saved-tab-routes").addEventListener("click",()=>selectSavedTab("routes"));
+$("saved-help-toggle").addEventListener("click",()=>{
+  const open=$("saved-help").classList.toggle("hidden")===false;
+  $("saved-help-toggle").setAttribute("aria-expanded",String(open));
+});
+// Update at the actual minute boundary without rebuilding the list.
+function scheduleSavedClockRefresh() {
+  setTimeout(()=>{if(!document.hidden)refreshSavedClocks();scheduleSavedClockRefresh();},
+    60000-Date.now()%60000);
+}
+scheduleSavedClockRefresh();
 setInterval(updateSessionExpiry,1000);
 setInterval(() => { if (!document.hidden && connected && token) refresh(); }, 2000);
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden && token) refresh();
+  if (!document.hidden) {
+    refreshSavedClocks();
+    if (token) refresh();
+  }
 });

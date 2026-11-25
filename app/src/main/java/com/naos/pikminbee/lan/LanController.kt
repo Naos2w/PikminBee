@@ -11,7 +11,6 @@ import androidx.core.content.ContextCompat
 import android.Manifest
 import android.content.pm.PackageManager
 import com.naos.pikminbee.ui.BeePermissions
-import com.naos.pikminbee.ui.VerifiedPhysicalFixState
 import com.naos.pikminbee.data.PreparedRouteState
 import com.naos.pikminbee.domain.PreparedWalkingRoute
 import com.naos.pikminbee.domain.WalkingGeometry
@@ -111,8 +110,6 @@ class LanController(private val context: Context) {
     @Volatile private var physicalShareSessionToken: String? = null
     @Volatile private var physicalSnapshot: LanPhysicalSnapshot? = null
     @Volatile private var verifiedTimeZoneReference: VerifiedRealTimeZone? = null
-    private val realZoneLookupBusy = AtomicBoolean(false)
-    @Volatile private var lastRealZoneLookupAtMillis = 0L
     @Volatile private var lastObservedMock = false
     private fun origin(): Coordinate? = browserOrigin ?: LocationStatus.selected.value
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -750,35 +747,8 @@ class LanController(private val context: Context) {
         PreparedRouteState.set(mode, null)
     }
 
-    private fun maybeResolveRealZoneFromPhone() {
-        // Only an explicitly non-mock, fresh fix captured by the Android App
-        // can establish the reference. A browser opening Favourites is an
-        // explicit user action, never a GPS tick or background location poll.
-        val verified = VerifiedPhysicalFixState.fresh() ?: return
-        if (verifiedTimeZoneReference?.let {
-                it.physicalFixAtMillis >= verified.timestampMillis && it.freshId() != null
-            } == true) return
-        val now = System.currentTimeMillis()
-        if (now - lastRealZoneLookupAtMillis in 0L..60_000L) return
-        if (!realZoneLookupBusy.compareAndSet(false, true)) return
-        lastRealZoneLookupAtMillis = now
-        scope.launch {
-            try {
-                val zone = placeLookup.zoneForVerifiedPhysical(verified.coordinate)
-                if (zone != null &&
-                    VerifiedPhysicalFixState.fresh()?.timestampMillis ==
-                        verified.timestampMillis) {
-                    verifiedTimeZoneReference = VerifiedRealTimeZone(
-                        zone, verified.timestampMillis)
-                }
-            } finally {
-                realZoneLookupBusy.set(false)
-            }
-        }
-    }
-
     private fun savedSnapshot(): String {
-        maybeResolveRealZoneFromPhone()
+        // Destination clocks need no phone-position time zone or external lookup.
         fun encoded(point: Coordinate) = JSONObject()
             .put("lat", point.latitude).put("lon", point.longitude)
         val places = JSONArray().apply {

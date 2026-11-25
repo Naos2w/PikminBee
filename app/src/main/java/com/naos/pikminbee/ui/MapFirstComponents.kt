@@ -137,7 +137,7 @@ fun NaosModeIcon(index: Int, tint: Color, modifier: Modifier = Modifier) {
 
 /** Shared lightweight vector glyphs; only major actions keep a short text label. */
 enum class NaosActionGlyph {
-    PLAN, PLAY, PAUSE, STOP, UNDO, REAL_GPS, VIRTUAL_GPS, FLOWER, SPEED, STEPS, REFRESH, EDIT, DONE
+    PLAN, PLAY, PAUSE, STOP, UNDO, REAL_GPS, VIRTUAL_GPS, FLOWER, SPEED, STEPS, REFRESH, EDIT, DONE, CLOCK, MORE
 }
 
 @Composable
@@ -241,6 +241,14 @@ fun NaosActionIcon(
             NaosActionGlyph.DONE -> {
                 drawLine(tint, pt(4f, 12f), pt(10f, 18f), pen*1.3f, StrokeCap.Round)
                 drawLine(tint, pt(10f, 18f), pt(21f, 6f), pen*1.3f, StrokeCap.Round)
+            }
+            NaosActionGlyph.CLOCK -> {
+                drawCircle(tint, 9f * scale, pt(12f, 12f), style = Stroke(pen))
+                drawLine(tint, pt(12f, 6f), pt(12f, 12f), pen, StrokeCap.Round)
+                drawLine(tint, pt(12f, 12f), pt(16f, 14f), pen, StrokeCap.Round)
+            }
+            NaosActionGlyph.MORE -> {
+                for (x in listOf(5f, 12f, 19f)) drawCircle(tint, 1.7f * scale, pt(x, 12f))
             }
             NaosActionGlyph.REAL_GPS, NaosActionGlyph.FLOWER -> Unit
         }
