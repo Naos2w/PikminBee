@@ -37,6 +37,17 @@ export function currentPosition(state, physical) {
   return state?.mockActive && state.position ? {point:state.position, simulated:true, historical:false}
     : physical ? {point:physical,simulated:false,historical:!!physical.historical} : null;
 }
+/** Use the confirmed phone test pace; older snapshots may omit the label. */
+export function appliedSpeedLabel(state) {
+  if (!["MOVING","PAUSED"].includes(state?.phase)) return "";
+  if (typeof state.speedAppliedDisplay === "string" && state.speedAppliedDisplay)
+    return state.speedAppliedDisplay;
+  const speed = state.speedAppliedKmh;
+  return Number.isFinite(speed) && speed > 0
+    ? (state.phase === "PAUSED" ? "恢復速度 " : "已套用 ") + Number(speed.toFixed(1)) + " km/h"
+    : "速度待確認";
+}
+
 /** The running route and the current draft are different states. A parked
  * route is history, not an active road; never let it mask a new preview. */
 export function routePresentation(state, mode, loop) {

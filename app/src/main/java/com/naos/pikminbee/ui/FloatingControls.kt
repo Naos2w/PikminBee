@@ -611,11 +611,8 @@ class FloatingControls(
         } else ""
         val selectedProfile = WalkSpeedState.profile.value
         val applied = com.naos.pikminbee.location.LocationStatus.appliedSpeedKmh.value
-        val speedLabel = if (applied > 0.0 &&
-            lastPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)) {
-            val prefix = if (selectedProfile.mode == WalkSpeedMode.RANGE) "區間 · " else ""
-            prefix + WalkSpeedProfile.number(applied) + " km/h"
-        } else selectedProfile.display
+        val speedLabel = RouteSurfaceStatusPolicy.appliedRouteSpeedLabel(lastPhase, applied)
+            ?: selectedProfile.display
         quickSummary?.text = "$label · $speedLabel$journey"
         val primaryLabel = when (primary) {
             OverlayPrimaryState.START -> "開始行走"

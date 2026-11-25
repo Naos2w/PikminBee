@@ -168,10 +168,9 @@ internal class FloatingSpeedPanel(
 
     fun render(confirmed: WalkSpeedProfile, applied: Double, phase: WalkPhase) {
         profile = confirmed
-        val active = phase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)
-        val appliedLabel = if (active && applied.isFinite() && applied > 0.0)
-            " · 已套用 ${WalkSpeedProfile.number(applied)} km/h" else ""
-        current.updateText("目前：${confirmed.display}$appliedLabel")
+        val appliedLabel = com.naos.pikminbee.domain.RouteSurfaceStatusPolicy
+            .appliedRouteSpeedLabel(phase, applied)
+        current.updateText("目前：${appliedLabel ?: confirmed.display}")
         presets.forEach { (preset, button) ->
             widgets.select(button, confirmed.mode == WalkSpeedMode.PRESET && confirmed.preset == preset)
         }

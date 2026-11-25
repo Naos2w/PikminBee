@@ -870,6 +870,9 @@ class LanController(private val context: Context) {
             }
         }
         val progress = LocationStatus.progress.value
+        val phase = LocationStatus.phase.value
+        val appliedKmh = com.naos.pikminbee.domain.RouteSurfaceStatusPolicy.visibleRouteSpeedKmh(
+            phase, LocationStatus.appliedSpeedKmh.value)
         // A newly enabled mock provider invalidates any earlier real-location request.
         val mocked = LocationStatus.mockActive.value
         if (mocked && !lastObservedMock) {
@@ -925,7 +928,7 @@ class LanController(private val context: Context) {
                         now - it.capturedAtMillis > 120_000L)
             })
             .put("origin", origin()?.let { JSONObject().put("lat", it.latitude).put("lon", it.longitude) })
-            .put("phase", LocationStatus.phase.value.name)
+            .put("phase", phase.name)
             .put("mode", LocationStatus.mode.value?.name)
             .put("planning", RouteDraftState.planning.value)
             .put("mockPermissionReady", mockPermissionReady())
@@ -944,7 +947,9 @@ class LanController(private val context: Context) {
             .put("speedKmh", WalkSpeedState.profile.value.fixedKmh)
             .put("speedMinKmh", WalkSpeedState.profile.value.minKmh)
             .put("speedMaxKmh", WalkSpeedState.profile.value.maxKmh)
-            .put("speedAppliedKmh", LocationStatus.appliedSpeedKmh.value)
+            .put("speedAppliedKmh", appliedKmh)
+            .put("speedAppliedDisplay", com.naos.pikminbee.domain.RouteSurfaceStatusPolicy
+                .appliedRouteSpeedLabel(phase, appliedKmh) ?: "")
             .put("defaultSpeedPreset", WalkSpeedState.preferred.value.name)
             .put("defaultSpeedMode", WalkSpeedState.preferredProfile.value.mode.name)
             .put("defaultSpeedKmh", WalkSpeedState.preferredProfile.value.fixedKmh)

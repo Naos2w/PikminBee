@@ -11,6 +11,17 @@ on:
         type: boolean
         default: false
         required: false
+      apk_abi:
+        description: 'Target ABI (arm64 for phone; universal for compatibility)'
+        type: choice
+        default: arm64-v8a
+        options:
+          - arm64-v8a
+          - universal
+          - x86_64
+          - armeabi-v7a
+          - x86
+        required: false
 
 permissions:
   contents: read
@@ -46,6 +57,7 @@ jobs:
       - name: Check semantic version progression rules
         run: |
           python3 -m unittest discover -s scripts -p 'test_version*.py'
+          python3 -m unittest discover -s scripts -p 'test_apk_size*.py'
           python3 scripts/bump_version.py check
       - name: Verify map and shared coordinate formats
         run: node --test scripts/test_map_ui_policy.mjs scripts/test_coordinate_formats.mjs
@@ -70,13 +82,14 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && inputs.package_apk == true
         env:
           PIKMINBEE_UAT: 'true'
+          APK_ABI: ${{ inputs.apk_abi }}
           PIKMINBEE_UAT_SIGN_PASSWORD: ${{ secrets.PIKMINBEE_UAT_SIGN_PASSWORD }}
         run: |
           if [ -z "$PIKMINBEE_UAT_SIGN_PASSWORD" ]; then
             echo "Missing private UAT signing password. Refusing an unsigned build."
             exit 1
           fi
-          ./gradlew :app:assembleDebug --no-daemon --console=plain
+          ./gradlew :app:assembleDebug -PpikminbeeApkAbi="$APK_ABI" --no-daemon --console=plain
       - name: Verify UAT package identity and certificate
         if: github.event_name == 'workflow_dispatch' && inputs.package_apk == true
         shell: bash
@@ -111,27 +124,41 @@ jobs:
             exit 1
           fi
           sha256sum "$APK"
+      - name: Audit verified APK size and ABI
+        if: github.event_name == 'workflow_dispatch' && inputs.package_apk == true
+        env:
+          APK_ABI: ${{ inputs.apk_abi }}
+        run: |
+          python3 scripts/apk_size_audit.py app/build/outputs/apk/debug/app-debug.apk \
+            --expected-abi "$APK_ABI" --source-sha "$GITHUB_SHA" \
+            --output app/build/outputs/apk/debug/apk-size-report.json
       - name: Give verified UAT APK its semantic-version filename
         if: github.event_name == 'workflow_dispatch' && inputs.package_apk == true
+        env:
+          APK_ABI: ${{ inputs.apk_abi }}
         shell: bash
         run: |
           set -euo pipefail
           APK="app/build/outputs/apk/debug/app-debug.apk"
           METADATA="app/build/outputs/apk/debug/output-metadata.json"
           VERSION="$(python3 scripts/uat_release_filename.py "$METADATA")"
-          VERSIONED_APK="app/build/outputs/apk/debug/PikminBee-UAT-${VERSION}.apk"
+          SUFFIX=""
+          if [ "$APK_ABI" != "arm64-v8a" ]; then SUFFIX="-$APK_ABI"; fi
+          VERSIONED_APK="app/build/outputs/apk/debug/PikminBee-UAT-${VERSION}${SUFFIX}.apk"
           # Copy ONLY after verifying package identity and pinned certificate.
           # APK contents, signature and installed package ID remain unchanged.
           cp -- "$APK" "$VERSIONED_APK"
           cmp -s -- "$APK" "$VERSIONED_APK"
           echo "UAT_APK_PATH=$VERSIONED_APK" >> "$GITHUB_ENV"
-          echo "UAT_ARTIFACT_NAME=PikminBee-UAT-${VERSION}-signed" >> "$GITHUB_ENV"
+          echo "UAT_ARTIFACT_NAME=PikminBee-UAT-${VERSION}${SUFFIX}-signed" >> "$GITHUB_ENV"
           sha256sum "$VERSIONED_APK"
       - name: Upload manually requested UAT APK
         if: github.event_name == 'workflow_dispatch' && inputs.package_apk == true
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.UAT_ARTIFACT_NAME }}
-          path: ${{ env.UAT_APK_PATH }}
+          path: |
+            ${{ env.UAT_APK_PATH }}
+            app/build/outputs/apk/debug/apk-size-report.json
           if-no-files-found: error
           retention-days: 7
