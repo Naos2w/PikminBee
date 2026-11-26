@@ -37,6 +37,14 @@ export function currentPosition(state, physical) {
   return state?.mockActive && state.position ? {point:state.position, simulated:true, historical:false}
     : physical ? {point:physical,simulated:false,historical:!!physical.historical} : null;
 }
+/** A camera-only follow target from the already authorised, displayed route state. */
+export function routeCameraPoint(state, available) {
+  if (!available || state?.mode !== "ROUTE" || !["MOVING","PAUSED"].includes(state.phase) ||
+      state.mockActive !== true) return null;
+  const p = state.position;
+  return p && Number.isFinite(p.lat) && Number.isFinite(p.lon) &&
+    Math.abs(p.lat) <= 90 && Math.abs(p.lon) <= 180 ? p : null;
+}
 /** Use the confirmed phone test pace; older snapshots may omit the label. */
 export function appliedSpeedLabel(state) {
   if (!["MOVING","PAUSED"].includes(state?.phase)) return "";

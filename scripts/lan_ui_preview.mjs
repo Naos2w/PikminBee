@@ -118,18 +118,20 @@ createServer(async (req,res)=>{
   // Fixed synthetic route scenarios: never contact the phone or a routing service.
   if(req.method==='POST'&&url==='/api/preview/route-state'){
     const {scenario}=await readBody(req);
-    if(!['active','parked','planning','ready','failed','cleared','arrived'].includes(scenario)){
+    if(!['active','active-next','parked','planning','ready','failed','cleared','arrived'].includes(scenario)){
       send(res,{error:'Unknown test scenario'},400);return;
     }
     const origin={lat:25.033,lon:121.5654};
     const a={lat:25.043,lon:121.5654}, b={lat:25.033,lon:121.5754};
     const preview=(id,point)=>({id,loop:false,geometry:[origin,point],
       distanceMetres:1000,maxSnapMetres:0});
+    const moving=['active','active-next'].includes(scenario);
     state={...state,origin,geometry:[origin,a],mode:'ROUTE',
-      phase:scenario==='active'?'MOVING':'PARKED',
+      position:scenario==='active-next'?{lat:25.036,lon:121.5654}:state.position,
+      phase:moving?'MOVING':'PARKED',
       routeArrivalId:scenario==='arrived'?'synthetic-arrival-'+(state.routeRevision+1):null,
       routeRevision:state.routeRevision+1,
-      routeStops:scenario==='cleared'?[]:[scenario==='active'?a:b],
+      routeStops:scenario==='cleared'?[]:[moving?a:b],
       planning:scenario==='planning',
       previews:scenario==='ready'?{ROUTE:preview('B',b)}:
         scenario==='planning'?{ROUTE:preview('A',a)}:{}};

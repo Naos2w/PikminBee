@@ -94,6 +94,9 @@ fun MapFirstShell(
     routeSpeedKmh: Double = 0.0,
     routeActive: Boolean = false,
     routePaused: Boolean = false,
+    routeCameraAvailable: Boolean = false,
+    routeCameraFollowing: Boolean = false,
+    onToggleRouteCameraFollow: () -> Unit = {},
     routePreviewReady: Boolean = false,
     routePlanning: Boolean = false,
     routeSnapMetres: Double = 0.0,
@@ -348,14 +351,37 @@ fun MapFirstShell(
             }
         }
 
-        CurrentLocationMapButton(
-            onClick = onCurrentLocation,
-            dark = dark,
+        Column(
             modifier = Modifier.align(Alignment.BottomEnd)
                 .navigationBarsPadding().padding(end = 16.dp,
                     bottom = if (showQuick) 224.dp else 132.dp),
-            backdrop = backdrop,
-        )
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalAlignment = Alignment.End,
+        ) {
+            if (routeCameraAvailable) {
+                MapGlass(dark, Modifier.size(52.dp), backdrop) {
+                    IconButton(
+                        onClick = onToggleRouteCameraFollow,
+                        modifier = Modifier.fillMaxSize()
+                            .background(if (routeCameraFollowing) p.accent else Color.Transparent,
+                                RoundedCornerShape(16.dp))
+                            .semantics {
+                                contentDescription = if (routeCameraFollowing)
+                                    "停止跟隨目前位置" else "跟隨目前位置（僅移動地圖）"
+                            },
+                    ) {
+                        Text(if (routeCameraFollowing) "跟隨中" else "跟隨",
+                            fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                            color = if (routeCameraFollowing) Color.White else p.ink)
+                    }
+                }
+            }
+            CurrentLocationMapButton(
+                onClick = onCurrentLocation,
+                dark = dark,
+                backdrop = backdrop,
+            )
+        }
         }
     }
 

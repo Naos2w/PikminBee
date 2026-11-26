@@ -218,6 +218,7 @@ private fun PikminBeeScreen() {
     var mapExplore by remember { mutableStateOf(false) }
     var cameraSerial by remember { mutableIntStateOf(0) }
     var cameraRequest by remember { mutableStateOf<MapCameraRequest?>(null) }
+    var routeCameraFollowing by remember { mutableStateOf(false) }
     var mapViewport by remember { mutableStateOf<MapViewport?>(null) }
     var initiallyFocusedOnPhone by remember { mutableStateOf(false) }
     val controlsScroll = rememberScrollState()
@@ -506,7 +507,14 @@ private fun PikminBeeScreen() {
             moveMapCamera(MapCameraGeometry.fitPoints(listOf(firstFix)))
         }
     }
+    fun stopRouteCameraFollow() {
+        if (routeCameraFollowing) {
+            routeCameraFollowing = false
+            cameraRequest = null
+        }
+    }
     fun fitCurrentRoute() {
+        stopRouteCameraFollow()
         val target = if (tab == ToolTab.ROUTE)
             MapCameraGeometry.forRoute(mockPosition ?: phonePosition, roadStops, displayedRoad)
         else MapCameraGeometry.fitPoints(listOf(selected))
@@ -515,6 +523,7 @@ private fun PikminBeeScreen() {
             else MapCameraGeometry.fitPoints(listOf(selected)))
     }
     fun focusMapPoint(point: Coordinate) {
+        stopRouteCameraFollow()
         mapExplore = true
         moveMapCamera(MapCameraGeometry.fitPoints(listOf(point)))
     }
@@ -526,6 +535,16 @@ private fun PikminBeeScreen() {
                     it.getIntExtra(MainActivity.EXTRA_OPEN_MODE, -1) == 3
             } == true) BeePage.SETTINGS
             else if (prefs.setupCompleted()) BeePage.MAP else BeePage.PERMISSIONS)
+    }
+    val routeCameraAvailable = activeRouteWalk && tab == ToolTab.ROUTE &&
+        activePage == BeePage.MAP && mockPosition != null
+    LaunchedEffect(routeCameraAvailable, routeCameraFollowing, mockPosition) {
+        if (!routeCameraAvailable) {
+            stopRouteCameraFollow()
+        } else if (routeCameraFollowing) {
+            // Only move the map camera to the already displayed test-route position.
+            mockPosition?.let { moveMapCamera(MapCameraGeometry.fitPoints(listOf(it))) }
+        }
     }
     var mapMounted by remember { mutableStateOf(activePage == BeePage.MAP) }
     LaunchedEffect(activePage) {
@@ -984,6 +1003,14 @@ private fun PikminBeeScreen() {
                 routeActive = walkMode == WalkMode.ROUTE &&
                     walkPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED),
                 routePaused = walkPhase == WalkPhase.PAUSED,
+                routeCameraAvailable = routeCameraAvailable,
+                routeCameraFollowing = routeCameraFollowing,
+                onToggleRouteCameraFollow = {
+                    if (routeCameraAvailable) {
+                        routeCameraFollowing = !routeCameraFollowing
+                        if (!routeCameraFollowing) cameraRequest = null
+                    }
+                },
                 routePreviewReady = routePreviewReady,
                 routeSnapMetres = preparedRoute?.maxSnapMetres ?: 0.0,
                 routePlanning = planning,
@@ -1023,8 +1050,10 @@ private fun PikminBeeScreen() {
                 },
                 mapExplore = mapExplore,
                 onCameraFailure = { message = it },
+                onCameraGesture = ::stopRouteCameraFollow,
                 flowerSpots = emptyList(),
                 onPick = { point ->
+                    stopRouteCameraFollow()
                     coordinateInputDismissToken++
                     selectionExplicit = true
                     if (mapExplore) mapExplore = false
@@ -1072,6 +1101,7 @@ private fun PikminBeeScreen() {
                 onFlowerPick = { _ -> Unit },
                 onStopPick = when (tab) {
                     ToolTab.ROUTE -> { index: Int ->
+                        stopRouteCameraFollow()
                         coordinateInputDismissToken++
                         if (index in roadStops.indices) {
                             routeStopActionIndex = index

@@ -1,7 +1,19 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
-import { BRIGHT_STYLE_URL, samePosition, currentPosition, createCameraFocus, visibleMapPadding, countryFlagPath, destinationTime, routePresentation, appliedSpeedLabel, createRouteArrivalNotice } from "../app/src/main/assets/lan/map-ui-policy.mjs";
+import { BRIGHT_STYLE_URL, samePosition, currentPosition, createCameraFocus, visibleMapPadding, countryFlagPath, destinationTime, routePresentation, appliedSpeedLabel, createRouteArrivalNotice, routeCameraPoint } from "../app/src/main/assets/lan/map-ui-policy.mjs";
+
+test("route camera following is restricted to the current active route and healthy display",()=>{
+  const point={lat:0,lon:0};
+  const active={mode:"ROUTE",phase:"MOVING",mockActive:true,position:point};
+  assert.deepEqual(routeCameraPoint(active,true),point);
+  assert.deepEqual(routeCameraPoint({...active,phase:"PAUSED"},true),point);
+  assert.equal(routeCameraPoint(active,false),null);
+  for (const state of [null,{...active,phase:"PARKED"},{...active,phase:"IDLE"},
+    {...active,mode:"TELEPORT"},{...active,mockActive:false},
+    {...active,position:null},{...active,position:{lat:91,lon:0}},
+    {...active,position:{lat:0,lon:Infinity}}]) assert.equal(routeCameraPoint(state,true),null);
+});
 
 test("route arrival notices consume only new authoritative events",()=>{
   const notice=createRouteArrivalNotice();

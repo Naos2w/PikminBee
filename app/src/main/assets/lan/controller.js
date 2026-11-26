@@ -1,5 +1,5 @@
 import {parseCoordinate} from "/coordinate-format.mjs";
-import { BRIGHT_STYLE_URL, samePosition, currentPosition, createCameraFocus, visibleMapPadding, countryFlagPath, destinationTime, routePresentation, appliedSpeedLabel, createRouteArrivalNotice } from "/map-ui-policy.mjs";
+import { BRIGHT_STYLE_URL, samePosition, currentPosition, createCameraFocus, visibleMapPadding, countryFlagPath, destinationTime, routePresentation, appliedSpeedLabel, createRouteArrivalNotice, routeCameraPoint } from "/map-ui-policy.mjs";
 const $ = id => document.getElementById(id);
 let token = null;
 let sessionDeadlineMs = 0;
@@ -26,6 +26,42 @@ let routeMarkers = [];
 let lastStopsKey = "", lastLineKey = "", lastDraftKey = "", lastOrderKey = "";
 let focusRealWhenReady = false;
 const cameraFocus = createCameraFocus();
+let routeCameraFollowing = false, lastFollowPoint = null;
+function setRouteCameraFollow(enabled) {
+  if (routeCameraFollowing !== enabled) {
+    routeCameraFollowing = enabled;
+    lastFollowPoint = null;
+    cameraFocus.clear();
+  }
+  const button = $("route-follow");
+  button.setAttribute("aria-pressed", String(routeCameraFollowing));
+  const label = routeCameraFollowing ? "停止跟隨目前位置" : "跟隨目前位置（僅移動地圖）";
+  button.title = label;
+  button.setAttribute("aria-label", label);
+}
+function updateRouteCameraControl() {
+  const point = routeCameraPoint(latest, connected && remoteLinkHealthy && !settingsOpen && mode === "ROUTE");
+  if (!point) setRouteCameraFollow(false);
+  $("route-follow").classList.toggle("hidden", !point);
+  return point;
+}
+function renderRouteCameraFollow() {
+  const point = updateRouteCameraControl();
+  if (!routeCameraFollowing || !point || !map) return;
+  if (!lastFollowPoint) {
+    cameraFocus.request(point, 15);
+    if (flushMapFocus()) lastFollowPoint = {...point};
+  } else if (point.lat !== lastFollowPoint.lat || point.lon !== lastFollowPoint.lon) {
+    // Camera only; keep the user's zoom and the existing safe map padding.
+    map.jumpTo({center:[point.lon,point.lat]});
+    lastFollowPoint = {...point};
+  }
+}
+$("route-follow").addEventListener("click", () => {
+  if (!updateRouteCameraControl()) return;
+  setRouteCameraFollow(!routeCameraFollowing);
+  renderRouteCameraFollow();
+});
 let teleportBusy = false, pendingTeleportConfirmation = null;
 let mapContextSelection = null;
 const routeArrivalNotice = createRouteArrivalNotice();
@@ -86,6 +122,8 @@ async function call(path, method = "GET", body = null, useToken = true) {
     if (requestToken !== token || (renewingSession && path === "/api/state"))
       throw Error("等待續期完成，忽略舊狀態");
     token = null; connected = false;
+    setRouteCameraFollow(false);
+    updateRouteCameraControl();
     resetRouteArrivalNotice();
     closeMapContextMenu();
     sessionDeadlineMs = 0;
@@ -136,6 +174,7 @@ $("connect").addEventListener("click", async () => {
     }
     if (!approved?.token) throw Error("等待手機核准逾時");
     token = approved.token; connected = true; remoteLinkHealthy = true;
+    setRouteCameraFollow(false);
     resetRouteArrivalNotice();
     sessionDeadlineMs = Date.now() + Math.max(0, approved.expiresInSeconds || 0) * 1000;
     updateSessionExpiry();
@@ -171,11 +210,13 @@ $("session-renew").addEventListener("click", async () => {
         {pendingId:pending.pendingId});
       if (!result.token) continue;
       token = result.token;
+      setRouteCameraFollow(false);
       resetRouteArrivalNotice();
       sessionDeadlineMs = Date.now() + Math.max(0, result.expiresInSeconds || 0) * 1000;
       // A renewed token must not inherit the previous precise GPS sharing grant.
       latest = null;
       current = null;
+      updateRouteCameraControl();
       cameraFocus.clear();
       pendingTeleportConfirmation = null;
       focusRealWhenReady = false;
@@ -382,6 +423,7 @@ for (const [id,value] of [
 $("mode-settings").addEventListener("click", () => {
   const wasCurrent = settingsOpen;
   settingsOpen = !settingsOpen;
+  updateRouteCameraControl();
   updateModeView();
   if (deviceKind() === "mobile") {
     setSheetState(wasCurrent && sheetState !== "collapsed" ? "collapsed" : "half");
@@ -389,6 +431,7 @@ $("mode-settings").addEventListener("click", () => {
 });
 $("web-settings-close").addEventListener("click", () => {
   settingsOpen = false;
+  updateRouteCameraControl();
   updateModeView();
   if (deviceKind() === "mobile") setSheetState("collapsed");
 });
@@ -467,6 +510,7 @@ function flushMapFocus() {
 }
 function focusMapPosition(point, zoom = 15, collapse = true) {
   if (!point || !Number.isFinite(point.lat) || !Number.isFinite(point.lon)) return false;
+  setRouteCameraFollow(false);
   // Keep the full map canvas. Collapse the mobile sheet on explicit focus,
   // and use the unobstructed region of that canvas for camera centring.
   $("map-locations").open = false;
@@ -819,10 +863,13 @@ async function initialiseMap() {
     });
     // Zoom/location actions share a permanent bottom-right overlay.
     // Native attribution remains visible and is never covered by the tools.
-    map.on("dragstart", () => cameraFocus.clear());
+    map.on("dragstart", () => { setRouteCameraFollow(false); cameraFocus.clear(); });
+    for (const event of ["zoomstart", "rotatestart", "pitchstart"])
+      map.on(event, e => { if (e.originalEvent) setRouteCameraFollow(false); });
     map.on("movestart", closeMapContextMenu);
     map.on("contextmenu", openMapContextMenu);
     map.on("click", e => {
+      setRouteCameraFollow(false);
       closeMapContextMenu();
       showCoordinate({lat:e.lngLat.lat,lon:e.lngLat.lng});
       renderMap();
@@ -1191,6 +1238,7 @@ function renderRouteOrder() {
 }
 
 function updateRouteControls() {
+  updateRouteCameraControl();
   const navigating = mode === "ROUTE";
   const stops = latest?.routeStops || [];
   const prepared = routePresentation(latest, mode, $("loop").value === "true").prepared;
@@ -1269,6 +1317,7 @@ for (const [id,action] of [["compact-pause","pause"],
   });
 }
 function updateStatus() {
+  updateRouteCameraControl();
   const phase = latest?.phase || "IDLE";
   const names = {MOVING:"行走中", PAUSED:"已暫停", PARKED:"已停止", IDLE:"待命"};
   const progress = latest?.progress || {};
@@ -1380,6 +1429,7 @@ async function refresh() {
     updateStatus();
     updateRouteControls();
     renderMap();
+    renderRouteCameraFollow();
     reconcileTeleport(latest);
     refreshSavedClocks();
     if (focusRealWhenReady && trustedRealPosition()) {
