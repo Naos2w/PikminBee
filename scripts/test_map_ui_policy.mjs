@@ -91,6 +91,9 @@ test("parked route A cannot hide new draft or prepared route B", () => {
   const ready = routePresentation({...stopped,previews:{ROUTE:preview}},"ROUTE",false);
   assert.equal(ready.prepared,preview);
   assert.deepEqual(ready.road,newRoad);
+  const stale = routePresentation({...stopped,previews:{ROUTE:{...preview,canStart:false}}},"ROUTE",false);
+  assert.deepEqual(stale.road,newRoad,"stale start retains drawing");
+  assert.equal(stale.prepared.canStart,false);
   assert.deepEqual(ready.draft,[]);
   for (const state of [{...stopped,planning:true,previews:{ROUTE:preview}},
                        {...stopped,previews:{ROUTE:{...preview,loop:true}}}]) {

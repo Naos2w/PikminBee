@@ -86,6 +86,7 @@ import com.naos.pikminbee.data.MapAppearance
 import com.naos.pikminbee.data.MapProvider
 import com.naos.pikminbee.data.MapBasemapPolicy
 import com.naos.pikminbee.data.RouteDraftState
+import com.naos.pikminbee.data.RoutePlanningNotice
 import com.naos.pikminbee.data.PreparedRouteState
 import com.naos.pikminbee.data.WalkSpeedState
 import com.naos.pikminbee.domain.WalkSpeedPreset
@@ -104,6 +105,8 @@ import com.naos.pikminbee.domain.WalkPhase
 import com.naos.pikminbee.domain.WalkingGeometry
 import com.naos.pikminbee.route.ValhallaPlanner
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import com.naos.pikminbee.location.LocationStatus
@@ -250,6 +253,10 @@ private fun PikminBeeScreen() {
     val roadStops by remember { derivedStateOf { routeDraft.stops } }
     val savedRoutes by SavedRouteState.routes.collectAsState()
     val planning by RouteDraftState.planning.collectAsState()
+    val planningNotice by RouteDraftState.planningNotice.collectAsState()
+    var routePlanJob by remember { mutableStateOf<Job?>(null) }
+    var saveRouteRevision by remember { mutableStateOf<Long?>(null) }
+    var saveRouteName by remember { mutableStateOf("") }
     var confirmStopWalk by remember { mutableStateOf(false) }
     val speedPreset by WalkSpeedState.selected.collectAsState()
     val speedProfile by WalkSpeedState.profile.collectAsState()
@@ -421,9 +428,18 @@ private fun PikminBeeScreen() {
         }
     }
 
-    fun saveRoute(name: String, mode: WalkMode, stops: List<Coordinate>): Boolean =
+    fun saveRoute(name: String, expectedRevision: Long): Boolean =
         runCatching {
-            val item = prefs.addSavedRoute(name, mode, stops)
+            val item = synchronized(RouteDraftState) {
+                val draft = RouteDraftState.snapshot()
+                check(draft.revision == expectedRevision && !RouteDraftState.planning.value) {
+                    "路線已變更，請重新確認收藏"
+                }
+                val savedOrigin = draft.origin ?: preparedRoute?.takeIf {
+                    it.matchesDraft(draft.stops, draft.loop)
+                }?.origin ?: mockPosition ?: phonePosition
+                prefs.addSavedRoute(name, WalkMode.ROUTE, draft.stops, savedOrigin, draft.loop)
+            }
             message = "已收藏「" + item.name + "」，共 " + item.stops.size + " 個路點"
         }.onFailure { message = "無法收藏路線：" + (it.message ?: "儲存錯誤") }.isSuccess
 
@@ -434,7 +450,11 @@ private fun PikminBeeScreen() {
         }.onFailure { message = "無法改名：" + (it.message ?: "儲存錯誤") }.isSuccess
 
     fun loadRoute(route: SavedRoute) {
-        if (!commitDraft(routeDraft.revision, route.stops)) return
+        if (LocationStatus.phase.value in listOf(WalkPhase.MOVING, WalkPhase.PAUSED) ||
+            !prefs.loadSavedRouteDraftIfCurrent(routeDraft.revision, route)) {
+            message = "路線已變更、規劃或行走中，無法載入收藏"
+            return
+        }
         if (route.mode == WalkMode.FLOWERS) {
             // Migrate only the *draft*, never mutate/delete the user's saved legacy route.
             tab = ToolTab.ROUTE
@@ -457,12 +477,15 @@ private fun PikminBeeScreen() {
 
     val activeRouteWalk = walkMode == WalkMode.ROUTE &&
         walkPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED)
-    val routePreviewReady = preparedRoute?.isCurrent(
-        mockPosition ?: phonePosition, roadStops
-    ) == true
+    val routePlanOrigin = routeDraft.origin ?: mockPosition ?: phonePosition
+    val routePreviewShown = preparedRoute?.matchesDraft(roadStops, routeDraft.loop) == true
+    // Retain a valid drawing, but never relax the existing start-position check.
+    val routePreviewReady = routePreviewShown && !routeDraft.loop &&
+        preparedRoute?.isCurrent(mockPosition ?: phonePosition, roadStops, false) == true
+    val routePreviewStale = routePreviewShown && !routePreviewReady
     val displayedRoad = if (tab == ToolTab.ROUTE) {
         if (activeRouteWalk) roadLine
-        else if (routePreviewReady) routeRoadPreview else emptyList()
+        else if (routePreviewShown) routeRoadPreview else emptyList()
     } else emptyList()
     fun chooseSpeedProfile(next: WalkSpeedProfile) {
         prefs.setWalkSpeedProfile(next)
@@ -585,7 +608,7 @@ private fun PikminBeeScreen() {
         val start = mockPosition ?: phonePosition
         val stops = roadStops
         val loop = false
-        if (ready == null || !ready.isCurrent(start, stops, loop)) {
+        if (RouteDraftState.planning.value || routeDraft.loop || ready == null || !ready.isCurrent(start, stops, loop)) {
             message = "路點或起點已變更，請先重新規劃"
             return
         }
@@ -630,15 +653,19 @@ private fun PikminBeeScreen() {
             return
         }
         val mode = WalkMode.ROUTE
-        val origin = mockPosition ?: phonePosition
+        val origin = routePlanOrigin
         val stops = roadStops
-        val loop = false
+        val loop = routeDraft.loop
         val ready = PreparedRouteState.get(mode)
         when {
-            planning -> Unit
+            planning -> {
+                RouteDraftState.cancelPlanning()
+                routePlanJob?.cancel()
+                message = "已取消規劃"
+            }
             origin == null -> message = "請先取得定位或在地圖設定起點"
             stops.isEmpty() -> message = "請先在地圖選取至少一個路點"
-            ready?.isCurrent(origin, stops, loop) == true -> {
+            routePreviewReady && ready != null -> {
                 if (ready.requiresSnapConfirmation) confirmStartMode = mode
                 else startPreparedWalk(mode)
             }
@@ -650,36 +677,38 @@ private fun PikminBeeScreen() {
                 val owner = RouteDraftState.beginPlanning(capturedRevision)
                     ?: run { message = "路點已變更或仍在規劃，請稍後重試"; return }
                 message = "正在規劃可步行道路…"
-                work.launch {
+                routePlanJob = work.launch {
                     try {
-                        val plan = ValhallaPlanner.planDetailed(listOf(capturedOrigin) + capturedStops)
-                        val currentOrigin = mockPosition ?: phonePosition
-                        if (currentOrigin == null || RouteDraftState.snapshot().revision != capturedRevision ||
-                            RouteDraftState.snapshot().stops != capturedStops ||
-                            WalkingGeometry.distanceMeters(capturedOrigin, currentOrigin) > 30.0) {
-                            message = "規劃期間路點或起點已變更，請重新規劃"
-                        } else {
-                            PreparedRouteState.set(mode, PreparedWalkingRoute(
-                                origin = capturedOrigin,
-                                stops = capturedStops,
-                                geometry = plan.geometry,
-                                loop = capturedLoop,
-                                snapMetres = plan.snapMetres,
-                            ))
-                            mapExplore = true
-                            moveMapCamera(MapCameraGeometry.forRoute(
-                                capturedOrigin, capturedStops, plan.geometry))
-                            closeDetailsRequest++
-                            message = if (plan.maxSnapMetres > 40.0)
-                                "路線已預覽，最近道路最大偏移 ${plan.maxSnapMetres.toInt()} 公尺，開始前須確認"
-                            else "路線已預覽，再按一次即可開始行走"
+                        val anchors = listOf(capturedOrigin) + capturedStops +
+                            (if (capturedLoop) listOf(capturedOrigin) else emptyList())
+                        val plan = ValhallaPlanner.planDetailed(anchors) { RouteDraftState.isPlanning(owner) }
+                        val accepted = synchronized(RouteDraftState) {
+                            if (!RouteDraftState.isPlanning(owner) ||
+                                RouteDraftState.snapshot().revision != capturedRevision) false
+                            else {
+                                PreparedRouteState.set(mode, PreparedWalkingRoute(
+                                    origin = capturedOrigin, stops = capturedStops,
+                                    geometry = plan.geometry, loop = capturedLoop, snapMetres = plan.snapMetres,
+                                ))
+                                RouteDraftState.finishPlanning(owner, RoutePlanningNotice("路線已預覽"))
+                                true
+                            }
                         }
+                        if (accepted) {
+                            mapExplore = true
+                            moveMapCamera(MapCameraGeometry.forRoute(capturedOrigin, capturedStops, plan.geometry))
+                            closeDetailsRequest++
+                            message = "路線已預覽"
+                        }
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
                     } catch (error: Exception) {
-                        message = "道路規劃失敗：" + (error.message ?: "請檢查網路或路點")
+                        RouteDraftState.finishPlanning(owner, RoutePlanningNotice(
+                            "道路規劃失敗：" + (error.message ?: "請檢查網路或路點"), true))
                     } finally {
                         RouteDraftState.finishPlanning(owner)
                     }
-                }.invokeOnCompletion { RouteDraftState.finishPlanning(owner) }
+                }
             }
         }
     }
@@ -958,12 +987,14 @@ private fun PikminBeeScreen() {
                 dark = dark,
                 modeIndex = tab.ordinal,
                 modeTitle = tab.label,
-                message = if (tab == ToolTab.ROUTE)
-                    routeEditingStopIndex?.let { "請點地圖重選第 ${it + 1} 點" }
-                        ?: if (roadStops.size >= RoutePointDraft.MAX_STOPS)
-                            "已選滿 ${RoutePointDraft.MAX_STOPS} 個路點 · 上滑可復原或刪除"
-                        else "下一點：第 ${roadStops.size + 1} 點 · 上滑復原或管理路點"
-                    else message,
+                message = if (tab == ToolTab.ROUTE) when {
+                    planning -> "正在規劃可步行道路…"
+                    planningNotice.error -> planningNotice.text
+                    routePreviewStale && routeDraft.loop -> "循環路線已預覽；App 僅供查看，需非循環路線才可開始"
+                    routePreviewStale -> "保留道路預覽；目前位置已偏離起點，請改用目前位置重新規劃"
+                    planningNotice.text.isNotBlank() -> planningNotice.text
+                    else -> message
+                } else message,
                 coordinateInput = coordinateInput,
                 coordinateInputDismissToken = coordinateInputDismissToken,
                 onCoordinateChange = { coordinateInput = it },
@@ -1012,6 +1043,7 @@ private fun PikminBeeScreen() {
                     }
                 },
                 routePreviewReady = routePreviewReady,
+                routePreviewStale = routePreviewStale,
                 routeSnapMetres = preparedRoute?.maxSnapMetres ?: 0.0,
                 routePlanning = planning,
                 onRouteUndo = {
@@ -1038,10 +1070,10 @@ private fun PikminBeeScreen() {
                 selectionActive = selectionExplicit,
                 current = mockPosition ?: phonePosition,
                 currentIsMock = mockPosition != null,
-                start = null,
+                start = if (tab == ToolTab.ROUTE) preparedRoute?.takeIf { routePreviewShown }?.origin ?: routePlanOrigin else null,
                 stops = if (tab == ToolTab.ROUTE) roadStops else emptyList(),
                 road = displayedRoad,
-                previewRoad = tab == ToolTab.ROUTE && !activeRouteWalk && routePreviewReady,
+                previewRoad = tab == ToolTab.ROUTE && !activeRouteWalk && routePreviewShown,
                 cameraRequest = cameraRequest,
                 viewport = mapViewport,
                 onViewport = { mapViewport = it },
@@ -1065,7 +1097,7 @@ private fun PikminBeeScreen() {
                                 message = "規劃或行走中不可修改路點"
                             } else {
                                 val edit = RoutePointDraft.select(
-                                    roadStops, mockPosition ?: phonePosition, point,
+                                    roadStops, routePlanOrigin, point,
                                     routeEditingStopIndex,
                                 )
                                 when (edit.outcome) {
@@ -1196,7 +1228,7 @@ private fun PikminBeeScreen() {
                                     mode = WalkMode.ROUTE,
                                     stops = routeDraft.stops,
                                     draftRevision = routeDraft.revision,
-                                    origin = mockPosition ?: phonePosition,
+                                    origin = routePlanOrigin,
                                     activeMode = walkMode,
                                     phase = walkPhase,
                                     walkEstimatedSteps = walkEstimatedSteps,
@@ -1219,11 +1251,31 @@ private fun PikminBeeScreen() {
                                         }
                                     },
                                     onMessage = { message = it },
-                                    preparedRoad = if (routePreviewReady) routeRoadPreview else emptyList(),
+                                    preparedRoad = if (routePreviewShown) routeRoadPreview else emptyList(),
+                                    previewCanStart = routePreviewReady,
+                                    previewStale = routePreviewStale,
+                                    planningMessage = if (planningNotice.error) planningNotice.text else message,
                                     routePlanning = planning,
                                     snapMetres = preparedRoute?.maxSnapMetres ?: 0.0,
-                                    loop = false,
-                                    onLoopChange = {},
+                                    loop = routeDraft.loop,
+                                    onLoopChange = { next ->
+                                        if (next && routeDraft.stops.size > 14)
+                                            message = "循環預覽最多 14 個目的地"
+                                        else if (!prefs.saveRouteOptionsIfCurrent(routeDraft.revision, routeDraft.origin, next))
+                                            message = "路線已變更，請重新確認"
+                                    },
+                                    onUseCurrentOrigin = {
+                                        if (!prefs.saveRouteOptionsIfCurrent(routeDraft.revision, null, routeDraft.loop))
+                                            message = "路線已變更，請重新確認"
+                                        else {
+                                            PreparedRouteState.set(WalkMode.ROUTE, null)
+                                            message = "已改用目前位置為規劃起點"
+                                        }
+                                    },
+                                    onSaveRoute = {
+                                        saveRouteRevision = routeDraft.revision
+                                        saveRouteName = ""
+                                    },
                                     onRoutePrimary = { handleJourneyPrimary() },
                                     onRouteStop = ::requestStopWalk,
                                     onLocateStop = { point ->
@@ -1348,6 +1400,12 @@ private fun PikminBeeScreen() {
                     canAddPlace = selectionExplicit,
                     savingPlace = savingPlace,
                     onAddPlace = ::saveSelectedPlace,
+                    initialRoutes = tab == ToolTab.ROUTE,
+                    canAddRoute = roadStops.isNotEmpty() && !planning,
+                    onAddRoute = {
+                        saveRouteRevision = routeDraft.revision
+                        saveRouteName = ""
+                    },
                     onSelectPlace = { place ->
                         showFavourites = false
                         selected = place.coordinate
@@ -1407,7 +1465,7 @@ private fun PikminBeeScreen() {
                                 query.isBlank() || it.name.contains(query, ignoreCase = true)
                             },
                             foreground = foreground, muted = muted,
-                            onSave = { name -> saveRoute(name, WalkMode.ROUTE, roadStops) },
+                            onSave = { name -> saveRoute(name, routeDraft.revision) },
                             onRename = ::renameRoute,
                             onLoad = { route ->
                                 loadRoute(route)
@@ -1432,6 +1490,23 @@ private fun PikminBeeScreen() {
                     },
                 )
             }
+        }
+        saveRouteRevision?.let { revision ->
+            AlertDialog(
+                onDismissRequest = { saveRouteRevision = null },
+                title = { Text("收藏路線") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("保存起點、路點順序及循環設定。載入只恢復草稿，不會開始行走。")
+                        OutlinedTextField(value = saveRouteName, onValueChange = { saveRouteName = it.take(60) },
+                            singleLine = true, label = { Text("路線名稱") })
+                    }
+                },
+                confirmButton = { TextButton(enabled = saveRouteName.isNotBlank(), onClick = {
+                    if (saveRoute(saveRouteName.trim(), revision)) saveRouteRevision = null
+                }) { Text("儲存") } },
+                dismissButton = { TextButton(onClick = { saveRouteRevision = null }) { Text("取消") } },
+            )
         }
         pendingSimplifiedGpx?.let { candidate ->
             AlertDialog(

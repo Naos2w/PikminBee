@@ -484,9 +484,14 @@ swipeArea.addEventListener("touchend", event => {
   const next = index + (dx < 0 ? 1 : -1);
   if (next >= 0 && next < modeOrder.length) selectMode(modeOrder[next]);
 }, {passive:true});
-$("loop").addEventListener("change", () => {
-  if (mode === "ROUTE") loops.ROUTE = $("loop").value === "true";
+$("loop").addEventListener("change", async () => {
+  if (mode !== "ROUTE") return;
+  const loop = $("loop").value === "true";
   $("confirm-snap").checked = false;
+  if (!await act("/api/route/options",{loop,expectedRevision:latest?.routeRevision}))
+    $("loop").value = String(loops.ROUTE);
+  else loops.ROUTE = typeof latest?.routeLoop === "boolean" ? latest.routeLoop : loop;
+  $("loop").value = String(loops.ROUTE);
   updateRouteControls();
   renderMap();
 });
@@ -535,13 +540,13 @@ function reconcileTeleport(state) {
 }
 async function act(path, body, note = "") {
   const editsRoute = path.startsWith("/api/points/") ||
-    ["/api/origin", "/api/saved/load", "/api/route/preview"].includes(path);
+    ["/api/origin", "/api/saved/load", "/api/route/options", "/api/route/preview", "/api/route/cancel-preview"].includes(path);
   if (editsRoute) {
     if (routeMutationPending) return false;
     routeMutationPending = true;
     routeStateVersion++;
     // Clear the stale preview immediately; do not let a pre-edit poll restore it.
-    if (latest) latest = {...latest, previews:{}, planning:true};
+    if (latest) latest = {...latest, previews:path === "/api/route/cancel-preview" ? latest.previews : {}, planning:true};
     $("confirm-snap").checked = false;
     updateRouteControls();
     renderMap();
@@ -617,7 +622,7 @@ $("teleport").addEventListener("click", async () => {
   }
 });
 $("set-origin").addEventListener("click", async () => {
-  try { await act("/api/origin", readCoordinate()); }
+  try { await act("/api/origin", {...readCoordinate(),expectedRevision:latest?.routeRevision}); }
   catch (error) { setMessage(error.message); }
 });
 $("add").addEventListener("click", async () => {
@@ -686,9 +691,10 @@ $("plan").addEventListener("click", async () => {
     await act("/api/route/preview",{mode,loop:$("loop").value === "true"});
   } finally { updateRouteControls(); }
 });
+$("cancel-plan").addEventListener("click", () => act("/api/route/cancel-preview",{}));
 $("start").addEventListener("click", async () => {
   const prepared = routePresentation(latest, mode, $("loop").value === "true").prepared;
-  if (!prepared?.id) { setMessage("請先預覽路線，再按開始"); return; }
+  if (!prepared?.id || prepared.canStart === false) { setMessage("請先預覽路線，再按開始"); return; }
   if (prepared.loop !== ($("loop").value === "true")) {
     setMessage("循環設定已改變，請重新規劃"); return;
   }
@@ -1247,7 +1253,8 @@ function updateRouteControls() {
   const paused = latest?.phase === "PAUSED";
   const busy = moving || paused || !!latest?.planning;
   const loop = $("loop").value === "true";
-  const ready = !!prepared?.id && prepared.loop === loop;
+  const hasPreview = !!prepared?.id && prepared.loop === loop;
+  const ready = hasPreview && prepared.canStart !== false;
   const needSnap = ready && prepared.maxSnapMetres > 40;
   const max = loop ? 14 : 15;
   $("pointcount").textContent = stops.length + " / " + max + " 個路點";
@@ -1260,23 +1267,30 @@ function updateRouteControls() {
   $("undo").disabled = !navigating || busy || stops.length === 0;
   $("clear").disabled = !navigating || busy || stops.length === 0;
   $("plan").disabled = !navigating || busy || !hasOrigin || stops.length === 0 || stops.length > max;
-  $("plan").textContent = ready ? "重新規劃" : "規劃路徑";
+  $("plan").textContent = hasPreview ? "重新規劃" : "規劃路徑";
+  $("loop").disabled = !navigating || busy;
+  $("save-route").disabled = !navigating || busy || !stops.length || !hasOrigin;
+  $("cancel-plan").classList.toggle("hidden", !navigating || !latest?.planning);
+  $("cancel-plan").disabled = routeMutationPending;
   $("start").closest(".row").classList.toggle("hidden",!ready);
   $("start").disabled = !navigating || busy || !ready ||
     (needSnap && !$("confirm-snap").checked) ||
     !latest?.mockPermissionReady;
   $("snapconfirmrow").classList.toggle("hidden",!needSnap);
-  $("previewinfo").classList.toggle("hidden",!ready);
-  if (ready) {
+  $("previewinfo").classList.toggle("hidden",!hasPreview);
+  if (hasPreview) {
     $("previewinfo").textContent = "路線預覽 · " +
       formatDistance(prepared.distanceMetres) + " · 最大道路吸附 " +
-      Math.round(prepared.maxSnapMetres) + " 公尺。請確認後再開始。";
+      Math.round(prepared.maxSnapMetres) + " 公尺。" +
+      (ready ? "請確認後再開始。" : "起點已變動，預覽保留；請重新規劃。 ");
   }
   $("routehint").textContent = moving || paused
     ? "行走中路點暫時為唯讀；需修改請先確認停止路線。"
     : !hasOrigin ? "先在地圖選取起點，再按「設為起點」。"
     : stops.length === 0 ? "加入目的地，規劃只會預覽不會移動 GPS。"
     : latest?.planning ? "正在查詢步行道路，不會移動手機。"
+    : latest?.planningError ? latest.planningNotice
+    : hasPreview && !ready ? "起點已變動，請重新規劃；原預覽保留。"
     : ready ? "路線已預覽。確認道路和起點後可開始。"
     : "請先按「規劃並預覽道路」。";
   if (navigating && !latest?.mockPermissionReady && ready) {
@@ -1396,6 +1410,10 @@ async function refresh() {
     const nextState = await call("/api/state");
     if (token !== activeToken || requestedRouteVersion !== routeStateVersion) return;
     latest = nextState;
+    if (typeof latest.routeLoop === "boolean") {
+      loops.ROUTE = latest.routeLoop;
+      $("loop").value = String(loops.ROUTE);
+    }
     remoteLinkHealthy = true;
     renderRouteArrivalNotice(latest);
     sessionDeadlineMs = Date.now() +
@@ -1529,6 +1547,8 @@ function refreshSavedClocks() {
 let savedTab="places";
 function selectSavedTab(tab) {
   savedTab=tab==="routes"?"routes":"places";
+  $("saved-add-button").title=savedTab==="routes"?"收藏目前路線":"收藏所選位置（自動命名）";
+  $("saved-add-button").setAttribute("aria-label",savedTab==="routes"?"收藏目前路線":"收藏目前選取的位置");
   $("saved-list").scrollTop=0;
   renderSaved();
 }
@@ -1623,21 +1643,30 @@ function renderSaved() {
     if (!places.length) list.append(labelledText("沒有符合條件的收藏地點"));
   } else {
     for(const route of routes){
-      const card=document.createElement("article");card.className="saved-card";
-      card.append(labelledText(route.name||"未命名路線","strong"));
+      const card=document.createElement("article");card.className="saved-card saved-route-card";
+      const name=route.name||"未命名路線";
+      card.append(labelledText(name,"strong"));
       card.append(labelledText((route.stops||[]).length+" 個路點 · "+
-        (route.mode==="FLOWERS"?"舊巡花收藏 · 可轉一般路線":"道路")));
-      const button=document.createElement("button");
-      button.textContent="載入草稿（仍須預覽）";
-      button.addEventListener("click",async()=>{
-        if(await act("/api/saved/load",{id:route.id})){
+        (route.mode==="FLOWERS"?"舊收藏":route.loop?"循環":"道路")+
+        (route.origin?" · 已儲存起點":" · 未儲存起點")));
+      const actions=document.createElement("div");actions.className="row";
+      actions.append(savedAction("載入",async()=>{
+        if (!confirm("載入「"+name+"」並替換目前路線草稿？不會移動定位。")) return;
+        if(await act("/api/saved/load",{id:route.id,expectedRevision:latest?.routeRevision})){
           $("saved-dialog").close();selectMode("ROUTE");
-          setMessage(route.mode==="FLOWERS"
-            ? "舊巡花收藏已轉成一般道路草稿；原收藏保留，請重新預覽"
-            : "收藏路線已載入，請先預覽步行道路");
+          setMessage("收藏路線已載入，請先預覽步行道路");
         }
-      });
-      card.append(button);list.append(card);
+      }),savedAction("改名",async()=>{
+        const proposed=prompt("修改收藏路線名稱",name);
+        if(proposed===null)return;
+        const next=proposed.trim();
+        if(!next||next.length>60){$("saved-enrich-status").textContent="路線名稱需為 1 到 60 字";return;}
+        await changeSavedRoute("rename",{id:route.id,name:next});
+      }));
+      const remove=savedAction("刪除",async()=>{
+        if(confirm("確定刪除「"+name+"」？不會變更目前草稿或定位。")) await changeSavedRoute("delete",{id:route.id});
+      });remove.classList.add("danger");actions.append(remove);
+      card.append(actions);list.append(card);
     }
     if (!routes.length) list.append(labelledText("沒有符合條件的收藏路線"));
   }
@@ -1654,8 +1683,37 @@ async function refreshSaved() {
   } catch(error){$("saved-enrich-status").textContent=error.message||"無法讀取收藏";}
 }
 let pendingSavedPoint=null, savedLookupId=null, savedLookupGeneration=0;
+let savingRoute=false;
+async function changeSavedRoute(action,body) {
+  try {
+    const result=await call("/api/saved/route/"+action,"POST",body);
+    if($("saved-dialog").open) {
+      await refreshSaved();
+      $("saved-enrich-status").textContent=result.message||"已更新收藏路線";
+    }
+    setMessage(result.message||"已更新收藏路線");
+    return true;
+  } catch(error) {
+    const text=error.message||"無法更新收藏路線";
+    if($("saved-dialog").open)$("saved-enrich-status").textContent=text;
+    setMessage(text);return false;
+  }
+}
+async function saveCurrentRoute() {
+  if(savingRoute||routeEditingBusy()||!latest?.routeStops?.length||!latest?.origin){setMessage("請先設定起點及路點，再收藏路線");return;}
+  const expectedRevision=latest.routeRevision;
+  const value=prompt("收藏路線名稱（儲存起點、路點與循環設定）","");
+  if(value===null)return;
+  const name=value.trim();
+  if(!name||name.length>60){setMessage("路線名稱需為 1 到 60 字");return;}
+  savingRoute=true;
+  try {await changeSavedRoute("add",{name,expectedRevision});}
+  finally{savingRoute=false;}
+}
+$("save-route").addEventListener("click",saveCurrentRoute);
 $("saved-add-button").addEventListener("click",async()=>{
   if ($("saved-add-button").disabled) return;
+  if(savedTab==="routes"){await saveCurrentRoute();return;}
   pendingSavedPoint=null;savedLookupId=null;
   $("saved-editor").classList.add("hidden");
   const button = $("saved-add-button");
