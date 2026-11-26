@@ -17,6 +17,10 @@ internal interface LegalConsentStorage {
 
     @Throws(IOException::class)
     fun replace(value: String)
+
+    /** Remove only the consent record when a replacement cannot be persisted. */
+    @Throws(IOException::class)
+    fun removeReceipt()
 }
 
 /** One private record, replaced atomically; never fall back to a partial overwrite. */
@@ -53,6 +57,10 @@ internal class FileLegalConsentStorage(private val file: File) : LegalConsentSto
         } finally {
             Files.deleteIfExists(temporary)
         }
+    }
+
+    override fun removeReceipt() {
+        Files.deleteIfExists(file.toPath())
     }
 
     private companion object {
@@ -113,9 +121,22 @@ class LegalConsentStore internal constructor(private val storage: LegalConsentSt
     @Synchronized
     fun withdraw(): Boolean {
         blocked = true
-        return try {
+        val replaced = try {
             storage.replace(WITHDRAWN)
             storage.read() == WITHDRAWN
+        } catch (_: IOException) {
+            false
+        } catch (_: SecurityException) {
+            false
+        }
+        if (replaced) return true
+
+        // A full disk or a failed atomic replacement may still permit unlinking
+        // the old receipt. Missing consent requires review on a fresh process.
+        // Do not report success if neither operation can be verified.
+        return try {
+            storage.removeReceipt()
+            storage.read() == null
         } catch (_: IOException) {
             false
         } catch (_: SecurityException) {

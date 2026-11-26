@@ -19,6 +19,8 @@ class LegalConsentStoreTest {
         var failWrite = false
         var failRead = false
         var ignoreWrite = false
+        var failRemove = false
+        var ignoreRemove = false
         override fun read(): String? {
             if (failRead) throw IOException("read failure")
             return value
@@ -26,6 +28,10 @@ class LegalConsentStoreTest {
         override fun replace(value: String) {
             if (failWrite) throw IOException("write failure")
             if (!ignoreWrite) this.value = value
+        }
+        override fun removeReceipt() {
+            if (failRemove) throw IOException("remove failure")
+            if (!ignoreRemove) value = null
         }
     }
 
@@ -91,12 +97,56 @@ class LegalConsentStoreTest {
         val store = LegalConsentStore(storage)
         assertTrue(store.confirm(current, current, true, 123L))
         storage.failWrite = true
+        storage.failRemove = true
         assertFalse(store.withdraw())
         assertTrue(store.requiresReview(current))
         storage.failWrite = false
+        storage.failRemove = false
         assertTrue(store.withdraw())
         assertTrue(LegalConsentStore(storage).requiresReview(current))
         assertTrue(store.requiresReview(current))
+    }
+
+    @Test fun failedReplacementCanRemoveReceiptAcrossRestart() {
+        val file = File(folder.root, "legal-consent.json")
+        val unrelated = File(folder.root, "saved-places.json").apply { writeText("keep") }
+        val backing = FileLegalConsentStorage(file)
+        val original = LegalConsentStore(backing)
+        assertTrue(original.confirm(current, current, true, 123L))
+        val failedReplacement = object : LegalConsentStorage by backing {
+            override fun replace(value: String) { throw IOException("replacement failed") }
+        }
+        val store = LegalConsentStore(failedReplacement)
+        assertTrue(store.withdraw())
+        assertFalse(file.exists())
+        assertTrue(LegalConsentStore(backing).requiresReview(current))
+        assertEquals("keep", unrelated.readText())
+    }
+
+    @Test fun ignoredReplacementAndRemovalAreNotVerifiedWithdrawal() {
+        val storage = MemoryStorage()
+        val store = LegalConsentStore(storage)
+        assertTrue(store.confirm(current, current, true, 123L))
+        storage.ignoreWrite = true
+        storage.ignoreRemove = true
+        assertFalse(store.withdraw())
+        assertTrue(store.requiresReview(current))
+        assertFalse(LegalConsentStore(storage).requiresReview(current))
+        storage.ignoreRemove = false
+        assertTrue(store.withdraw())
+        assertTrue(LegalConsentStore(storage).requiresReview(current))
+    }
+
+    @Test fun failedReadBackDoesNotClaimWithdrawalSuccess() {
+        val storage = MemoryStorage()
+        val store = LegalConsentStore(storage)
+        assertTrue(store.confirm(current, current, true, 123L))
+        storage.failRead = true
+        assertFalse(store.withdraw())
+        assertTrue(store.requiresReview(current))
+        storage.failRead = false
+        assertTrue(LegalConsentStore(storage).requiresReview(current))
+        assertTrue(store.withdraw())
     }
 
     @Test fun ignoredWriteAndReadFailureCannotUnlock() {
