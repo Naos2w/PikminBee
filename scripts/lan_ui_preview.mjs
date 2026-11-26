@@ -109,6 +109,12 @@ createServer(async (req,res)=>{
     if(state.realPosition)state.realPosition.expiresAtMillis=Date.now()-1000;
     send(res,{message:'合成快照已過期'},202);return;
   }
+  // Synthetic permission toggle for browser tests only; never requests device permissions.
+  if(req.method==='POST'&&url==='/api/preview/mock-permission'){
+    const {approved}=await readBody(req);
+    state.mockPermissionReady=approved===true;
+    send(res,{message:'Synthetic test permission state only'},202);return;
+  }
   // Fixed synthetic route scenarios: never contact the phone or a routing service.
   if(req.method==='POST'&&url==='/api/preview/route-state'){
     const {scenario}=await readBody(req);
@@ -230,7 +236,7 @@ createServer(async (req,res)=>{
     // Synthetic historical physical coordinate stays only until its original TTL.
     send(res,{message:'合成虛擬位置已啟用（未操控手機）'},202);return;
   }
-  if(req.method==='POST'&&['/api/points/reorder','/api/points/remove','/api/points/replace','/api/points/clear','/api/points/undo'].includes(url)){
+  if(req.method==='POST'&&['/api/points/add','/api/points/reorder','/api/points/remove','/api/points/replace','/api/points/clear','/api/points/undo'].includes(url)){
     let body='';
     for await(const chunk of req)body+=chunk;
     const request=JSON.parse(body||'{}');
@@ -248,6 +254,13 @@ createServer(async (req,res)=>{
         send(res,{error:'路點順序無效'},409);return;
       }
       old.splice(to,0,old.splice(from,1)[0]);
+    } else if(url.endsWith('add')){
+      if(request.mode!=='ROUTE'||old.length>=15||!Number.isFinite(request.lat)||
+        !Number.isFinite(request.lon)||Math.abs(request.lat)>90||Math.abs(request.lon)>180||
+        request.expectedRevision!==state.routeRevision){
+        send(res,{error:'合成路點無效'},409);return;
+      }
+      old.push({lat:request.lat,lon:request.lon});
     } else if(url.endsWith('clear')) old.length=0;
     else if(url.endsWith('undo')) old.pop();
     else {

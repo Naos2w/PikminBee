@@ -27,6 +27,7 @@ let lastStopsKey = "", lastLineKey = "", lastDraftKey = "", lastOrderKey = "";
 let focusRealWhenReady = false;
 const cameraFocus = createCameraFocus();
 let teleportBusy = false, pendingTeleportConfirmation = null;
+let mapContextSelection = null;
 let brightDarkPalette = null, originalBrightPaint = new Map();
 const loops = {ROUTE: false};
 const setMessage = value => { $("message").textContent = value; };
@@ -73,6 +74,7 @@ async function call(path, method = "GET", body = null, useToken = true) {
     if (requestToken !== token || (renewingSession && path === "/api/state"))
       throw Error("等待續期完成，忽略舊狀態");
     token = null; connected = false;
+    closeMapContextMenu();
     sessionDeadlineMs = 0;
     remoteLinkHealthy = false;
     latest = null; // clear any in-memory sensitive physical snapshot on revocation
@@ -208,7 +210,75 @@ function readCoordinate() {
   return point;
 }
 
+function closeMapContextMenu() {
+  mapContextSelection = null;
+  $("map-context-menu").classList.add("hidden");
+}
+function contextActionTarget(selection) {
+  if (!selection || selection.mode !== mode || settingsOpen ||
+      !token || token !== selection.session || !connected || !remoteLinkHealthy ||
+      !latest || Date.now() >= sessionDeadlineMs || routeEditingBusy()) return null;
+  if (mode === "ROUTE") {
+    if (selection.revision !== latest.routeRevision || $("add").disabled) return null;
+    return $("add");
+  }
+  if (mode === "TELEPORT" && latest.mockPermissionReady && !$("teleport").disabled)
+    return $("teleport");
+  return null;
+}
+function updateMapContextMenu() {
+  if (mapContextSelection && !contextActionTarget(mapContextSelection))
+    closeMapContextMenu();
+}
+function openMapContextMenu(event) {
+  const original = event.originalEvent;
+  if (!original || original.button !== 2 || settingsOpen ||
+      original.target?.closest?.(".maplibregl-control-container, .maplibregl-popup")) return;
+  original.preventDefault();
+  closeMapContextMenu();
+  const point = parseCoordinate(event.lngLat.lat + ", " + event.lngLat.wrap().lng);
+  if (!point) return;
+  const selection = {point, mode, session:token, revision:latest?.routeRevision};
+  if (!contextActionTarget(selection)) return;
+  mapContextSelection = selection;
+  const menu = $("map-context-menu");
+  $("map-context-label").textContent = mode === "ROUTE" ? "加入路點" : "瞬移至此";
+  $("map-context-icon").setAttribute("d", mode === "ROUTE" ?
+    "M12 5v14M5 12h14" : "M13 2 4 14h7l-1 8 10-12h-7l1-8Z");
+  menu.style.left = "8px";
+  menu.style.top = "8px";
+  menu.classList.remove("hidden");
+  const rect = menu.getBoundingClientRect();
+  menu.style.left = Math.max(8, Math.min(original.clientX, window.innerWidth - rect.width - 8)) + "px";
+  menu.style.top = Math.max(8, Math.min(original.clientY, window.innerHeight - rect.height - 8)) + "px";
+  $("map-context-action").focus({preventScroll:true});
+}
+$("map-context-action").addEventListener("click", () => {
+  const selection = mapContextSelection;
+  const target = contextActionTarget(selection);
+  closeMapContextMenu();
+  if (!target) return;
+  showCoordinate(selection.point);
+  renderMap();
+  // Reuse the existing explicit confirmation/permission or revision-checked
+  // route editor. Opening the menu never changes coordinates or sends a command.
+  target.click();
+});
+document.addEventListener("pointerdown", event => {
+  if (!$("map-context-menu").contains(event.target)) closeMapContextMenu();
+});
+document.addEventListener("keydown", event => {
+  if (event.key === "Escape" && mapContextSelection) {
+    event.preventDefault();
+    closeMapContextMenu();
+    map?.getCanvas().focus({preventScroll:true});
+  }
+});
+window.addEventListener("resize", closeMapContextMenu, {passive:true});
+window.addEventListener("blur", closeMapContextMenu);
+
 function updateModeView() {
+  closeMapContextMenu();
   document.body.dataset.mode = settingsOpen ? "settings" : mode.toLowerCase();
   for (const [id,value] of [
     ["mode-teleport","TELEPORT"],["mode-route","ROUTE"]
@@ -735,7 +805,10 @@ async function initialiseMap() {
     // Zoom/location actions share a permanent bottom-right overlay.
     // Native attribution remains visible and is never covered by the tools.
     map.on("dragstart", () => cameraFocus.clear());
+    map.on("movestart", closeMapContextMenu);
+    map.on("contextmenu", openMapContextMenu);
     map.on("click", e => {
+      closeMapContextMenu();
       showCoordinate({lat:e.lngLat.lat,lon:e.lngLat.lng});
       renderMap();
     });
@@ -1150,8 +1223,10 @@ function updateRouteControls() {
   $("resume").disabled = !paused;
   $("stop").disabled = !moving && !paused;
   $("teleport").disabled = teleportBusy || !connected || !remoteLinkHealthy || moving || paused;
+  updateMapContextMenu();
 }
 function updateCompactWalkControls() {
+  updateMapContextMenu();
   const phase = latest?.phase || "IDLE";
   const active = phase === "MOVING" || phase === "PAUSED";
   // A running walk must remain controllable even with the mobile sheet half-open,

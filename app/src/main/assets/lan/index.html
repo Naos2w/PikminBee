@@ -578,6 +578,14 @@ button.maplibregl-popup-close-button{
 button.maplibregl-popup-close-button:hover{background:var(--soft)}
 button.maplibregl-popup-close-button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 
+/* The map context action is a viewport overlay, never a map layout column. */
+.map-context-menu{position:fixed;z-index:45;min-width:154px;max-width:calc(100vw - 16px);padding:4px;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--text);box-shadow:var(--shadow)}
+.map-context-menu button{display:flex;align-items:center;gap:9px;width:100%;min-height:44px;padding:8px 12px;border:0;border-radius:8px;background:transparent;text-align:left;white-space:nowrap}
+.map-context-menu button:not(:disabled):hover{background:var(--soft)}
+.map-context-menu button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.map-context-menu button svg{width:18px;height:18px;flex:none;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.map-context-menu button:disabled{cursor:not-allowed;opacity:.5}
+
 </style>
 </head>
 <body>
@@ -647,7 +655,7 @@ button.maplibregl-popup-close-button:focus-visible{outline:2px solid var(--accen
  </div>
 </section>
  <div id="map-wrap">
-  <div id="map" aria-label="點地圖選座標，需按下方按鈕才會變更手機位置"></div>
+  <div id="map" aria-label="點地圖選座標，右鍵顯示目前模式的操作；變更測試位置仍需確認"></div>
   <div id="map-warning" class="map-alert hidden" role="alert" aria-live="polite">
    <strong>地圖資料尚未載入</strong>
    <p id="map-warning-text">請確認手機可連上地圖服務，或點擊重新載入。</p>
@@ -659,7 +667,7 @@ button.maplibregl-popup-close-button:focus-visible{outline:2px solid var(--accen
  <div id="message" role="status" aria-live="polite"></div>
  <details class="help-details">
   <summary>地圖操作說明</summary>
-  <p>選位置不會自動瞬移或開始行走。底圖由 OpenFreeMap 提供，需要手機與瀏覽器可連線到圖磚服務；地圖失敗時仍可在控制區輸入經緯度。</p>
+  <p>選位置不會自動瞬移或開始行走。桌面地圖按右鍵可顯示目前模式的操作：瞬移至此仍需原有確認，路徑模式可加入路點。底圖由 OpenFreeMap 提供，需要手機與瀏覽器可連線到圖磚服務；地圖失敗時仍可在控制區輸入經緯度。</p>
   <p>座標支援十進位 DD（25.033, 121.5654）、度分秒 DMS（25°01′58.8″N 121°33′55.44″E）、度與小數分 DDM（25°1.980′N 121°33.924′E）。DMS/DDM 必須標示 N/S、E/W。</p>
  </details>
 </section>
@@ -788,6 +796,9 @@ button.maplibregl-popup-close-button:focus-visible{outline:2px solid var(--accen
  <div id="saved-list" class="saved-scroll" aria-live="polite">正在讀取收藏…</div>
 </dialog>
 </main>
+  <div id="map-context-menu" class="map-context-menu hidden" role="group" aria-label="地圖操作">
+   <button id="map-context-action" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><path id="map-context-icon" d="M13 2 4 14h7l-1 8 10-12h-7l1-8Z"/></svg><span id="map-context-label">瞬移至此</span></button>
+  </div>
 <script type="module" src="/controller.js"></script>
 </body>
 </html>
