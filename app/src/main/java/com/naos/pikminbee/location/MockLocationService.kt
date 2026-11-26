@@ -68,6 +68,9 @@ object LocationStatus {
     val geometry = MutableStateFlow<List<Coordinate>>(emptyList())
     val overlayVisible = MutableStateFlow(false)
     val progress = MutableStateFlow(WalkingProgressSnapshot())
+    /** Opaque, process-local event from a confirmed natural non-loop arrival.
+     *  No coordinate, timestamp or persistent history is sent to paired Web. */
+    val routeArrivalId = MutableStateFlow<String?>(null)
     /** Steps estimated for the current/most recently stopped virtual walk only. */
     val walkEstimatedSteps = MutableStateFlow(0L)
     /** Actual virtual route speed, not a sensor-measured walking pace. */
@@ -182,6 +185,7 @@ class MockLocationService : Service() {
             val deltaSeconds = ((now - previousTickMillis) / 1000.0).coerceIn(0.0, 2.0)
             previousTickMillis = now
             var advancedMetres = 0.0
+            var arrivedThisTick = false
             if (phase == WalkPhase.MOVING && track.size > 1) {
                 val movement = RouteTickProgression.advance(
                     walkingDistanceMeters, trackLengthMeters,
@@ -225,7 +229,7 @@ class MockLocationService : Service() {
                     if (RouteCompletionAlertPolicy.shouldAlert(
                             previousPhase, phase, loopRoute, routeArrivalNotified)) {
                         routeArrivalNotified = true
-                        showRouteArrivalNotification()
+                        arrivedThisTick = true
                     }
                 }
             }
@@ -251,6 +255,14 @@ class MockLocationService : Service() {
                     LocationStatus.appliedSpeedKmh.value / 3.6,
                     stopThresholds, loopRoute,
                 )
+            }
+            // Publish only after the final test-provider fix has succeeded.
+            // Web and Android use the same event; notification permission is
+            // only needed for the Android system notification.
+            if (arrivedThisTick && providerActive && phase == WalkPhase.PARKED) {
+                if (mode == WalkMode.ROUTE)
+                    LocationStatus.routeArrivalId.value = java.util.UUID.randomUUID().toString()
+                showRouteArrivalNotification()
             }
             updateOverlay()
             lanController?.checkNetwork()
@@ -899,6 +911,7 @@ class MockLocationService : Service() {
      *  Expanding/hiding the floating controller or pausing must NOT clear it. */
     private fun clearOldArrivalNotification(change: RouteLifecycleChange) {
         if (!RouteSurfaceStatusPolicy.clearsPreviousArrival(change)) return
+        LocationStatus.routeArrivalId.value = null
         runCatching {
             getSystemService(NotificationManager::class.java)
                 .cancel(ARRIVAL_NOTIFICATION_ID)
@@ -968,6 +981,9 @@ class MockLocationService : Service() {
         arrivalChange: RouteLifecycleChange = RouteLifecycleChange.RESTORE_REAL_GPS,
     ) {
         clearOldArrivalNotification(arrivalChange)
+        // A historical Android notification may survive service reclaim, but
+        // a disconnected Web session must never see it as a new arrival.
+        LocationStatus.routeArrivalId.value = null
         mockGpsJitter.reset()
         saveEstimatedSteps()
         cancelFlowerPlanning()

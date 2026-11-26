@@ -60,12 +60,17 @@ fun JourneyControls(
     onClear: () -> Unit,
     onMessage: (String) -> Unit,
     preparedRoad: List<Coordinate>,
+    previewCanStart: Boolean = preparedRoad.size >= 2,
+    previewStale: Boolean = false,
+    planningMessage: String = "",
     routePlanning: Boolean,
     snapMetres: Double,
     loop: Boolean,
     onLoopChange: (Boolean) -> Unit,
     onRoutePrimary: () -> Unit,
     onRouteStop: () -> Unit,
+    onUseCurrentOrigin: () -> Unit = {},
+    onSaveRoute: () -> Unit = {},
     onLocateStop: (Coordinate) -> Unit = {},
     onMoveStop: (Long, Int, Int) -> Unit = { _, _, _ -> },
     onDeleteStop: (Long, Int) -> Unit = { _, _ -> },
@@ -82,14 +87,25 @@ fun JourneyControls(
         controlling && phase == WalkPhase.PAUSED -> "繼續"
         controlling -> "暫停"
         otherWalking -> "其他行走進行中"
-        routePlanning -> "規劃中…"
-        hasPreview -> "開始"
+        routePlanning -> "取消規劃"
+        previewCanStart -> "開始"
+        previewStale -> "重新規劃"
         else -> "規劃"
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("路徑 · ${stops.size} 個路點",
-            color = foreground, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("路徑 · ${stops.size} 個路點", modifier = Modifier.weight(1f),
+                color = foreground, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+            TextButton(onClick = onSaveRoute, enabled = canEdit && stops.isNotEmpty()) {
+                NaosModeIcon(3, foreground, Modifier.size(20.dp))
+                Text("收藏", fontSize = 12.sp)
+            }
+        }
+        TextButton(onClick = onUseCurrentOrigin, enabled = canEdit) {
+            Text("改用目前位置為起點", fontSize = 12.sp)
+        }
         RouteWaypointList(
             stops = stops,
             origin = origin,
@@ -101,12 +117,12 @@ fun JourneyControls(
             onMove = onMoveStop,
             onDelete = onDeleteStop,
         )
-        if (flower) {
+        if (flower || mode == WalkMode.ROUTE) {
             FilterChip(
                 selected = loop,
                 onClick = { onLoopChange(!loop) },
                 enabled = canEdit,
-                label = { Text("循環路線") },
+                label = { Text(if (flower) "循環路線" else "循環預覽（僅查看）") },
             )
         }
         Text(if (controlling)
@@ -143,6 +159,8 @@ fun JourneyControls(
             routePlanning -> Text("正在查詢可步行道路…",
                 color = muted, fontSize = 12.sp)
             hasPreview -> {
+                if (previewStale) Text(if (loop) "循環路線僅供預覽。" else "預覽已保留；起點不符，需重新規劃。",
+                    color = Color(0xFFD59C36), fontSize = 12.sp)
                 val estimate = RouteEstimate.fromDistanceAtMps(
                     WalkingGeometry.lengthMeters(preparedRoad), speedProfile.nominalMps)
                 Text("預覽完成 · ${estimate.distanceLabel} · 約 ${estimate.durationLabel}" +
@@ -156,6 +174,8 @@ fun JourneyControls(
             else -> Text("先選路點並預覽，不會自動移動定位。",
                 color = muted, fontSize = 12.sp)
         }
+        if (!activeWalk && planningMessage.contains("失敗"))
+            Text(planningMessage, color = Color(BeeActionColors.STOP_RED), fontSize = 12.sp)
         if (controlling || (phase == WalkPhase.PARKED &&
                 activeMode == mode && walkEstimatedSteps > 0L)) {
             Row(verticalAlignment = Alignment.CenterVertically,
@@ -169,12 +189,12 @@ fun JourneyControls(
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
                 onClick = onRoutePrimary,
-                enabled = controlling || (!otherWalking && !routePlanning && canPlan),
+                enabled = controlling || (!otherWalking && (routePlanning || canPlan)),
                 modifier = Modifier.weight(1.5f).height(50.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = if (controlling && phase == WalkPhase.MOVING)
                         Color(BeeActionColors.PAUSE_AMBER)
-                    else if (hasPreview || controlling) Color(BeeActionColors.START_GREEN)
+                    else if (previewCanStart || controlling) Color(BeeActionColors.START_GREEN)
                     else Color(0xFF567A86),
                     contentColor = Color.White,
                     disabledContainerColor = muted.copy(alpha = .14f),
@@ -185,7 +205,7 @@ fun JourneyControls(
                     horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                     NaosActionIcon(when {
                         controlling && phase == WalkPhase.MOVING -> NaosActionGlyph.PAUSE
-                        controlling || hasPreview -> NaosActionGlyph.PLAY
+                        controlling || previewCanStart -> NaosActionGlyph.PLAY
                         else -> NaosActionGlyph.PLAN
                     }, Color.White)
                     Text(primaryLabel, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
