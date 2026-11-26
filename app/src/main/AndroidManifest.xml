@@ -9,15 +9,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <!-- Normal permission prerequisite for a user-started, Wi-Fi connected-device FGS. -->
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_HEALTH" />
-    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
-    <uses-feature android:name="android.hardware.sensor.stepcounter" android:required="false" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-    <!-- Optional and independently granted; no Health Connect write before explicit opt-in. -->
-    <uses-permission android:name="android.permission.health.WRITE_STEPS" />
-    <uses-permission android:name="android.permission.health.READ_STEPS" />
-    <queries><package android:name="com.google.android.apps.healthdata" /></queries>
 
     <application
         android:allowBackup="false"
@@ -38,31 +31,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <activity android:name=".health.HealthPermissionsRationaleActivity"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
-            </intent-filter>
-        </activity>
-        <activity-alias android:name=".ViewHealthPermissionUsageActivity"
-            android:exported="true"
-            android:targetActivity=".health.HealthPermissionsRationaleActivity"
-            android:permission="android.permission.START_VIEW_PERMISSION_USAGE">
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW_PERMISSION_USAGE" />
-                <category android:name="android.intent.category.HEALTH_PERMISSIONS" />
-            </intent-filter>
-        </activity-alias>
         <service
             android:name=".lan.LanControlService"
             android:exported="false"
             android:stopWithTask="false"
             android:foregroundServiceType="connectedDevice" />
-        <service
-            android:name=".health.PhysicalStepTrackingService"
-            android:exported="false"
-            android:stopWithTask="false"
-            android:foregroundServiceType="health" />
         <service
             android:name=".location.MockLocationService"
             android:exported="false"
