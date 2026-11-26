@@ -36,8 +36,29 @@ class LanHttpPolicyTest {
             post + ("content-length" to "999999")))
         assertEquals(413, LanHttpPolicy.rejectRequest("POST", address,
             post + ("content-length" to "0")))
-        assertEquals(413, LanHttpPolicy.rejectRequest("POST", address,
+        assertEquals(400, LanHttpPolicy.rejectRequest("POST", address,
             post + ("content-length" to "-1")))
+    }
+
+    @Test fun malformedContentLengthNeverBecomesAnAbsentHeader() {
+        for (invalid in listOf("", "+1", "-0", "1,1", "1 2", "abc", "１")) {
+            assertEquals(invalid, 400, LanHttpPolicy.rejectRequest("GET", address,
+                get + ("content-length" to invalid)))
+            assertEquals(invalid, 400, LanHttpPolicy.rejectRequest("POST", address,
+                post + ("content-length" to invalid)))
+        }
+        for (method in listOf("GET", "POST")) {
+            assertEquals(413, LanHttpPolicy.rejectRequest(method, address,
+                post + ("content-length" to "2147483648")))
+        }
+    }
+
+    @Test fun getRequestsCannotCarryBodiesAndPostRequiresExplicitLength() {
+        assertNull(LanHttpPolicy.rejectRequest("GET", address, get + ("content-length" to "0")))
+        assertEquals(400, LanHttpPolicy.rejectRequest("GET", address, get + ("content-length" to "1")))
+        assertEquals(413, LanHttpPolicy.rejectRequest("POST", address, post - "content-length"))
+        assertNull(LanHttpPolicy.rejectRequest("POST", address,
+            post + ("content-length" to LanHttpPolicy.MAX_BODY_BYTES.toString())))
     }
 
     @Test fun acceptsJsonOnlyForWrites() {
