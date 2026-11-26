@@ -79,6 +79,47 @@ class LegalConsentStoreTest {
         assertTrue(store.requiresReview(current))
     }
 
+    @Test fun onlyAbsentFileReturnsNullFromStorage() {
+        val file = File(folder.root, "legal-consent.json")
+        val storage = FileLegalConsentStorage(file)
+        assertEquals(null, storage.read())
+        file.writeText("x".repeat(16 * 1024 + 1))
+        assertTrue(runCatching { storage.read() }.exceptionOrNull() is IOException)
+        assertTrue(LegalConsentStore(storage).requiresReview(current))
+        storage.removeReceipt()
+        assertEquals(null, storage.read())
+    }
+
+    @Test fun malformedUtf8CannotBeDecodedAsAValidRevision() {
+        val file = File(folder.root, "legal-consent.json")
+        val storage = FileLegalConsentStorage(file)
+        val revision = LegalDocumentRevisions("terms-\uFFFD", "privacy-r1")
+        // A lossy UTF-8 decoder would replace the invalid byte with U+FFFD
+        // and could turn this damaged record into a matching receipt.
+        file.writeBytes(
+            """{"schema":1,"terms":"terms-""".toByteArray(Charsets.UTF_8) +
+                byteArrayOf(0xFF.toByte()) +
+                """","privacy":"privacy-r1","acceptedAtMillis":123}""".toByteArray(Charsets.UTF_8)
+        )
+        assertTrue(runCatching { storage.read() }.exceptionOrNull() is IOException)
+        assertTrue(LegalConsentStore(storage).requiresReview(revision))
+    }
+
+    @Test fun oversizedSurvivingFileIsNotVerifiedRemoval() {
+        val file = File(folder.root, "legal-consent.json").apply {
+            writeText("x".repeat(16 * 1024 + 1))
+        }
+        val backing = FileLegalConsentStorage(file)
+        val storage = object : LegalConsentStorage by backing {
+            override fun replace(value: String) { throw IOException("replacement failed") }
+            override fun removeReceipt() { /* simulate ineffective removal */ }
+        }
+        val store = LegalConsentStore(storage)
+        assertFalse(store.withdraw())
+        assertTrue(file.exists())
+        assertTrue(store.requiresReview(current))
+    }
+
     @Test fun failedConfirmationDoesNotReusePreviouslyValidReceipt() {
         val storage = MemoryStorage()
         val store = LegalConsentStore(storage)

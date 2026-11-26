@@ -7,7 +7,9 @@ import com.naos.pikminbee.domain.LegalDocumentRevisions
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.nio.ByteBuffer
 import java.nio.file.Files
+import java.nio.file.NoSuchFileException
 import java.nio.file.StandardCopyOption
 
 /** Storage failures are observable; callers must not unlock on a failed write. */
@@ -26,8 +28,14 @@ internal interface LegalConsentStorage {
 /** One private record, replaced atomically; never fall back to a partial overwrite. */
 internal class FileLegalConsentStorage(private val file: File) : LegalConsentStorage {
     override fun read(): String? {
-        if (!file.exists()) return null
-        return file.inputStream().use { input ->
+        // Null means absence, never unreadable or invalid content. In particular,
+        // withdrawal must not mistake an oversized surviving file for removal.
+        val stream = try {
+            Files.newInputStream(file.toPath())
+        } catch (_: NoSuchFileException) {
+            return null
+        }
+        return stream.use { input ->
             val bytes = ByteArray(MAX_BYTES + 1)
             var count = 0
             while (count < bytes.size) {
@@ -35,7 +43,9 @@ internal class FileLegalConsentStorage(private val file: File) : LegalConsentSto
                 if (read < 0) break
                 count += read
             }
-            if (count > MAX_BYTES) null else bytes.copyOf(count).toString(Charsets.UTF_8)
+            if (count > MAX_BYTES) throw IOException("Consent record exceeds size limit")
+            // Reject malformed UTF-8 instead of silently inserting replacement characters.
+            Charsets.UTF_8.newDecoder().decode(ByteBuffer.wrap(bytes, 0, count)).toString()
         }
     }
 
