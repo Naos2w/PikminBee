@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="720" viewBox="0 0 720 720" role="img" aria-labelledby="title desc">
+  <title id="title">Mogulei logo V1 vector proposal</title>
+  <desc id="desc">The Mogulei symbol above the wordmark and Explore Your Own Way tagline.</desc>
+  <rect width="720" height="720" fill="#F2EBDD"/>
+  <g transform="translate(162 64) scale(3.6666667)">
+    <rect width="108" height="108" rx="23" fill="#24493E"/>
+    <path d="M28 76 42 70 54 76 66 70 80 76 87 91 66 84 54 90 42 84 21 91Z" fill="#8EAA72" stroke="#F2EBDD" stroke-width="2.6" stroke-linejoin="round"/>
+    <path d="M42 70V84M66 70V84" stroke="#F2EBDD" stroke-width="2.6" stroke-linecap="round"/>
+    <path d="M22 47C22 30 36 20 54 20S86 30 86 47C86 54 80 59 72 60H36C28 59 22 54 22 47Z" fill="#C17B55"/>
+    <circle cx="54" cy="32" r="6" fill="#F2EBDD"/>
+    <circle cx="36" cy="42" r="3.7" fill="#F2EBDD"/>
+    <circle cx="72" cy="42" r="3.7" fill="#F2EBDD"/>
+    <path d="M29 52C40 44 68 44 79 52C79 57 70 60 65 60C65 67 58 77 54 81C50 77 43 67 43 60C38 60 29 57 29 52Z" fill="#F2EBDD"/>
+    <circle cx="54" cy="59" r="5.5" fill="#24493E"/>
+  </g>
+  <text x="360" y="554" text-anchor="middle" fill="#202824" font-family="system-ui, sans-serif" font-size="88" font-weight="700" letter-spacing="-3">Mogulei</text>
+  <path d="M90 617H147M573 617H630" stroke="#8EAA72" stroke-width="5" stroke-linecap="round"/>
+  <text x="360" y="626" text-anchor="middle" fill="#24493E" font-family="system-ui, sans-serif" font-style="italic" font-size="30">Explore Your Own Way.</text>
+</svg>

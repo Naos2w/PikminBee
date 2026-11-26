@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Mogulei favicon draft">
+  <rect width="64" height="64" rx="14" fill="#24493E"/>
+  <path d="M10 28C10 16 20 10 32 10S54 16 54 28C54 35 48 39 40 39C40 46 35 52 32 55C29 52 24 46 24 39C16 39 10 35 10 28Z" fill="#F2EBDD"/>
+  <path d="M10 28C10 16 20 10 32 10S54 16 54 28Q54 34 44 34H20Q10 34 10 28Z" fill="#C17B55"/>
+  <circle cx="32" cy="20" r="4" fill="#F2EBDD"/>
+  <circle cx="21" cy="26" r="2.5" fill="#F2EBDD"/>
+  <circle cx="43" cy="26" r="2.5" fill="#F2EBDD"/>
+  <circle cx="32" cy="39" r="4" fill="#24493E"/>
+</svg>
