@@ -48,6 +48,30 @@ export function appliedSpeedLabel(state) {
     : "速度待確認";
 }
 
+/** Consume only new, authoritative arrival events from the paired phone.
+ * The initial state is a baseline (no replay after pairing/refresh). Retain the
+ * last observed ID even when a poll has no arrival, so dismissals stay final. */
+export function createRouteArrivalNotice() {
+  let initialized = false, seen = null;
+  return {
+    reset() { initialized = false; seen = null; },
+    observe(state) {
+      const id = state?.routeArrivalId;
+      const arrival = state?.phase === "PARKED" && state?.mode === "ROUTE" &&
+        state?.mockActive === true && typeof id === "string" && id.length > 0 ? id : null;
+      if (!initialized) {
+        initialized = true;
+        seen = arrival;
+        return "hide";
+      }
+      if (!arrival) return "hide";
+      if (arrival === seen) return "none";
+      seen = arrival;
+      return "show";
+    }
+  };
+}
+
 /** The running route and the current draft are different states. A parked
  * route is history, not an active road; never let it mask a new preview. */
 export function routePresentation(state, mode, loop) {

@@ -929,6 +929,9 @@ class LanController(private val context: Context) {
             })
             .put("origin", origin()?.let { JSONObject().put("lat", it.latitude).put("lon", it.longitude) })
             .put("phase", phase.name)
+            .put("routeArrivalId", LocationStatus.routeArrivalId.value
+                ?.takeIf { phase == com.naos.pikminbee.domain.WalkPhase.PARKED }
+                ?: JSONObject.NULL)
             .put("mode", LocationStatus.mode.value?.name)
             .put("planning", RouteDraftState.planning.value)
             .put("mockPermissionReady", mockPermissionReady())

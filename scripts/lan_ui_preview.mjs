@@ -118,7 +118,7 @@ createServer(async (req,res)=>{
   // Fixed synthetic route scenarios: never contact the phone or a routing service.
   if(req.method==='POST'&&url==='/api/preview/route-state'){
     const {scenario}=await readBody(req);
-    if(!['active','parked','planning','ready','failed','cleared'].includes(scenario)){
+    if(!['active','parked','planning','ready','failed','cleared','arrived'].includes(scenario)){
       send(res,{error:'Unknown test scenario'},400);return;
     }
     const origin={lat:25.033,lon:121.5654};
@@ -127,6 +127,7 @@ createServer(async (req,res)=>{
       distanceMetres:1000,maxSnapMetres:0});
     state={...state,origin,geometry:[origin,a],mode:'ROUTE',
       phase:scenario==='active'?'MOVING':'PARKED',
+      routeArrivalId:scenario==='arrived'?'synthetic-arrival-'+(state.routeRevision+1):null,
       routeRevision:state.routeRevision+1,
       routeStops:scenario==='cleared'?[]:[scenario==='active'?a:b],
       planning:scenario==='planning',

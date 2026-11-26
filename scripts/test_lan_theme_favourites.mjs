@@ -270,6 +270,31 @@ try{
   await rightClickMap();
   assert.equal(await contextVisible(),false);
   console.log("Map context menu: real right-click, current-mode action, exact synthetic waypoint, cancellation/permission, Escape, outside click, viewport clamp and active-route lock verified.");
+  // Completion UI is a server-confirmed, one-time event, not a PARKED guess.
+  const arrivalVisible=()=>evaluate("!document.querySelector('#route-arrival-notice').classList.contains('hidden')");
+  const scenario=async name=>{
+    const r=await fetch(url+"/api/preview/route-state",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({scenario:name})});
+    assert.ok(r.ok);
+  };
+  assert.equal(await arrivalVisible(),false,"active route does not alert");
+  await scenario("parked");
+  await until(()=>evaluate("!document.querySelector('#add').disabled"),"manual parked snapshot");
+  assert.equal(await arrivalVisible(),false,"manual stop does not alert");
+  await scenario("arrived");
+  await until(arrivalVisible,"confirmed arrival notice");
+  assert.ok(await evaluate("document.querySelector('#route-arrival-notice').innerText.includes('路徑已完成')"));
+  assert.ok(await evaluate("(()=>{const r=document.querySelector('#route-arrival-notice').getBoundingClientRect();return r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight})()"));
+  await evaluate("document.querySelector('#route-arrival-dismiss').click();true");
+  assert.equal(await arrivalVisible(),false);
+  await delay(2500);
+  assert.equal(await arrivalVisible(),false,"polling does not reopen dismissed notice");
+  await scenario("active");
+  await until(()=>evaluate("document.querySelector('#add').disabled"),"new active route");
+  await scenario("arrived");
+  await until(arrivalVisible,"second distinct natural arrival");
+  await scenario("parked");
+  await until(async()=>!await arrivalVisible(),"superseded arrival notice dismissed");
+  console.log("Route completion notice: natural arrivals, manual stop, dismissal across polls, subsequent route and stale clearing verified.");
   console.log(JSON.stringify({dark,light,saved,routeLayers,verified:"synthetic browser; no phone or external map tiles"},null,2));
 }finally{
   socket?.close();

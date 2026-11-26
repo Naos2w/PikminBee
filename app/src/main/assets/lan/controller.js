@@ -1,5 +1,5 @@
 import {parseCoordinate} from "/coordinate-format.mjs";
-import { BRIGHT_STYLE_URL, samePosition, currentPosition, createCameraFocus, visibleMapPadding, countryFlagPath, destinationTime, routePresentation, appliedSpeedLabel } from "/map-ui-policy.mjs";
+import { BRIGHT_STYLE_URL, samePosition, currentPosition, createCameraFocus, visibleMapPadding, countryFlagPath, destinationTime, routePresentation, appliedSpeedLabel, createRouteArrivalNotice } from "/map-ui-policy.mjs";
 const $ = id => document.getElementById(id);
 let token = null;
 let sessionDeadlineMs = 0;
@@ -28,6 +28,18 @@ let focusRealWhenReady = false;
 const cameraFocus = createCameraFocus();
 let teleportBusy = false, pendingTeleportConfirmation = null;
 let mapContextSelection = null;
+const routeArrivalNotice = createRouteArrivalNotice();
+function hideRouteArrivalNotice() { $("route-arrival-notice").classList.add("hidden"); }
+function resetRouteArrivalNotice() {
+  routeArrivalNotice.reset();
+  hideRouteArrivalNotice();
+}
+function renderRouteArrivalNotice(state) {
+  const action = routeArrivalNotice.observe(state);
+  if (action === "hide") hideRouteArrivalNotice();
+  if (action === "show") $("route-arrival-notice").classList.remove("hidden");
+}
+$("route-arrival-dismiss").addEventListener("click", hideRouteArrivalNotice);
 let brightDarkPalette = null, originalBrightPaint = new Map();
 const loops = {ROUTE: false};
 const setMessage = value => { $("message").textContent = value; };
@@ -74,6 +86,7 @@ async function call(path, method = "GET", body = null, useToken = true) {
     if (requestToken !== token || (renewingSession && path === "/api/state"))
       throw Error("等待續期完成，忽略舊狀態");
     token = null; connected = false;
+    resetRouteArrivalNotice();
     closeMapContextMenu();
     sessionDeadlineMs = 0;
     remoteLinkHealthy = false;
@@ -123,6 +136,7 @@ $("connect").addEventListener("click", async () => {
     }
     if (!approved?.token) throw Error("等待手機核准逾時");
     token = approved.token; connected = true; remoteLinkHealthy = true;
+    resetRouteArrivalNotice();
     sessionDeadlineMs = Date.now() + Math.max(0, approved.expiresInSeconds || 0) * 1000;
     updateSessionExpiry();
     document.body.classList.add("remote-active");
@@ -157,6 +171,7 @@ $("session-renew").addEventListener("click", async () => {
         {pendingId:pending.pendingId});
       if (!result.token) continue;
       token = result.token;
+      resetRouteArrivalNotice();
       sessionDeadlineMs = Date.now() + Math.max(0, result.expiresInSeconds || 0) * 1000;
       // A renewed token must not inherit the previous precise GPS sharing grant.
       latest = null;
@@ -1333,6 +1348,7 @@ async function refresh() {
     if (token !== activeToken || requestedRouteVersion !== routeStateVersion) return;
     latest = nextState;
     remoteLinkHealthy = true;
+    renderRouteArrivalNotice(latest);
     sessionDeadlineMs = Date.now() +
       Math.max(0, Number(latest.sessionExpiresInSeconds) || 0) * 1000;
     updateSessionExpiry();
@@ -1379,6 +1395,7 @@ async function refresh() {
       if (renewingSession && error.message === "等待續期完成，忽略舊狀態")
         return;
       remoteLinkHealthy = false;
+      hideRouteArrivalNotice();
       cameraFocus.clear();
       focusRealWhenReady = false;
       $("connection").textContent = "暫時離線";

@@ -1,7 +1,27 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
-import { BRIGHT_STYLE_URL, samePosition, currentPosition, createCameraFocus, visibleMapPadding, countryFlagPath, destinationTime, routePresentation, appliedSpeedLabel } from "../app/src/main/assets/lan/map-ui-policy.mjs";
+import { BRIGHT_STYLE_URL, samePosition, currentPosition, createCameraFocus, visibleMapPadding, countryFlagPath, destinationTime, routePresentation, appliedSpeedLabel, createRouteArrivalNotice } from "../app/src/main/assets/lan/map-ui-policy.mjs";
+
+test("route arrival notices consume only new authoritative events",()=>{
+  const notice=createRouteArrivalNotice();
+  const parked={phase:"PARKED",mode:"ROUTE",mockActive:true};
+  const arrived={...parked,routeArrivalId:"first"};
+  assert.equal(notice.observe(arrived),"hide","initial historical event is a baseline");
+  assert.equal(notice.observe(arrived),"none");
+  assert.equal(notice.observe({...parked,progress:{fraction:1}}),"hide","progress alone is not an arrival");
+  assert.equal(notice.observe({...arrived,phase:"MOVING"}),"hide");
+  assert.equal(notice.observe({...arrived,phase:"PAUSED"}),"hide");
+  assert.equal(notice.observe({...arrived,mockActive:false}),"hide");
+  assert.equal(notice.observe({...arrived,mode:"TELEPORT"}),"hide");
+  assert.equal(notice.observe({...arrived,routeArrivalId:"second"}),"show");
+  assert.equal(notice.observe({...arrived,routeArrivalId:"second"}),"none","dismissal stays final");
+  assert.equal(notice.observe(parked),"hide");
+  assert.equal(notice.observe({...arrived,routeArrivalId:"second"}),"none");
+  notice.reset();
+  assert.equal(notice.observe({...arrived,routeArrivalId:"third"}),"hide","renewal/reload cannot replay");
+  assert.equal(notice.observe({...arrived,routeArrivalId:"fourth"}),"show");
+});
 
 test("display only the confirmed applied speed and distinguish resume pace", () => {
   const state = {phase:"MOVING", speedPreset:"WALK", speedKmh:1.4, speedAppliedKmh:5.2};
