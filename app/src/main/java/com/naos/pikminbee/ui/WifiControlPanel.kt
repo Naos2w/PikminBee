@@ -137,13 +137,13 @@ fun WifiControlPanel(
         if (lan.pendingDevice.isNotBlank() && lan.connection.approvalId.isNotBlank()) {
             val approvalId = lan.connection.approvalId
             var shareOnApproval by remember(approvalId) {
-                mutableStateOf(!lan.connection.renewal || lan.physicalSharingAllowed)
+                mutableStateOf(false)
             }
             Text("待核准連線／續期：${lan.pendingDevice}",
                 color = foreground, fontWeight = FontWeight.Bold, fontSize = 13.sp)
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(checked = shareOnApproval, onCheckedChange = { shareOnApproval = it })
-                Text("分享最近真實位置（可取消）", color = foreground, fontSize = 12.sp)
+                Text("分享最近真實位置（選填）", color = foreground, fontSize = 12.sp)
             }
             Text("僅限本次核准的瀏覽器，快照最多 30 分鐘；私人 Wi-Fi 的 HTTP 未加密。",
                 color = muted, fontSize = 11.sp)

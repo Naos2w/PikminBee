@@ -20,6 +20,7 @@ class LanPairingTest {
         val approved = pairing.poll(ip, request.pendingId)
         assertEquals("approved", approved.state)
         assertNotNull(approved.token)
+        assertFalse(approved.sharePhysical)
         assertTrue(pairing.authorised(approved.token, ip))
         assertFalse(pairing.authorised(approved.token, "192.168.50.16"))
         assertEquals("invalid", pairing.poll(ip, request.pendingId).state)
