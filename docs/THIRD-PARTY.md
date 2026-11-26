@@ -47,6 +47,143 @@ For provenance: https://www.npmjs.com/package/maplibre-gl and https://maplibre.o
 
 `app/build.gradle`: Android MapLibre 13.7.1; Google Maps SDK 20.0.0; Compose BOM 2025.10.00 (UI, foundation, Material3, tooling preview); AndroidX Activity Compose 1.11.0, Lifecycle Runtime/Compose 2.9.4, Core KTX 1.17.0; Kotlin Coroutines Android 1.10.2. JUnit 4.13.2 and org.json 20250517 are test dependencies; Compose tooling is debug-only. No direct AdMob or Health Connect dependency in this base. Local web MapLibre version/hash/notice above. `app/src/main/assets/lan/flags/NOTICE.md` records svg-country-flags 1.2.10, 252 bundled PNGs, public-domain upstream claim; national flag usage law and exact asset rights remain separate. #180 new brand assets remain subject to owner review; no claim of trademark clearance. Need release runtime dependency resolution, native libraries/ABIs, bundled notices/asset-font inventory and final binary verification before G5 closure.
 
+### Resolved release runtime dependency evidence (2026-11-27)
+
+Local source `4f7c406` (base `d8170aa`), Gradle 9.3.1, Android Studio bundled JDK, offline `gradlew.bat --offline --console=plain :app:dependencies --configuration releaseRuntimeClasspath`: BUILD SUCCESSFUL in 25s, no FAILED entries. Deduplicated selected group:artifact:version from expanded non-constraint dependency rows (version substitutions applied): **111 module coordinates** including platforms and multiplatform metadata, not 111 packaged binaries. All 111 had one cached POM; licence names below are observed direct POM declarations (normalised Apache labels), not an independent licence clearance. No Health Connect or Google Ads module was observed in this configuration. No build, sign, package, install, or external provider traffic was performed.
+
+**Apache 2.0 (POM declaration) — 104**
+
+```text
+androidx.activity:activity-compose:1.11.0
+androidx.activity:activity-ktx:1.11.0
+androidx.activity:activity:1.11.0
+androidx.annotation:annotation-experimental:1.4.1
+androidx.annotation:annotation-jvm:1.9.1
+androidx.annotation:annotation:1.9.1
+androidx.arch.core:core-common:2.2.0
+androidx.arch.core:core-runtime:2.2.0
+androidx.autofill:autofill:1.0.0
+androidx.collection:collection-jvm:1.5.0
+androidx.collection:collection-ktx:1.5.0
+androidx.collection:collection:1.5.0
+androidx.compose.animation:animation-android:1.9.3
+androidx.compose.animation:animation-core-android:1.9.3
+androidx.compose.animation:animation-core:1.9.3
+androidx.compose.animation:animation:1.9.3
+androidx.compose.foundation:foundation-android:1.9.3
+androidx.compose.foundation:foundation-layout-android:1.9.3
+androidx.compose.foundation:foundation-layout:1.9.3
+androidx.compose.foundation:foundation:1.9.3
+androidx.compose.material3:material3-android:1.4.0
+androidx.compose.material3:material3:1.4.0
+androidx.compose.material:material-ripple-android:1.9.3
+androidx.compose.material:material-ripple:1.9.3
+androidx.compose.runtime:runtime-android:1.9.3
+androidx.compose.runtime:runtime-annotation-android:1.9.3
+androidx.compose.runtime:runtime-annotation:1.9.3
+androidx.compose.runtime:runtime-saveable-android:1.9.3
+androidx.compose.runtime:runtime-saveable:1.9.3
+androidx.compose.runtime:runtime:1.9.3
+androidx.compose.ui:ui-android:1.9.3
+androidx.compose.ui:ui-geometry-android:1.9.3
+androidx.compose.ui:ui-geometry:1.9.3
+androidx.compose.ui:ui-graphics-android:1.9.3
+androidx.compose.ui:ui-graphics:1.9.3
+androidx.compose.ui:ui-text-android:1.9.3
+androidx.compose.ui:ui-text:1.9.3
+androidx.compose.ui:ui-tooling-preview-android:1.9.3
+androidx.compose.ui:ui-tooling-preview:1.9.3
+androidx.compose.ui:ui-unit-android:1.9.3
+androidx.compose.ui:ui-unit:1.9.3
+androidx.compose.ui:ui-util-android:1.9.3
+androidx.compose.ui:ui-util:1.9.3
+androidx.compose.ui:ui:1.9.3
+androidx.compose:compose-bom:2025.10.00
+androidx.concurrent:concurrent-futures:1.1.0
+androidx.core:core-ktx:1.17.0
+androidx.core:core-viewtree:1.0.0
+androidx.core:core:1.17.0
+androidx.customview:customview-poolingcontainer:1.0.0
+androidx.customview:customview:1.0.0
+androidx.emoji2:emoji2:1.4.0
+androidx.fragment:fragment:1.8.9
+androidx.graphics:graphics-path:1.0.1
+androidx.interpolator:interpolator:1.0.0
+androidx.lifecycle:lifecycle-common-java8:2.9.4
+androidx.lifecycle:lifecycle-common-jvm:2.9.4
+androidx.lifecycle:lifecycle-common:2.9.4
+androidx.lifecycle:lifecycle-livedata-core-ktx:2.9.4
+androidx.lifecycle:lifecycle-livedata-core:2.9.4
+androidx.lifecycle:lifecycle-livedata:2.9.4
+androidx.lifecycle:lifecycle-process:2.9.4
+androidx.lifecycle:lifecycle-runtime-android:2.9.4
+androidx.lifecycle:lifecycle-runtime-compose-android:2.9.4
+androidx.lifecycle:lifecycle-runtime-compose:2.9.4
+androidx.lifecycle:lifecycle-runtime-ktx-android:2.9.4
+androidx.lifecycle:lifecycle-runtime-ktx:2.9.4
+androidx.lifecycle:lifecycle-runtime:2.9.4
+androidx.lifecycle:lifecycle-viewmodel-android:2.9.4
+androidx.lifecycle:lifecycle-viewmodel-ktx:2.9.4
+androidx.lifecycle:lifecycle-viewmodel-savedstate-android:2.9.4
+androidx.lifecycle:lifecycle-viewmodel-savedstate:2.9.4
+androidx.lifecycle:lifecycle-viewmodel:2.9.4
+androidx.loader:loader:1.0.0
+androidx.profileinstaller:profileinstaller:1.4.0
+androidx.savedstate:savedstate-android:1.3.3
+androidx.savedstate:savedstate-compose-android:1.3.3
+androidx.savedstate:savedstate-compose:1.3.3
+androidx.savedstate:savedstate-ktx:1.3.3
+androidx.savedstate:savedstate:1.3.3
+androidx.startup:startup-runtime:1.1.1
+androidx.tracing:tracing:1.2.0
+androidx.versionedparcelable:versionedparcelable:1.1.1
+androidx.viewpager:viewpager:1.0.0
+com.google.code.gson:gson:2.10.1
+com.jakewharton.timber:timber:5.0.1
+com.squareup.okhttp3:okhttp:4.12.0
+com.squareup.okio:okio-jvm:3.6.0
+com.squareup.okio:okio:3.6.0
+org.jetbrains.kotlin:kotlin-stdlib-common:2.2.10
+org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.10
+org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.10
+org.jetbrains.kotlin:kotlin-stdlib:2.2.10
+org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2
+org.jetbrains.kotlinx:kotlinx-coroutines-bom:1.10.2
+org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm:1.10.2
+org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2
+org.jetbrains.kotlinx:kotlinx-serialization-bom:1.7.3
+org.jetbrains.kotlinx:kotlinx-serialization-core-jvm:1.7.3
+org.jetbrains.kotlinx:kotlinx-serialization-core:1.7.3
+org.jetbrains:annotations:23.0.0
+org.jspecify:jspecify:1.0.0
+org.maplibre.gl:android-sdk-geojson:6.0.1
+org.maplibre.gl:android-sdk-turf:6.0.1
+```
+
+**Android Software Development Kit License (POM declaration; separate Google service terms) — 4**
+
+```text
+com.google.android.gms:play-services-base:18.5.0
+com.google.android.gms:play-services-basement:18.9.0
+com.google.android.gms:play-services-maps:20.0.0
+com.google.android.gms:play-services-tasks:18.2.0
+```
+
+**BSD (POM label only; exact licence and bundled native notices not yet verified) — 2**
+
+```text
+org.maplibre.gl:android-sdk:13.7.1
+org.maplibre.gl:maplibre-android-gestures:0.0.4
+```
+
+**Missing direct POM licence declaration; review upstream and bundled notice — 1**
+
+```text
+com.google.guava:listenablefuture:1.0
+```
+
+Cached AAR inspection (ZIP entry names, not final APK content) found these JNI libraries for arm64-v8a, armeabi-v7a, x86 and x86_64: `androidx.graphics:graphics-path:1.0.1` → `libandroidx.graphics.path.so`; `org.maplibre.gl:android-sdk:13.7.1` → `libmaplibre.so`. Neither native library's embedded dependency licences nor ELF alignment have been validated. Google Play services Maps, Base, Basement and Tasks are **not** classified as Apache 2.0 merely because AndroidX is. The Google SDK licence and Maps terms, MapLibre native bundled notices, and Guava's exact upstream/JAR notice must be examined. Reconcile embedded/transitive licences, assets/fonts, rendered attribution, merged manifest, final package contents and ABI/16 KB checks (#177) against the integrated develop SHA before closing G5. This snapshot is not an SBOM or final legal sign-off; no runtime dependency was changed.
+
 ### Capacity model for decision, not observed traffic
 
 Assume 100 / 1,000 / 10,000 daily active users, 30 days, two uncached route queries per active user/day, two uncached place saves/day (one Photon + one TimeAPI request each), and two map sessions/day. These are stress-planning assumptions before measuring real adoption/cache hit rate, not permission to send requests.
