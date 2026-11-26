@@ -184,6 +184,35 @@ com.google.guava:listenablefuture:1.0
 
 Cached AAR inspection (ZIP entry names, not final APK content) found these JNI libraries for arm64-v8a, armeabi-v7a, x86 and x86_64: `androidx.graphics:graphics-path:1.0.1` → `libandroidx.graphics.path.so`; `org.maplibre.gl:android-sdk:13.7.1` → `libmaplibre.so`. Neither native library's embedded dependency licences nor ELF alignment have been validated. Google Play services Maps, Base, Basement and Tasks are **not** classified as Apache 2.0 merely because AndroidX is. The Google SDK licence and Maps terms, MapLibre native bundled notices, and Guava's exact upstream/JAR notice must be examined. Reconcile embedded/transitive licences, assets/fonts, rendered attribution, merged manifest, final package contents and ABI/16 KB checks (#177) against the integrated develop SHA before closing G5. This snapshot is not an SBOM or final legal sign-off; no runtime dependency was changed.
 
+### Archive-level notice and native ABI audit (2026-11-27)
+
+Local source `fedef30`; inspected existing Gradle-cache archives read-only (no new build/download). Exact SHA-256 identifies each inspected input:
+
+| Module | Archive SHA-256 | Notice inspection |
+| --- | --- | --- |
+| com.google.guava:listenablefuture:1.0 | `e4ad7607e5c0477c6f890ef26a49cb8d1bb4dffb650bab4502afee64644e3069` | 13 JAR entries; embedded POM, no named LICENSE/NOTICE/COPYRIGHT entry |
+| org.maplibre.gl:android-sdk:13.7.1 | `08ebf900c96c3cd22e78ce8b01a098cddf85d146695df2555352e0a512753d39` | 139 AAR entries; no named notice in AAR or classes.jar |
+| org.maplibre.gl:maplibre-android-gestures:0.0.4 | `44ff4fc2dd8bfbcf54a06f219e7ab40a2062eb6b4a10dcbf1f4e02b4a30c61af` | 8 AAR entries; no named notice in AAR or classes.jar |
+| androidx.graphics:graphics-path:1.0.1 | `8ca4032b6d79b351f0b59ad4b580eddbb9423e1652f7c958830687f1eee2ec03` | 23 AAR entries; no named notice in AAR or classes.jar |
+
+Evidence: ZIP entry names searched case-insensitively for license/licence/notice/copyright; nested JAR entries checked too. This does not rule out notices under other names, embedded resources, ELF strings, or final app resources. Tracked main assets/res contain the existing flag NOTICE and vendored MapLibre JS LICENSE; no tracked TTF/OTF/WOFF font file was found by extension. Remote style glyphs and other asset rights remain separate.
+
+- Upstream [MapLibre Native](https://github.com/maplibre/maplibre-native) and [Android licence inventory](https://github.com/maplibre/maplibre-native/blob/main/platform/android/LICENSE.md) identify BSD-2-Clause and list additional native dependency licences; [Gestures Android](https://github.com/maplibre/maplibre-gestures-android) likewise identifies BSD-2-Clause. [Native releases](https://github.com/maplibre/maplibre-native/releases) identify android-v13.7.1 at 4cf121e. Exact version-tag licence files were not retrievable in this audit, so the upstream evidence is provisional rather than a final binary-specific NOTICE. Obtain the exact release notices including native third-party components before redistribution.
+- Guava listenablefuture:1.0 has no direct POM licence declaration, but the [Apache Curator dependency report](https://svn.apache.org/repos/asf/curator/site/trunk/curator-x-discovery/dependencies.html) identifies that exact coordinate as Apache 2.0. Treat as corroborating evidence, not the original release notice; verify upstream version and retain required copyright/licence materials. The 111-coordinate direct-POM classification above remains unchanged.
+
+#### Native library 16 KiB preflight — #177
+
+Read little-endian ELF program headers directly from both cached AARs. For each PT_LOAD, checked p_align >= 16384 and p_offset congruent to p_vaddr modulo 16384. Each library has three PT_LOAD segments per ABI.
+
+| Library | arm64-v8a | x86_64 | armeabi-v7a | x86 |
+| --- | --- | --- | --- | --- |
+| libmaplibre.so | 16384 × 3 | 16384 × 3 | 4096 × 3 | 4096 × 3 |
+| libandroidx.graphics.path.so | 16384 × 3 | 16384 × 3 | 16384 × 3 | 16384 × 3 |
+
+All four 64-bit ELF inputs pass the PT_LOAD check (12/12 segments). MapLibre's six 32-bit PT_LOAD segments do not meet this 16 KiB test; this is not by itself a Play rejection, which requires assessing the actual supported ABI/artifact. Additional 64-bit GNU_RELRO inspection found unaligned RELRO ends but no subsequent writable LOAD in the same rounded-up 16 KiB page: MapLibre ARM64 end 0xC6B000, next RW start 0xC6EED8; x86_64 end 0xCFB000, next RW start 0xCFE8E0; graphics-path ARM64 end 0x6000, next RW start 0x9FD0; x86_64 end 0x7000, next RW start 0xA268. The graphics-path RELRO extends past the preceding RW LOAD memory end; do not treat this preflight as complete runtime validation.
+
+Follow the current [Android 16 KB guidance](https://developer.android.com/guide/practices/page-sizes) on the integrated release binary: inspect all packaged .so files with llvm-readelf, check ZIP alignment (zipalign -c -P 16 -v 4 on the actual APK), bundle configuration, GNU_RELRO and 16 KiB emulator/device operation. No new APK/AAB, packaging change, dependency upgrade, or device test was performed. G4 and G5 remain open.
+
 ### Capacity model for decision, not observed traffic
 
 Assume 100 / 1,000 / 10,000 daily active users, 30 days, two uncached route queries per active user/day, two uncached place saves/day (one Photon + one TimeAPI request each), and two map sessions/day. These are stress-planning assumptions before measuring real adoption/cache hit rate, not permission to send requests.
