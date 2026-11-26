@@ -60,6 +60,26 @@ class LanHttpPolicyTest {
         assertTrue(policy.contains("connect-src 'self' https://tiles.openfreemap.org"))
     }
 
+    @Test fun physicalLocationSharingDoesNotLookUpExternalTimeZoneOrExposeItInState() {
+        val source = sequenceOf(File("src/main/java/com/naos/pikminbee"),
+            File("app/src/main/java/com/naos/pikminbee"))
+            .firstOrNull { it.isDirectory } ?: error("Missing application source")
+        val controller = File(source, "lan/LanController.kt").readText()
+        val lookup = File(source, "data/PlaceLookup.kt").readText()
+        // The obsolete physical-coordinate lookup entry point and response
+        // fields must not return; selected-place lookup is a separate feature.
+        assertFalse(controller.contains("zoneForVerifiedPhysical"))
+        assertFalse(controller.contains("verifiedTimeZoneReference"))
+        assertFalse(controller.contains("realTimeZoneId"))
+        assertFalse(controller.contains("realTimeZoneExpiresAtMillis"))
+        assertFalse(lookup.contains("zoneForVerifiedPhysical"))
+        val physicalFixHandler = controller.substringAfter("private fun acceptRealLocation(")
+            .substringBefore("private fun walking(")
+        assertTrue(physicalFixHandler.contains("physicalSnapshot = LanPhysicalSnapshot"))
+        assertFalse(physicalFixHandler.contains("placeLookup"))
+        assertTrue(lookup.contains("suspend fun suggest(point: Coordinate)"))
+    }
+
     @Test fun binaryFlagReplyPreservesPngBytes() {
         val directory = sequenceOf(File("src/main/assets/lan"), File("app/src/main/assets/lan"))
             .firstOrNull { it.isDirectory } ?: error("Missing LAN assets")
