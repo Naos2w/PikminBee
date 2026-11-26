@@ -1,14 +1,20 @@
 # Branching / CI policy
 
-Three long-lived branches, because UAT is explicitly a separate release gate:
+Three long-lived branches, because UAT is explicitly a separate release gate.
+
+## Current release hold (owner decision 2026-11-26)
+
+[Commercial Readiness plan](COMMERCIAL-READINESS.md) and [Epic #168](https://github.com/Naos2w/PikminBee/issues/168) supersede the previous immediate 1.0.0 release decision. Continue feature development through develop and separately approved fixed-signer UAT on staging. Do not merge staging into main, create a production release/tag, publish a production APK/AAB, or enable live advertising while the relevant gates remain unmet. Require recorded evidence and explicit owner approval for production release, and separate AdMob approval/owner authorization before live ads. #167 preserves prior release infrastructure work; do not treat that PR's CI as release authorization.
+
+Use only the personal GitHub account Naos2w and its verified personal commit identity for this repository. Verify actual Git author/committer and API/CLI account before writes; use the personal Projects MCP. Do not switch the shared CLI default or use/notify unrelated accounts. Stop on identity mismatch.
 
 ## Issue-first planning and design review
 
-- GitHub Issues are the canonical task ledger; GitHub Projects is the status/planning view when authorized. See [task navigation](TODO.md) and the [V4 design review epic #140](https://github.com/Naos2w/PikminBee/issues/140).
+- GitHub Issues are the canonical task ledger; [PikminBee Development (Project #1)](https://github.com/users/Naos2w/projects/1) is the verified status/planning view. See [task navigation](TODO.md) and the [V4 design review epic #140](https://github.com/Naos2w/PikminBee/issues/140).
 - Before opening a development branch, read the existing Issue, its latest review decisions, acceptance criteria and linked PRs. Do not recreate completed work or maintain a parallel TODO list.
 - Record visual/function assessment, proposed UI, mockups, dependencies and test evidence in the corresponding Issue. New visual direction requires user review before implementation; no private coordinates, account details, PINs or unauthorized screenshots in public artifacts.
 - Reference the Issue in the PR; avoid auto-closing a task merely on merge when physical UAT is required. A merged implementation, fixed-signer APK build and verified device acceptance are separate gates.
-- Status proposal for Projects: Backlog, Ready, In Progress, Review, UAT, Done, Blocked. Close an Issue only after its stated acceptance criteria actually pass; preserve cancelled/superseded history. No automatic APK, staging or production promotion.
+- Projects currently uses Todo / In Progress / Done with separate V4 design review, UAT and future backlog views. Expanded Status options (Backlog / Ready / Review / UAT / Blocked) and dedicated metadata fields remain pending; do not claim they are configured. Close an Issue only after its stated acceptance criteria actually pass; preserve cancelled/superseded history. No automatic APK, staging or production promotion.
 
 ## DEV / UAT semantic versions
 
@@ -32,12 +38,12 @@ Three long-lived branches, because UAT is explicitly a separate release gate:
 - Ruleset for `staging`: require PR, require status check, require merge commit.
 - Ruleset for `main`: require PR, require status check, require merge commit.
 - One CI workflow also rejects an incorrect source → target PR pairing.
-- Release tags `vX.Y.Z` only from `main`, manually after UAT approval.
+- Release tags `vX.Y.Z` only from `main`, manually after all applicable release gates in #168 and explicit owner approval (not just CI/UAT).
 - If private-repository plan entitlements prevent enforcement of branch rulesets, keep the CI source-branch guard and make the PR merge-type check manual until plan support is enabled.
 
 **Hotfixes** begin with `fix/* → develop`, then promote through staging → main, keeping the branch ancestry straightforward.
 
-**CI (cost control):** One Gradle job, one JVM version, no matrix, no deploy server, no scheduled runs. Draft PRs skip the Android runner. When a PR is marked ready for review, Gradle runs unit tests and lint (without packaging APK). Synchronised updates while a PR is ready trigger verification; concurrency cancels superseded runs. `workflow_dispatch` allows explicit source verification; only if `package_apk=true` does it build and upload a UAT APK (3-day retention). Do not mark Draft PRs ready until a feature is reviewed locally. GitHub Actions is a final PR gate, not the development feedback loop.
+**CI (cost control):** One Gradle job, one JVM version, no matrix, no deploy server, no scheduled runs. Draft PRs skip the Android runner. When a PR is marked ready for review, Gradle runs unit tests and lint (without packaging APK). Synchronised updates while a PR is ready trigger verification; concurrency cancels superseded runs. `workflow_dispatch` allows explicit source verification; only if `package_apk=true` does it build and upload a UAT APK (7-day retention). Do not mark Draft PRs ready until a feature is reviewed locally. GitHub Actions is a final PR gate, not the development feedback loop.
 
 **APK ABI and size:** ordinary DEV builds remain universal. Signed UAT defaults to arm64-v8a (confirmed target POCO ABI); manual `apk_abi` selection permits a universal or specific alternative build. Local unsigned/re-signed DEV-only measurements can use `-PpikminbeeApkAbi=arm64-v8a`. The packaging workflow audits the actual APK ZIP entries, exact ABI set, bytes and SHA-256 before upload. The fixed UAT signer, app ID, versionCode progression and default semantic-version filename are unchanged. Non-default ABI files include an ABI suffix. R8 is not enabled by this first packaging change; evaluate optimized builds separately and retain map/JNI/permission regressions and real-device acceptance as gates.
 

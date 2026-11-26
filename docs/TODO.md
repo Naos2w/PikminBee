@@ -1,19 +1,20 @@
 # PikminBee — Issue-based development tracking
 
-Since 2026-11-25, **GitHub Issues are the only active task ledger**. GitHub Projects is the planning and status view once the account grants project access. Until then, use the issue list and issue discussions; do not maintain a second Markdown checklist.
+Since 2026-11-25, **GitHub Issues are the only active task ledger**. GitHub Projects is the planning and status view; the personal-account MCP connection and Project #1 have been verified. Do not maintain a second Markdown checklist.
 
 ## Start here
 
 - [All open Issues](https://github.com/Naos2w/PikminBee/issues?q=is%3Aissue+is%3Aopen)
-- [V4 design review / Epic #140](https://github.com/Naos2w/PikminBee/issues/140): links to each feature, design proposal, wireframe, requirements and acceptance criteria.
-- [Repository Projects](https://github.com/Naos2w/PikminBee/projects): intended board; its creation and configuration are not yet verified because the personal CLI account lacks Projects authorization.
+- **Current development direction:** [Commercial Readiness plan](COMMERCIAL-READINESS.md), governed by [release Epic #168](https://github.com/Naos2w/PikminBee/issues/168). Start with #169, then #171 and #170. Do not promote to main or publish 1.0.0 while release gates remain open.
+- [V4 design review / Epic #140](https://github.com/Naos2w/PikminBee/issues/140): links to existing features, design proposals, wireframes, requirements and acceptance criteria.
+- [PikminBee Development — Project #1](https://github.com/users/Naos2w/projects/1): verified planning board (32 tracked items verified on 2026-11-26; live count is authoritative). Views: All Tasks, Development Board, V4 Design Review, UAT Acceptance and Future Backlog. Access Projects through the independent `github-personal` MCP (verified identity `Naos2w`), not by switching the shared GitHub CLI account.
 - [Branching and CI policy](BRANCHING.md)
 
 ## Task workflow
 
 Create or reuse a single Issue per work item. Include source evidence, proposed UI and interaction flow (when applicable), acceptance criteria, dependencies, relevant PRs and actual test results. Review new visual directions in the Issue before implementation. Use `Refs #123` rather than auto-closing keywords for work awaiting device acceptance. Keep design review, implementation, CI, release packaging and physical acceptance distinct.
 
-The planned Projects fields are Status (Backlog / Ready / In Progress / Review / UAT / Done / Blocked), Priority (P0–P3), Type, Platform, Version and Assignee. Never treat a merged PR or automated workflow as physical UAT. A task is closed only when its actual acceptance criteria are satisfied; cancellation and supersession are recorded separately. Do not auto-promote to staging or main.
+Current board fields include Status (Todo / In Progress / Done), Labels, Assignees, Parent issue, Sub-issues progress, Linked pull requests and Milestone. V4 design review and physical UAT are separate filtered views. Expanded Status options (Backlog / Ready / Review / UAT / Blocked) and dedicated Priority, Platform and Version fields are planned but not yet configured: the current MCP only exposes item/value updates, view management and iteration-field creation. Existing issue metadata remains authoritative for those distinctions. Never treat a merged PR or automated workflow as physical UAT. A task is closed only when its actual acceptance criteria are satisfied; cancellation and supersession are recorded separately. Do not auto-promote to staging or main.
 
 ## Migration map — history/reference only, not a task list
 
@@ -24,8 +25,9 @@ The planned Projects fields are Status (Backlog / Ready / In Progress / Review /
 | V3-2/3, WEB-5, U1 map/road/route acceptance | #16 |
 | R4/U4 retired mode and legacy data preservation | #17 |
 | V3-4/5/6, UX-4, U5 visual acceptance | #26 |
-| U6 signed upgrade acceptance | #29 |
+| U6 signed upgrade acceptance | #179 (replacement Issue; original deleted) |
 | FAV-4 future collection management | #150 |
+| Commercial release and operations | #168 → #169–#178; see [release plan](COMMERCIAL-READINESS.md) |
 
 Existing implementation evidence and cancelled scope remain in the immutable historical sources below. All prior open device gates remain open. No new development is authorized merely by this migration.
 
