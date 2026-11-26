@@ -48,7 +48,7 @@ import org.maplibre.android.annotations.PolylineOptions as LibrePolylineOptions
 import org.maplibre.android.geometry.LatLngBounds as LibreLatLngBounds
 import org.maplibre.android.camera.CameraUpdateFactory as LibreCameraUpdateFactory
 
-/** An explicit, one-shot camera instruction. Live GPS updates never move the camera. */
+/** A one-shot camera instruction, including updates while the user explicitly enables following. */
 data class MapCameraRequest(
     val id: Int,
     val target: MapCameraGeometry.ViewTarget,
@@ -80,6 +80,7 @@ fun LocationMap(
     onCameraApplied: (Int) -> Unit = {},
     mapExplore: Boolean = false,
     onCameraFailure: (String) -> Unit = {},
+    onCameraGesture: () -> Unit = {},
     onPick: (Coordinate) -> Unit,
     onFlowerPick: (FlowerSpot) -> Unit,
     onStopPick: ((Int) -> Unit)? = null,
@@ -88,14 +89,14 @@ fun LocationMap(
 ) {
     when (provider) {
         MapProvider.OPEN_FREE_MAP -> OpenFreeMapPane(dark, selected, selectionActive, current, currentIsMock, start, stops, road, previewRoad, flowerSpots,
-            cameraRequest, viewport, onViewport, onCameraApplied, mapExplore, onCameraFailure,
+            cameraRequest, viewport, onViewport, onCameraApplied, mapExplore, onCameraFailure, onCameraGesture,
             onPick, onFlowerPick, onStopPick, modifier, interactive)
         MapProvider.GOOGLE_MAPS -> if (BuildConfig.HAS_GOOGLE_MAPS_KEY) {
             GoogleMapsPane(dark, selected, selectionActive, current, currentIsMock, start, stops, road, previewRoad, flowerSpots,
-                cameraRequest, viewport, onViewport, onCameraApplied, mapExplore, onCameraFailure, onPick, onFlowerPick, onStopPick, modifier, interactive)
+                cameraRequest, viewport, onViewport, onCameraApplied, mapExplore, onCameraFailure, onCameraGesture, onPick, onFlowerPick, onStopPick, modifier, interactive)
         } else {
             OpenFreeMapPane(dark, selected, selectionActive, current, currentIsMock, start, stops, road, previewRoad, flowerSpots,
-                cameraRequest, viewport, onViewport, onCameraApplied, mapExplore, onCameraFailure,
+                cameraRequest, viewport, onViewport, onCameraApplied, mapExplore, onCameraFailure, onCameraGesture,
                 onPick, onFlowerPick, onStopPick, modifier, interactive)
         }
     }
@@ -110,6 +111,7 @@ private fun OpenFreeMapPane(
     cameraRequest: MapCameraRequest?, viewport: MapViewport?,
     onViewport: (MapViewport) -> Unit, onCameraApplied: (Int) -> Unit, mapExplore: Boolean,
     onCameraFailure: (String) -> Unit,
+    onCameraGesture: () -> Unit,
     onPick: (Coordinate) -> Unit, onFlowerPick: (FlowerSpot) -> Unit,
     onStopPick: ((Int) -> Unit)?,
     modifier: Modifier,
@@ -123,6 +125,7 @@ private fun OpenFreeMapPane(
     val latestOnStopPick by rememberUpdatedState(onStopPick)
     val latestStops by rememberUpdatedState(stops)
     val latestOnCameraFailure by rememberUpdatedState(onCameraFailure)
+    val latestOnCameraGesture by rememberUpdatedState(onCameraGesture)
     val latestViewport by rememberUpdatedState(viewport)
     val latestOnViewport by rememberUpdatedState(onViewport)
     val latestCameraRequest by rememberUpdatedState(cameraRequest)
@@ -201,6 +204,10 @@ private fun OpenFreeMapPane(
                     .bearing(pose?.bearing ?: 0.0)
                     .tilt(pose?.tilt ?: 0.0).build()
             ))
+            ready.addOnCameraMoveStartedListener { reason ->
+                if (!disposed && reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE)
+                    latestOnCameraGesture()
+            }
             ready.addOnCameraIdleListener {
                 if (!disposed) {
                     val camera = ready.cameraPosition
@@ -321,7 +328,7 @@ private fun OpenFreeMapPane(
                     if (flower.evidence == FlowerEvidence.PERSONALLY_CHECKED) " · 本人確認" else " · 待確認"))
         }
     }
-    // Explicit camera actions only: do not follow the GPS marker at every tick.
+    // Camera changes require an explicit action or an explicitly enabled follow mode.
     // The map layout needs non-zero dimensions before the bounds update is valid.
     LaunchedEffect(map, styleVersion, cameraRequest) {
         val m = map ?: return@LaunchedEffect
@@ -371,6 +378,7 @@ private fun GoogleMapsPane(
     cameraRequest: MapCameraRequest?, viewport: MapViewport?,
     onViewport: (MapViewport) -> Unit, onCameraApplied: (Int) -> Unit, mapExplore: Boolean,
     onCameraFailure: (String) -> Unit,
+    onCameraGesture: () -> Unit,
     onPick: (Coordinate) -> Unit, onFlowerPick: (FlowerSpot) -> Unit,
     onStopPick: ((Int) -> Unit)?,
     modifier: Modifier,
@@ -384,6 +392,7 @@ private fun GoogleMapsPane(
     val latestOnStopPick by rememberUpdatedState(onStopPick)
     val latestStops by rememberUpdatedState(stops)
     val latestOnCameraFailure by rememberUpdatedState(onCameraFailure)
+    val latestOnCameraGesture by rememberUpdatedState(onCameraGesture)
     val latestViewport by rememberUpdatedState(viewport)
     val latestOnViewport by rememberUpdatedState(onViewport)
     val latestCameraRequest by rememberUpdatedState(cameraRequest)
@@ -453,6 +462,10 @@ private fun GoogleMapsPane(
                     .bearing(pose?.bearing?.toFloat() ?: 0f)
                     .tilt(pose?.tilt?.toFloat() ?: 0f).build()
             ))
+            ready.setOnCameraMoveStartedListener { reason ->
+                if (!disposed && reason == GoogleMap.OnCameraMoveStartedListener.REASON_GESTURE)
+                    latestOnCameraGesture()
+            }
             ready.setOnCameraIdleListener {
                 if (!disposed) {
                     val camera = ready.cameraPosition

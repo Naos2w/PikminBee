@@ -38,7 +38,7 @@ let state = {
   realTimeZoneId:null,
   realTimeZoneExpiresAtMillis:null,
   // Synthetic numbered draft for visual QA only; this never reaches a phone.
-  routeRevision: 1,
+  routeRevision: 1, routeLoop:false, planningNotice:'', planningError:false,
   routeStops: [
     {lat:25.0441,lon:121.4661},{lat:25.0478,lon:121.4702},
     {lat:25.0494,lon:121.4650}
@@ -49,6 +49,7 @@ let state = {
     travelledMetres:0,totalMetres:0,waypointCount:0},
   speedPreset:'WALK',defaultSpeedPreset:'WALK'
 };
+let previewRoutes=[];
 let previewPlaces=[{
   id:1,name:"東京車站（合成資料）",position:{lat:35.681236,lon:139.767125},
   countryCode:"JP",countryName:"日本",city:"東京",
@@ -109,22 +110,34 @@ createServer(async (req,res)=>{
     if(state.realPosition)state.realPosition.expiresAtMillis=Date.now()-1000;
     send(res,{message:'合成快照已過期'},202);return;
   }
+  // Synthetic permission toggle for browser tests only; never requests device permissions.
+  if(req.method==='POST'&&url==='/api/preview/mock-permission'){
+    const {approved}=await readBody(req);
+    state.mockPermissionReady=approved===true;
+    send(res,{message:'Synthetic test permission state only'},202);return;
+  }
   // Fixed synthetic route scenarios: never contact the phone or a routing service.
   if(req.method==='POST'&&url==='/api/preview/route-state'){
     const {scenario}=await readBody(req);
-    if(!['active','parked','planning','ready','failed','cleared'].includes(scenario)){
+    if(!['active','active-next','parked','planning','ready','stale','failed','cleared','arrived'].includes(scenario)){
       send(res,{error:'Unknown test scenario'},400);return;
     }
     const origin={lat:25.033,lon:121.5654};
     const a={lat:25.043,lon:121.5654}, b={lat:25.033,lon:121.5754};
     const preview=(id,point)=>({id,loop:false,geometry:[origin,point],
       distanceMetres:1000,maxSnapMetres:0});
+    const moving=['active','active-next'].includes(scenario);
     state={...state,origin,geometry:[origin,a],mode:'ROUTE',
-      phase:scenario==='active'?'MOVING':'PARKED',
+      position:scenario==='active-next'?{lat:25.036,lon:121.5654}:state.position,
+      phase:moving?'MOVING':'PARKED',
+      routeArrivalId:scenario==='arrived'?'synthetic-arrival-'+(state.routeRevision+1):null,
       routeRevision:state.routeRevision+1,
-      routeStops:scenario==='cleared'?[]:[scenario==='active'?a:b],
-      planning:scenario==='planning',
+      routeStops:scenario==='cleared'?[]:[moving?a:b],
+      planning:scenario==='planning', routeLoop:false,
+      planningNotice:scenario==='failed'?'道路規劃失敗：合成逾時':'',
+      planningError:scenario==='failed',
       previews:scenario==='ready'?{ROUTE:preview('B',b)}:
+        scenario==='stale'?{ROUTE:{...preview('B',b),canStart:false}}:
         scenario==='planning'?{ROUTE:preview('A',a)}:{}};
     send(res,{message:'Synthetic route state only'},202);return;
   }
@@ -135,8 +148,30 @@ createServer(async (req,res)=>{
     send(res,{message:'合成行走中，未操作任何真實 GPS'},202);return;
   }
   if(req.method==='GET'&&url==='/api/saved'){
-    send(res,{places:previewPlaces,routes:[],
+    send(res,{places:previewPlaces,routes:previewRoutes,
       enrichmentBusy:false,enrichmentNote:"本機合成資料測試完成"});return;
+  }
+  if(req.method==='POST'&&['/api/saved/route/add','/api/saved/route/rename','/api/saved/route/delete','/api/saved/load','/api/route/options','/api/route/cancel-preview'].includes(url)){
+    const data=await readBody(req);
+    if(url==='/api/route/cancel-preview'){
+      state.planning=false;state.previews={};state.planningError=false;state.planningNotice='已取消規劃';
+    } else if(url==='/api/route/options'){
+      if(data.expectedRevision!==state.routeRevision){send(res,{error:'stale draft'},409);return;}
+      state.routeLoop=data.loop===true;state.routeRevision++;state.previews={};
+    } else if(url==='/api/saved/route/add'){
+      if(data.expectedRevision!==state.routeRevision||state.planning||!state.routeStops.length){send(res,{error:'stale draft'},409);return;}
+      previewRoutes.push({id:'synthetic-'+Date.now(),name:data.name,mode:'ROUTE',origin:state.origin,loop:state.routeLoop,stops:state.routeStops.slice()});
+    } else {
+      const route=previewRoutes.find(x=>x.id===data.id);
+      if(!route){send(res,{error:'not found'},404);return;}
+      if(url.endsWith('/rename'))route.name=data.name;
+      else if(url.endsWith('/delete'))previewRoutes=previewRoutes.filter(x=>x.id!==route.id);
+      else {
+        if(data.expectedRevision!==state.routeRevision){send(res,{error:'stale draft'},409);return;}
+        state.origin=route.origin;state.routeLoop=route.loop;state.routeStops=route.stops.slice();state.routeRevision++;state.previews={};
+      }
+    }
+    send(res,{message:'合成路線收藏／規劃狀態已更新'},202);return;
   }
   if(req.method==='POST'&&url==='/api/preview/add-many-favourites'){
     previewPlaces=previewPlaces.slice(0,2);
@@ -230,7 +265,7 @@ createServer(async (req,res)=>{
     // Synthetic historical physical coordinate stays only until its original TTL.
     send(res,{message:'合成虛擬位置已啟用（未操控手機）'},202);return;
   }
-  if(req.method==='POST'&&['/api/points/reorder','/api/points/remove','/api/points/replace','/api/points/clear','/api/points/undo'].includes(url)){
+  if(req.method==='POST'&&['/api/points/add','/api/points/reorder','/api/points/remove','/api/points/replace','/api/points/clear','/api/points/undo'].includes(url)){
     let body='';
     for await(const chunk of req)body+=chunk;
     const request=JSON.parse(body||'{}');
@@ -248,6 +283,13 @@ createServer(async (req,res)=>{
         send(res,{error:'路點順序無效'},409);return;
       }
       old.splice(to,0,old.splice(from,1)[0]);
+    } else if(url.endsWith('add')){
+      if(request.mode!=='ROUTE'||old.length>=15||!Number.isFinite(request.lat)||
+        !Number.isFinite(request.lon)||Math.abs(request.lat)>90||Math.abs(request.lon)>180||
+        request.expectedRevision!==state.routeRevision){
+        send(res,{error:'合成路點無效'},409);return;
+      }
+      old.push({lat:request.lat,lon:request.lon});
     } else if(url.endsWith('clear')) old.length=0;
     else if(url.endsWith('undo')) old.pop();
     else {

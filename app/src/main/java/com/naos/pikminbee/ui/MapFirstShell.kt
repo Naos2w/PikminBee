@@ -94,7 +94,11 @@ fun MapFirstShell(
     routeSpeedKmh: Double = 0.0,
     routeActive: Boolean = false,
     routePaused: Boolean = false,
+    routeCameraAvailable: Boolean = false,
+    routeCameraFollowing: Boolean = false,
+    onToggleRouteCameraFollow: () -> Unit = {},
     routePreviewReady: Boolean = false,
+    routePreviewStale: Boolean = false,
     routePlanning: Boolean = false,
     routeSnapMetres: Double = 0.0,
     onRouteUndo: () -> Unit = {},
@@ -247,7 +251,7 @@ fun MapFirstShell(
                     }
                     Surface(
                         onClick = onRoutePrimary,
-                        enabled = activeWalking || (!routePlanning && modeStopsCount > 0),
+                        enabled = activeWalking || routePlanning || modeStopsCount > 0,
                         shape = RoundedCornerShape(13.dp),
                         color = if (activeWalking && !routePaused) Color(BeeActionColors.PAUSE_AMBER)
                             else if (!activeWalking && !routePreviewReady) p.accent
@@ -272,8 +276,9 @@ fun MapFirstShell(
                             Text(when {
                                 activeWalking && routePaused -> "繼續"
                                 activeWalking -> "暫停"
-                                routePlanning -> "規劃中"
+                                routePlanning -> "取消規劃"
                                 routePreviewReady -> "開始"
+                                routePreviewStale -> "重新規劃"
                                 else -> "規劃"
                             }, color = controlInk,
                                 fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
@@ -283,10 +288,10 @@ fun MapFirstShell(
                 if (!activeWalking && routePreviewReady && routeSnapMetres > 40.0) {
                     Text("路點最大吸附 ${routeSnapMetres.toInt()} 公尺 · 開始前會再次確認",
                         color = p.muted, fontSize = 11.sp, maxLines = 1)
-                } else if (!activeWalking &&
-                    (message.contains("失敗") || message.contains("無法"))) {
-                    Text(message, color = Color(BeeActionColors.STOP_RED),
-                        fontSize = 11.sp, maxLines = 2)
+                } else if (!activeWalking && message.isNotBlank()) {
+                    Text(message, color = if (message.contains("失敗") || message.contains("無法"))
+                        Color(BeeActionColors.STOP_RED) else p.muted,
+                        fontSize = 11.sp, maxLines = 3)
                 }
                 if (activeWalking && walkingProgress.totalMetres > 0.0) {
                     val total = walkingProgress.totalMetres / 1000.0
@@ -348,14 +353,37 @@ fun MapFirstShell(
             }
         }
 
-        CurrentLocationMapButton(
-            onClick = onCurrentLocation,
-            dark = dark,
+        Column(
             modifier = Modifier.align(Alignment.BottomEnd)
                 .navigationBarsPadding().padding(end = 16.dp,
                     bottom = if (showQuick) 224.dp else 132.dp),
-            backdrop = backdrop,
-        )
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalAlignment = Alignment.End,
+        ) {
+            if (routeCameraAvailable) {
+                MapGlass(dark, Modifier.size(52.dp), backdrop) {
+                    IconButton(
+                        onClick = onToggleRouteCameraFollow,
+                        modifier = Modifier.fillMaxSize()
+                            .background(if (routeCameraFollowing) p.accent else Color.Transparent,
+                                RoundedCornerShape(16.dp))
+                            .semantics {
+                                contentDescription = if (routeCameraFollowing)
+                                    "停止跟隨目前位置" else "跟隨目前位置（僅移動地圖）"
+                            },
+                    ) {
+                        Text(if (routeCameraFollowing) "跟隨中" else "跟隨",
+                            fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                            color = if (routeCameraFollowing) Color.White else p.ink)
+                    }
+                }
+            }
+            CurrentLocationMapButton(
+                onClick = onCurrentLocation,
+                dark = dark,
+                backdrop = backdrop,
+            )
+        }
         }
     }
 

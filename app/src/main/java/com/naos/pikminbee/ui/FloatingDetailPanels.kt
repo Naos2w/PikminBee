@@ -247,7 +247,7 @@ internal class FloatingWifiPanel(
     private var approvalId = ""
     private var renewal = false
     private val shareChoice = CheckBox(context).apply {
-        text = "分享最近真實位置（可取消）"
+        text = "分享最近真實位置（選填）"
         textSize = 12f
         minHeight = widgets.dp(48)
         setTextColor(palette().ink.toArgb())
@@ -329,7 +329,7 @@ internal class FloatingWifiPanel(
         renewal = state.renewal
         if (approvalId != state.approvalId) {
             approvalId = state.approvalId
-            shareChoice.isChecked = !renewal || lan.physicalSharingAllowed
+            shareChoice.isChecked = false
         }
         updateApprovalButton()
         shareChoice.visible(approval && approvalId.isNotBlank())

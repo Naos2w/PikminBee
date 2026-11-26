@@ -25,9 +25,6 @@ import com.naos.pikminbee.domain.FloatingRouteDraft
 import com.naos.pikminbee.location.OverlayMapSelection
 import com.naos.pikminbee.health.EstimatedStepCounter
 import com.naos.pikminbee.health.EstimatedWalkStatus
-import com.naos.pikminbee.health.EstimatedStepLedger
-import com.naos.pikminbee.health.EstimatedStepsSyncWorker
-import com.naos.pikminbee.health.VirtualEstimateSyncPolicy
 import com.naos.pikminbee.data.AppPreferences
 import com.naos.pikminbee.data.PreparedRouteState
 import com.naos.pikminbee.data.RouteDraftState
@@ -71,6 +68,9 @@ object LocationStatus {
     val geometry = MutableStateFlow<List<Coordinate>>(emptyList())
     val overlayVisible = MutableStateFlow(false)
     val progress = MutableStateFlow(WalkingProgressSnapshot())
+    /** Opaque, process-local event from a confirmed natural non-loop arrival.
+     *  No coordinate, timestamp or persistent history is sent to paired Web. */
+    val routeArrivalId = MutableStateFlow<String?>(null)
     /** Steps estimated for the current/most recently stopped virtual walk only. */
     val walkEstimatedSteps = MutableStateFlow(0L)
     /** Actual virtual route speed, not a sensor-measured walking pace. */
@@ -164,8 +164,6 @@ class MockLocationService : Service() {
     private val speedPlayback = WalkSpeedPlayback(WalkSpeedProfile.preset(WalkSpeedPreset.DEFAULT))
     private val mockGpsJitter = MockGpsJitter()
     private var estimatedStepPersistTicker = 0
-    private var sessionStartMillis = 0L
-    private var sessionStartSteps = 0L
     private var walkOriginSteps = 0L
     private var speedMetersPerSecond = WalkSpeedPreset.DEFAULT.metresPerSecond
     private var loopRoute = false
@@ -187,6 +185,7 @@ class MockLocationService : Service() {
             val deltaSeconds = ((now - previousTickMillis) / 1000.0).coerceIn(0.0, 2.0)
             previousTickMillis = now
             var advancedMetres = 0.0
+            var arrivedThisTick = false
             if (phase == WalkPhase.MOVING && track.size > 1) {
                 val movement = RouteTickProgression.advance(
                     walkingDistanceMeters, trackLengthMeters,
@@ -203,9 +202,6 @@ class MockLocationService : Service() {
                         refreshNotification()
                         estimatedStepPersistTicker = 0
                     }
-                    // Health Connect does not receive live GPS ticks. Persist a
-                    // bounded, explicitly opted-in estimate chunk per minute.
-                    checkpointEstimatedSession()
                 }
                 // Loop progress wraps, but ALL completed laps still accrue exact
                 // route distance and trigger any crossed speed segment boundary.
@@ -228,12 +224,12 @@ class MockLocationService : Service() {
                     LocationStatus.appliedSpeedKmh.value =
                         RouteSurfaceStatusPolicy.visibleRouteSpeedKmh(
                             phase, speedMetersPerSecond * 3.6)
-                    finishEstimatedSession()
+                    saveEstimatedSteps()
                     refreshNotification()
                     if (RouteCompletionAlertPolicy.shouldAlert(
                             previousPhase, phase, loopRoute, routeArrivalNotified)) {
                         routeArrivalNotified = true
-                        showRouteArrivalNotification()
+                        arrivedThisTick = true
                     }
                 }
             }
@@ -259,6 +255,14 @@ class MockLocationService : Service() {
                     LocationStatus.appliedSpeedKmh.value / 3.6,
                     stopThresholds, loopRoute,
                 )
+            }
+            // Publish only after the final test-provider fix has succeeded.
+            // Web and Android use the same event; notification permission is
+            // only needed for the Android system notification.
+            if (arrivedThisTick && providerActive && phase == WalkPhase.PARKED) {
+                if (mode == WalkMode.ROUTE)
+                    LocationStatus.routeArrivalId.value = java.util.UUID.randomUUID().toString()
+                showRouteArrivalNotification()
             }
             updateOverlay()
             lanController?.checkNetwork()
@@ -509,7 +513,7 @@ class MockLocationService : Service() {
                     return START_NOT_STICKY
                 }
                 clearOldArrivalNotification(RouteLifecycleChange.RESTORE_VIRTUAL_GPS)
-                finishEstimatedSession()
+                saveEstimatedSteps()
                 cancelFlowerPlanning()
                 phase = WalkPhase.PARKED
                 mode = null
@@ -540,8 +544,7 @@ class MockLocationService : Service() {
             }
             ACTION_PAUSE_ROUTE -> {
                 if (phase == WalkPhase.MOVING) {
-                    // Flush this moving interval before entering a paused state.
-                    checkpointEstimatedSession(force = true)
+                    saveEstimatedSteps()
                     phase = WalkPhase.PAUSED
                     LocationStatus.phase.value = phase
                     LocationStatus.display.value = "步行已暫停"
@@ -554,12 +557,6 @@ class MockLocationService : Service() {
             ACTION_RESUME_ROUTE -> {
                 if (phase == WalkPhase.PAUSED) {
                     previousTickMillis = SystemClock.elapsedRealtime()
-                    // Exclude the paused interval from the next HC estimate
-                    // record after a successful pause checkpoint.
-                    val currentSteps = estimatedSteps.snapshot().estimatedSteps
-                    if (sessionStartSteps == currentSteps && sessionStartMillis > 0L) {
-                        sessionStartMillis = System.currentTimeMillis()
-                    }
                     phase = WalkPhase.MOVING
                     LocationStatus.phase.value = phase
                     LocationStatus.display.value = RouteSurfaceStatusPolicy.movingStatus(mode)
@@ -589,7 +586,6 @@ class MockLocationService : Service() {
                         stopThresholds, loopRoute,
                     )
                     target?.let { journal.record(it, force = true) }
-                    finishEstimatedSession()
                     saveEstimatedSteps()
                     refreshNotification()
                     updateOverlay()
@@ -598,7 +594,7 @@ class MockLocationService : Service() {
             }
             ACTION_CLEAR_ROUTE -> {
                 clearOldArrivalNotification(RouteLifecycleChange.CLEAR)
-                finishEstimatedSession()
+                saveEstimatedSteps()
                 cancelFlowerPlanning()
                 track = emptyList()
                 trackLengthMeters = 0.0
@@ -621,7 +617,7 @@ class MockLocationService : Service() {
                 return START_STICKY
             }
             ACTION_TELEPORT -> {
-                finishEstimatedSession()
+                saveEstimatedSteps()
                 val point = runCatching {
                     Coordinate(intent.getDoubleExtra(EXTRA_LAT, Double.NaN),
                         intent.getDoubleExtra(EXTRA_LON, Double.NaN))
@@ -677,49 +673,6 @@ class MockLocationService : Service() {
         }
     }
 
-
-    private fun checkpointEstimatedSession(force: Boolean = false, finish: Boolean = false) {
-        val start = sessionStartMillis
-        if (start <= 0L) return
-        val now = System.currentTimeMillis()
-        val ledger = EstimatedStepLedger(this)
-        // While walking, export no more than once per minute and only if the
-        // user enabled virtual-estimate sync. An unfinished walk is not a sensor
-        // record and is still labelled MANUAL_ENTRY by HealthConnectStepSync.
-        if (!force && !finish &&
-            !VirtualEstimateSyncPolicy.shouldCheckpoint(start, now, ledger.optIn())) return
-        val currentSteps = estimatedSteps.snapshot().estimatedSteps
-        val deltaSteps = VirtualEstimateSyncPolicy.unsavedSteps(currentSteps, sessionStartSteps)
-        if (deltaSteps == 0L) {
-            if (finish) sessionStartMillis = 0L
-            else if (force) sessionStartMillis = now
-            return
-        }
-        // Do not advance the checkpoint until the interval is durably saved:
-        // otherwise a full queue/disk error could permanently lose step counts.
-        val stored = runCatching {
-            ledger.add(start, maxOf(now, start + 1L), deltaSteps)
-        }.getOrElse { error ->
-            LocationStatus.display.value = "估算步數保存失敗：" + error.message
-            return
-        }
-        if (stored != null) {
-            sessionStartSteps = currentSteps
-            sessionStartMillis = if (finish) 0L else now
-            saveEstimatedSteps()
-            if (ledger.optIn()) {
-                runCatching { EstimatedStepsSyncWorker.enqueue(this) }
-                    .onFailure {
-                        LocationStatus.display.value =
-                            "Health Connect 同步排程失敗：" + it.message
-                    }
-            }
-        }
-    }
-
-    private fun finishEstimatedSession() {
-        checkpointEstimatedSession(finish = true)
-    }
 
     private fun saveEstimatedSteps() {
         val snapshot = estimatedSteps.snapshot()
@@ -815,13 +768,10 @@ class MockLocationService : Service() {
         }
         if (!ensureProvider()) return false
         clearOldArrivalNotification(RouteLifecycleChange.START)
-        finishEstimatedSession()
         // A newly configured stride affects only this new walk, never historical totals.
         estimatedSteps.setStrideForNextTravel(appPreferences.virtualStrideMetres())
         saveEstimatedSteps()
-        sessionStartMillis = System.currentTimeMillis()
-        sessionStartSteps = estimatedSteps.snapshot().estimatedSteps
-        walkOriginSteps = sessionStartSteps
+        walkOriginSteps = estimatedSteps.snapshot().estimatedSteps
         LocationStatus.walkEstimatedSteps.value = 0L
         track = planned
         trackLengthMeters = length
@@ -961,6 +911,7 @@ class MockLocationService : Service() {
      *  Expanding/hiding the floating controller or pausing must NOT clear it. */
     private fun clearOldArrivalNotification(change: RouteLifecycleChange) {
         if (!RouteSurfaceStatusPolicy.clearsPreviousArrival(change)) return
+        LocationStatus.routeArrivalId.value = null
         runCatching {
             getSystemService(NotificationManager::class.java)
                 .cancel(ARRIVAL_NOTIFICATION_ID)
@@ -1030,8 +981,10 @@ class MockLocationService : Service() {
         arrivalChange: RouteLifecycleChange = RouteLifecycleChange.RESTORE_REAL_GPS,
     ) {
         clearOldArrivalNotification(arrivalChange)
+        // A historical Android notification may survive service reclaim, but
+        // a disconnected Web session must never see it as a new arrival.
+        LocationStatus.routeArrivalId.value = null
         mockGpsJitter.reset()
-        finishEstimatedSession()
         saveEstimatedSteps()
         cancelFlowerPlanning()
         if (clearCheckpoint) journal.clear()

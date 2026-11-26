@@ -30,17 +30,12 @@ import android.view.WindowManager
 import android.view.ViewGroup
 import android.os.Handler
 import android.os.Looper
-import android.os.SystemClock
 import android.view.animation.AccelerateDecelerateInterpolator
-import com.naos.pikminbee.health.HealthConnectRealSteps
-import com.naos.pikminbee.health.PhysicalStepLedger
-import com.naos.pikminbee.health.PhysicalStepsStatus
 import android.widget.LinearLayout
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.Toast
 import android.widget.ScrollView
-import com.naos.pikminbee.health.EstimatedWalkStatus
 import android.widget.TextView
 import com.naos.pikminbee.data.AppPreferences
 import com.naos.pikminbee.data.PreparedRouteState
@@ -110,72 +105,20 @@ class FloatingControls(
     private val windows = context.getSystemService(WindowManager::class.java)
     private val stepsHandler = Handler(Looper.getMainLooper())
     private val dailyReadScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private var dailyReadJob: Job? = null
-    private val dailyStepsCache = FloatingDailyStepsCache()
 
     private val stepRefresh = object : Runnable {
         override fun run() {
             updateStepSummary()
-            requestDailySteps()
             refreshQuick()
             if (root != null) stepsHandler.postDelayed(this, 5_000L)
         }
     }
 
-    private fun refreshDailyPeriod(): FloatingDayKey {
-        val period = FloatingDayKey.now()
-        // Do not reuse a Health Connect aggregate across a midnight or a time-zone
-        // change on the same date; drop the old async query before it finishes.
-        if (dailyStepsCache.ensurePeriod(period)) {
-            dailyReadJob?.cancel()
-            dailyReadJob = null
-        }
-        return period
-    }
-
-    /** Never query Health Connect on each 5-second overlay refresh. */
-    private fun requestDailySteps(force: Boolean = false) {
-        if (root == null || !expanded) return
-        val period = refreshDailyPeriod()
-        if (dailyReadJob?.isActive == true) {
-            if (!force) return
-            dailyReadJob?.cancel()
-            dailyReadJob = null
-        }
-        val token = dailyStepsCache.begin(
-            period, SystemClock.elapsedRealtime(), force,
-        ) ?: return
-        // A newly opened overlay first hides its potentially stale aggregate.
-        // The sensor fallback stays available while Health Connect is being read.
-        updateStepSummary()
-        dailyReadJob = dailyReadScope.launch {
-            // hasReadPermission() and aggregate() remain on Dispatchers.IO. A
-            // null read means denied/revoked/unavailable, never a total of zero.
-            val aggregate = HealthConnectRealSteps.todayAggregate(context)
-            dailyStepsCache.complete(
-                token, period, FloatingDayKey.now(),
-                SystemClock.elapsedRealtime(), aggregate,
-            )
-            updateStepSummary()
-        }
-    }
-
     private fun updateStepSummary() {
-        val period = refreshDailyPeriod()
-        val today = period.date
-        val physical = PhysicalStepsStatus.state.value
-        // A legacy sensor records only the period when local tracking was active.
-        val currentLocal = if (physical.date == today &&
-            (physical.tracking || physical.todaySteps > 0L)) physical.todaySteps
-            else PhysicalStepLedger(context).todaysCount().takeIf { it > 0L }
         val hasWalk = lastMode != null && lastPhase in
             listOf(WalkPhase.MOVING, WalkPhase.PAUSED, WalkPhase.PARKED)
         val currentWalk = com.naos.pikminbee.location.LocationStatus.walkEstimatedSteps.value
-        val display = FloatingDailyStepsPolicy.render(
-            dailyStepsCache.currentValue(period, SystemClock.elapsedRealtime()),
-            currentLocal,
-            currentWalk.takeIf { hasWalk },
-        )
+        val display = FloatingDailyStepsPolicy.render(currentWalk.takeIf { hasWalk })
         quickSteps?.text = display
         quickSteps?.contentDescription = display
     }
@@ -766,7 +709,7 @@ class FloatingControls(
         quickSummary = summary
         overviewContent.addView(summary)
         val stepsLine = TextView(context).apply {
-            text = "今日步數 —（尚未取得）"
+            text = ""
             textSize = 11f
             setTextColor(colors().muted.toArgb())
             setPadding(dp(9), dp(1), dp(9), dp(7))
@@ -1040,23 +983,12 @@ class FloatingControls(
         panel?.visibility = if (expanded) View.VISIBLE else View.GONE
         beeButton?.visibility = if (expanded) View.GONE else View.VISIBLE
         if (expanded) {
-            // Opening the panel always revalidates HC permission and today's
-            // aggregate, rather than briefly presenting an old private value.
-            dailyReadJob?.cancel()
-            dailyReadJob = null
-            dailyStepsCache.invalidate()
             updateStepSummary()
             panel?.alpha = 0f
             panel?.translationY = dp(10).toFloat()
             panel?.animate()?.alpha(1f)?.translationY(0f)
                 ?.setDuration(NaosDesignSystem.FAST_MS.toLong())?.start()
             refreshQuick()
-            requestDailySteps(force = true)
-        } else {
-            // A collapsed overlay need not retain a cached health total.
-            dailyReadJob?.cancel()
-            dailyReadJob = null
-            dailyStepsCache.invalidate()
         }
         params?.let { placement ->
             placement.width = if (expanded)
@@ -1111,8 +1043,6 @@ class FloatingControls(
         overflowAction = null
         detail = OverlayDetail.NONE
         stepsHandler.removeCallbacks(stepRefresh)
-        dailyReadJob?.cancel()
-        dailyStepsCache.invalidate()
         dailyReadScope.cancel()
         logoAnimator?.cancel()
         logoAnimator = null

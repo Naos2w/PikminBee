@@ -377,6 +377,8 @@ body.remote-active .map-tool-group button{
 body.remote-active .map-tool-group button+button{border-top:1px solid var(--line)}
 body.remote-active .map-tool-group button:hover:not(:disabled){background:var(--accent-soft)}
 body.remote-active .map-tool-group button:focus-visible{outline-offset:-4px}
+body.remote-active #route-follow[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
+body.remote-active #route-follow.hidden{display:none}
 body.remote-active .map-tool-group .tool-text{display:none}
 body.remote-active #find-real{color:#357def}
 body.remote-active #find-real:disabled{color:var(--subtle)}
@@ -578,6 +580,22 @@ button.maplibregl-popup-close-button{
 button.maplibregl-popup-close-button:hover{background:var(--soft)}
 button.maplibregl-popup-close-button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 
+/* The map context action is a viewport overlay, never a map layout column. */
+.map-context-menu{position:fixed;z-index:45;min-width:154px;max-width:calc(100vw - 16px);padding:4px;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--text);box-shadow:var(--shadow)}
+.map-context-menu button{display:flex;align-items:center;gap:9px;width:100%;min-height:44px;padding:8px 12px;border:0;border-radius:8px;background:transparent;text-align:left;white-space:nowrap}
+.map-context-menu button:not(:disabled):hover{background:var(--soft)}
+.map-context-menu button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.map-context-menu button svg{width:18px;height:18px;flex:none;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.map-context-menu button:disabled{cursor:not-allowed;opacity:.5}
+
+/* A dismissible in-page notice works on the existing private LAN HTTP page. */
+.route-arrival-notice{position:fixed;z-index:46;top:calc(76px + env(safe-area-inset-top));left:50%;transform:translateX(-50%);width:min(340px,calc(100vw - 24px));display:flex;align-items:center;gap:12px;padding:12px;border:1px solid var(--line);border-radius:14px;background:var(--surface);color:var(--text);box-shadow:var(--shadow)}
+.route-arrival-notice strong{display:block;font-size:15px}
+.route-arrival-notice small{display:block;color:var(--sub);font-size:12px}
+.route-arrival-notice .arrival-copy{flex:1;min-width:0}
+.route-arrival-notice svg{width:24px;height:24px;flex:none;fill:none;stroke:var(--accent);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.route-arrival-notice button{min-height:44px;width:44px;flex:none;padding:0;font-size:20px}
+
 </style>
 </head>
 <body>
@@ -630,6 +648,7 @@ button.maplibregl-popup-close-button:focus-visible{outline:2px solid var(--accen
    </div>
    <div class="map-tool-group" aria-label="位置定位">
     <button type="button" id="follow" title="回到目前位置（不移動 GPS）" aria-label="回到目前位置"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2" fill="currentColor"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg><span class="tool-text">目前位置</span></button>
+    <button type="button" id="route-follow" class="hidden" aria-pressed="false" title="跟隨目前位置（僅移動地圖）" aria-label="跟隨目前位置（僅移動地圖）"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M9 12l2 2 4-4"/></svg><span class="tool-text">跟隨</span></button>
     <button type="button" id="find-real" title="查看手機授權的真實位置" aria-label="查看真實位置"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s7-5.2 7-12a7 7 0 0 0-14 0c0 6.8 7 12 7 12Z"/><circle cx="12" cy="9" r="2.5"/></svg><span class="tool-text">真實位置</span></button>
    </div>
   </div>
@@ -647,7 +666,7 @@ button.maplibregl-popup-close-button:focus-visible{outline:2px solid var(--accen
  </div>
 </section>
  <div id="map-wrap">
-  <div id="map" aria-label="點地圖選座標，需按下方按鈕才會變更手機位置"></div>
+  <div id="map" aria-label="點地圖選座標，右鍵顯示目前模式的操作；變更測試位置仍需確認"></div>
   <div id="map-warning" class="map-alert hidden" role="alert" aria-live="polite">
    <strong>地圖資料尚未載入</strong>
    <p id="map-warning-text">請確認手機可連上地圖服務，或點擊重新載入。</p>
@@ -659,7 +678,7 @@ button.maplibregl-popup-close-button:focus-visible{outline:2px solid var(--accen
  <div id="message" role="status" aria-live="polite"></div>
  <details class="help-details">
   <summary>地圖操作說明</summary>
-  <p>選位置不會自動瞬移或開始行走。底圖由 OpenFreeMap 提供，需要手機與瀏覽器可連線到圖磚服務；地圖失敗時仍可在控制區輸入經緯度。</p>
+  <p>選位置不會自動瞬移或開始行走。桌面地圖按右鍵可顯示目前模式的操作：瞬移至此仍需原有確認，路徑模式可加入路點。底圖由 OpenFreeMap 提供，需要手機與瀏覽器可連線到圖磚服務；地圖失敗時仍可在控制區輸入經緯度。</p>
   <p>座標支援十進位 DD（25.033, 121.5654）、度分秒 DMS（25°01′58.8″N 121°33′55.44″E）、度與小數分 DDM（25°1.980′N 121°33.924′E）。DMS/DDM 必須標示 N/S、E/W。</p>
  </details>
 </section>
@@ -719,13 +738,13 @@ button.maplibregl-popup-close-button:focus-visible{outline:2px solid var(--accen
   </div>
   <div id="speed-applied" class="muted" role="status" aria-live="polite"></div>
   <details class="advanced-details"><summary>進階：設定預設速度</summary><div class="row"><span id="default-speed" class="muted">目前預設：走路</span><button id="make-speed-default">設為預設速度</button></div></details>
-  <div id="pointcount" class="muted">0 個路點</div>
+  <div class="row"><div id="pointcount" class="muted">0 個路點</div><button id="save-route" type="button" aria-label="收藏目前路線" title="收藏目前路線"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M6 4h12v17l-6-4-6 4z" fill="none" stroke="currentColor" stroke-width="1.8"/></svg> 收藏</button></div>
   <ol id="route-order" class="route-order" tabindex="0"
     aria-label="路點順序，可捲動查看全部路點" aria-live="polite"></ol>
   <div class="sub">虛線為路點順序。</div>
-  <div id="routehint" class="sub">選擇起點及目的地，先規劃道路再開始。</div>
+  <div id="routehint" class="sub" role="status" aria-live="polite">選擇起點及目的地，先規劃道路再開始。</div>
   <div class="row"><button id="add">＋ 加入路點</button><button id="undo" aria-label="撤銷上一點" title="撤銷上一點">↶</button><button id="clear" aria-label="清除全部" title="清除全部"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 6h16 M9 3h6 M6 6l1.5 14h9L18 6 M10 10v6 M14 10v6"/></svg></button></div>
-  <div class="row"><button id="plan" class="primary">① 規劃並預覽道路</button></div>
+  <div class="row"><button id="plan" class="primary">① 規劃並預覽道路</button><button id="cancel-plan" class="hidden" type="button">取消規劃</button></div>
   <div id="previewinfo" class="hint hidden" aria-live="polite"></div>
   <label id="snapconfirmrow" class="hint warning hidden">
    <input type="checkbox" id="confirm-snap" style="width:auto;min-height:0;margin-right:7px">
@@ -788,6 +807,14 @@ button.maplibregl-popup-close-button:focus-visible{outline:2px solid var(--accen
  <div id="saved-list" class="saved-scroll" aria-live="polite">正在讀取收藏…</div>
 </dialog>
 </main>
+  <div id="map-context-menu" class="map-context-menu hidden" role="group" aria-label="地圖操作">
+   <button id="map-context-action" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><path id="map-context-icon" d="M13 2 4 14h7l-1 8 10-12h-7l1-8Z"/></svg><span id="map-context-label">瞬移至此</span></button>
+  </div>
+<div id="route-arrival-notice" class="route-arrival-notice hidden" role="status" aria-live="polite">
+ <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg>
+ <div class="arrival-copy"><strong>路徑已完成</strong><small>已抵達終點</small></div>
+ <button id="route-arrival-dismiss" type="button" aria-label="關閉路徑完成通知">×</button>
+</div>
 <script type="module" src="/controller.js"></script>
 </body>
 </html>

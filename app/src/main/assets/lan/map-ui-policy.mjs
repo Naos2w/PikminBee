@@ -37,6 +37,14 @@ export function currentPosition(state, physical) {
   return state?.mockActive && state.position ? {point:state.position, simulated:true, historical:false}
     : physical ? {point:physical,simulated:false,historical:!!physical.historical} : null;
 }
+/** A camera-only follow target from the already authorised, displayed route state. */
+export function routeCameraPoint(state, available) {
+  if (!available || state?.mode !== "ROUTE" || !["MOVING","PAUSED"].includes(state.phase) ||
+      state.mockActive !== true) return null;
+  const p = state.position;
+  return p && Number.isFinite(p.lat) && Number.isFinite(p.lon) &&
+    Math.abs(p.lat) <= 90 && Math.abs(p.lon) <= 180 ? p : null;
+}
 /** Use the confirmed phone test pace; older snapshots may omit the label. */
 export function appliedSpeedLabel(state) {
   if (!["MOVING","PAUSED"].includes(state?.phase)) return "";
@@ -46,6 +54,30 @@ export function appliedSpeedLabel(state) {
   return Number.isFinite(speed) && speed > 0
     ? (state.phase === "PAUSED" ? "恢復速度 " : "已套用 ") + Number(speed.toFixed(1)) + " km/h"
     : "速度待確認";
+}
+
+/** Consume only new, authoritative arrival events from the paired phone.
+ * The initial state is a baseline (no replay after pairing/refresh). Retain the
+ * last observed ID even when a poll has no arrival, so dismissals stay final. */
+export function createRouteArrivalNotice() {
+  let initialized = false, seen = null;
+  return {
+    reset() { initialized = false; seen = null; },
+    observe(state) {
+      const id = state?.routeArrivalId;
+      const arrival = state?.phase === "PARKED" && state?.mode === "ROUTE" &&
+        state?.mockActive === true && typeof id === "string" && id.length > 0 ? id : null;
+      if (!initialized) {
+        initialized = true;
+        seen = arrival;
+        return "hide";
+      }
+      if (!arrival) return "hide";
+      if (arrival === seen) return "none";
+      seen = arrival;
+      return "show";
+    }
+  };
 }
 
 /** The running route and the current draft are different states. A parked
