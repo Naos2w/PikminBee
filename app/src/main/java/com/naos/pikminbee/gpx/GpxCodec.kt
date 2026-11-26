@@ -62,9 +62,17 @@ object GpxCodec {
             throw GpxException("只支援 GPX 1.1 格式")
         }
 
-        val route = children(root, "rte").firstOrNull()
-        val track = children(root, "trk").firstOrNull()
+        val routes = children(root, "rte")
+        val tracks = children(root, "trk")
         val waypoints = children(root, "wpt")
+        // This importer produces exactly one saved route, never a partial multi-object import.
+        if (routes.size > 1 || tracks.size > 1 ||
+            (routes.isNotEmpty() && tracks.isNotEmpty()) ||
+            (waypoints.isNotEmpty() && (routes.isNotEmpty() || tracks.isNotEmpty()))) {
+            throw GpxException("此 GPX 含多組路線、軌跡或獨立地標；請先分成單一類型及單一路線的檔案再匯入")
+        }
+        val route = routes.singleOrNull()
+        val track = tracks.singleOrNull()
         val source: Element
         val items: List<Element>
         val sourceType: String
@@ -79,11 +87,11 @@ object GpxCodec {
             }
             track != null -> {
                 source = track
-                // A GPX track can have disconnected segments. Import the first segment only.
+                // A GPX track can have disconnected segments. Never silently discard any segment.
                 val segments = children(track, "trkseg")
-                items = segments.firstOrNull()?.let { children(it, "trkpt") }.orEmpty()
-                sourceType = "trk"
                 if (segments.size > 1) throw GpxException("此 GPX 含多段不連續軌跡，請先選取單一軌跡段")
+                items = segments.singleOrNull()?.let { children(it, "trkpt") }.orEmpty()
+                sourceType = "trk"
                 if (items.size > MAX_TRACK_POINTS) {
                     throw GpxException("GPX 軌跡超過 5,000 個點，請先在其他工具簡化")
                 }
