@@ -325,7 +325,7 @@ fun BeeSettingsScreen(
             "overlay" -> "懸浮只提供快捷控制；關閉視窗不停止路徑或 Wi-Fi。"
             "wifi" -> "只在可信私人 Wi-Fi 開啟，電腦輸入配對碼後須由手機核准。HTTP 未加密，勿公開連接埠。"
             "permission" -> "Android 定位與背景權限需由你明確授權，可隨時撤銷。"
-            "health" -> "今日步數讀取、實際感測器計步、真實步數同步及懸浮統計可獨立管理。路線估算不寫入 Health Connect，健康資料不傳送至 Web。"
+            "health" -> "今日步數讀取、實際感測器計步、真實步數同步及懸浮統計可獨立管理。路線估算可獨立選用分段同步至 Health Connect（手動估算紀錄），健康資料不傳送至 Web。"
             else -> "點分類查看及修改相關設定；返回可回到設定首頁。"
         }) },
         confirmButton = { TextButton(onClick = { helpOpen = false }) { Text("關閉") } },
