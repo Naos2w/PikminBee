@@ -1,10 +1,10 @@
 # Mogulei (development repository: PikminBee)
 
-**Working brand:** Mogulei, selected on 2026-11-26; official trademark clearance and production application ID remain pending under #169 and #177. Existing DEV/UAT package identities and repository URLs remain unchanged. See the [commercial readiness plan](docs/COMMERCIAL-READINESS.md) and [Mogulei brand/migration design](docs/MOGULEI-BRAND.md).
+**Project name:** Mogulei (selected on 2026-11-26). Existing DEV/UAT package identities and repository URLs remain unchanged.
 
 PikminBee is a free, ad-free Android location and route testing app built with Kotlin and Jetpack Compose.
 
-**Project status:** UAT 0.27.1 is signed and built; full physical-device acceptance remains open. Production 1.0.0 is on hold pending [Commercial Readiness Epic #168](https://github.com/Naos2w/PikminBee/issues/168). The [commercial development and release plan](docs/COMMERCIAL-READINESS.md) is the current roadmap. Existing flower records, legacy route metadata and GPX compatibility remain readable/exportable; retired recognition/game-specific functions must not be reintroduced. No public production release or live advertising is approved.
+**Project status:** develop prepares UAT 0.33.1 / DEV 0.33.2; device acceptance remains open. This is a personal, free, ad-free development project. Existing flower records, legacy route metadata and GPX compatibility remain readable/exportable; previously retired flower recognition and dedicated flower route modes remain retired.
 
 - Maps: OpenFreeMap Liberty/Dark via MapLibre; optional official Google Maps SDK (requires your own API key).
 - Interface: iOS-27-inspired frosted controls with accessible contrasts and a clear light/dark theme.
@@ -16,7 +16,7 @@ PikminBee is a free, ad-free Android location and route testing app built with K
 
 ## Development tracking
 
-Use [GitHub Issues](https://github.com/Naos2w/PikminBee/issues) as the only active task ledger. Review screen and function proposals in [V4 Epic #140](https://github.com/Naos2w/PikminBee/issues/140) and its linked issues. [PikminBee Development (Project #1)](https://github.com/users/Naos2w/projects/1) is the verified planning board, with separate design review and UAT views; see [task navigation and migration history](docs/TODO.md). The current priority is [commercial feasibility #169](https://github.com/Naos2w/PikminBee/issues/169), followed by sensitive-function/permission cleanup #171 and legal/privacy/onboarding #170. Do not equate source merge or signed APK packaging with device acceptance or commercial release clearance.
+Use [GitHub Issues](https://github.com/Naos2w/PikminBee/issues) as the only active task ledger. Review screen and function proposals in [V4 Epic #140](https://github.com/Naos2w/PikminBee/issues/140) and its linked issues. [PikminBee Development (Project #1)](https://github.com/users/Naos2w/projects/1) is the verified planning board, with separate design review and UAT views; see [task navigation and migration history](docs/TODO.md). The current priority is existing-feature regression fixes, usability, reliability and device UAT. Do not equate source merge or signed APK packaging with physical-device acceptance.
 
 ## Setup
 
@@ -35,6 +35,6 @@ Only set PikminBee as your device's mock location application when intentionally
 
 `develop` → **merge commit** → `staging` (UAT)
 
-`staging` → **merge commit** → `main` (PROD; currently on hold under #168)
+`main` remains reserved; no automatic promotion or public release.
 
 See [branch policy](docs/BRANCHING.md). Repository: https://github.com/Naos2w/PikminBee.

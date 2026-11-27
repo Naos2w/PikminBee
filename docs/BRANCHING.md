@@ -2,9 +2,9 @@
 
 Three long-lived branches, because UAT is explicitly a separate release gate.
 
-## Current release hold (owner decision 2026-11-26)
+## Personal development scope (owner decision 2026-11-27)
 
-[Commercial Readiness plan](COMMERCIAL-READINESS.md) and [Epic #168](https://github.com/Naos2w/PikminBee/issues/168) supersede the previous immediate 1.0.0 release decision. Continue feature development through develop and separately approved fixed-signer UAT on staging. Do not merge staging into main, create a production release/tag, publish a production APK/AAB, or enable live advertising while the relevant gates remain unmet. Require recorded evidence and explicit owner approval for production release, and separate AdMob approval/owner authorization before live ads. #167 preserves prior release infrastructure work; do not treat that PR's CI as release authorization.
+The project is maintained for personal use. Continue feature development through develop and separately approved fixed-signer UAT on staging. Keep main reserved; do not promote to main, create public releases/tags or publish public APK/AAB artifacts without a separate explicit owner decision. Ordinary CI, source verification and device acceptance remain required.
 
 Use only the personal GitHub account Naos2w and its verified personal commit identity for this repository. Verify actual Git author/committer and API/CLI account before writes; use the personal Projects MCP. Do not switch the shared CLI default or use/notify unrelated accounts. Stop on identity mismatch.
 
@@ -39,10 +39,10 @@ Use only the personal GitHub account Naos2w and its verified personal commit ide
 - Ruleset for `staging`: require PR, require status check, require merge commit.
 - Ruleset for `main`: require PR, require status check, require merge commit.
 - One CI workflow also rejects an incorrect source → target PR pairing.
-- Release tags `vX.Y.Z` only from `main`, manually after all applicable release gates in #168 and explicit owner approval (not just CI/UAT).
+- Release tags are not part of personal development or routine UAT. Preserve existing Git history and obtain separate owner authorization for any future change.
 - If private-repository plan entitlements prevent enforcement of branch rulesets, keep the CI source-branch guard and make the PR merge-type check manual until plan support is enabled.
 
-**Hotfixes** begin with `fix/* → develop`, then promote through staging → main, keeping the branch ancestry straightforward.
+**Hotfixes** begin with `fix/* → develop`, then promote to staging only for explicitly approved UAT.
 
 **CI (cost control):** One Gradle job, one JVM version, no matrix, no deploy server, no scheduled runs. Draft PRs skip the Android runner. When a PR is marked ready for review, Gradle runs unit tests and lint (without packaging APK). Synchronised updates while a PR is ready trigger verification; concurrency cancels superseded runs. `workflow_dispatch` allows explicit source verification; only if `package_apk=true` does it build and upload a UAT APK (7-day retention). Do not mark Draft PRs ready until a feature is reviewed locally. GitHub Actions is a final PR gate, not the development feedback loop.
 
