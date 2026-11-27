@@ -3,6 +3,7 @@ package com.naos.pikminbee.data
 import android.content.Context
 import com.naos.pikminbee.BuildConfig
 import com.naos.pikminbee.domain.Coordinate
+import com.naos.pikminbee.domain.RoutePointDraft
 import com.naos.pikminbee.ui.NaosThemeFamily
 import com.naos.pikminbee.ui.NaosGlassMaterial
 import com.naos.pikminbee.domain.WalkMode
@@ -42,7 +43,12 @@ data class SavedPlace(
     val createdAtMillis: Long = id,
 )
 
-data class RouteDraftSnapshot(val stops: List<Coordinate>, val revision: Long)
+data class RouteDraftSnapshot(
+    val stops: List<Coordinate>, val revision: Long,
+    val origin: Coordinate? = null, val loop: Boolean = false,
+)
+
+data class RoutePlanningNotice(val text: String = "", val error: Boolean = false)
 
 /** One in-process draft state, observed by the phone UI, web API and planner. */
 object RouteDraftState {
@@ -54,11 +60,14 @@ object RouteDraftState {
     val planning: kotlinx.coroutines.flow.StateFlow<Boolean> = mutablePlanning
     private var planningSequence = 0L
     private var planningOwner: Long? = null
+    private val mutablePlanningNotice = MutableStateFlow(RoutePlanningNotice())
+    val planningNotice: kotlinx.coroutines.flow.StateFlow<RoutePlanningNotice> = mutablePlanningNotice
 
     @Synchronized fun beginPlanning(revision: Long): Long? {
         if (planningOwner != null || mutableSnapshot.value.revision != revision) return null
         val owner = ++planningSequence
         planningOwner = owner
+        mutablePlanningNotice.value = RoutePlanningNotice("正在規劃可步行道路…")
         mutablePlanning.value = true
         return owner
     }
@@ -66,27 +75,45 @@ object RouteDraftState {
     @Synchronized internal fun canCommit(expectedRevision: Long): Boolean =
         planningOwner == null && mutableSnapshot.value.revision == expectedRevision
 
-    @Synchronized fun finishPlanning(owner: Long) {
+    @Synchronized fun isPlanning(owner: Long): Boolean = planningOwner == owner
+
+    @Synchronized fun finishPlanning(owner: Long, notice: RoutePlanningNotice? = null) {
         if (planningOwner != owner) return
+        if (notice != null) mutablePlanningNotice.value = notice
+        else if (mutablePlanningNotice.value.text == "正在規劃可步行道路…")
+            mutablePlanningNotice.value = RoutePlanningNotice()
         planningOwner = null
         mutablePlanning.value = false
     }
 
+    /** Cancel presentation/acceptance; an in-flight HTTP request may finish on its own. */
+    @Synchronized fun cancelPlanning(): Boolean {
+        val owner = planningOwner ?: return false
+        finishPlanning(owner, RoutePlanningNotice("已取消規劃；不會採用舊回應"))
+        return true
+    }
+
     /** All callers hold the same draft lock while persisting and publishing. */
-    @Synchronized internal fun publish(points: List<Coordinate>) {
+    @Synchronized internal fun publish(
+        points: List<Coordinate>,
+        origin: Coordinate? = mutableSnapshot.value.origin,
+        loop: Boolean = mutableSnapshot.value.loop,
+    ) {
         val previous = mutableSnapshot.value
-        if (previous.stops == points) return
+        if (previous.stops == points && previous.origin == origin && previous.loop == loop) return
         val immutable = points.toList()
         PreparedRouteState.route.value = null
-        mutableSnapshot.value = RouteDraftSnapshot(immutable, previous.revision + 1)
+        mutablePlanningNotice.value = RoutePlanningNotice()
+        mutableSnapshot.value = RouteDraftSnapshot(immutable, previous.revision + 1, origin, loop)
         routeStops.value = immutable
     }
     val flowerStops = MutableStateFlow<List<Coordinate>>(emptyList())
     private var initialized = false
 
-    @Synchronized fun initialize(route: List<Coordinate>, flowers: List<Coordinate>) {
+    @Synchronized fun initialize(route: List<Coordinate>, flowers: List<Coordinate>,
+        origin: Coordinate? = null, loop: Boolean = false) {
         if (initialized) return
-        publish(route)
+        publish(route, origin, loop)
         flowerStops.value = flowers
         initialized = true
     }
@@ -148,7 +175,8 @@ class AppPreferences(private val context: Context) {
     private val prefs = context.getSharedPreferences("pikminbee_preferences", Context.MODE_PRIVATE)
 
     init {
-        RouteDraftState.initialize(loadPoints("route_draft"), loadPoints("flower_draft"))
+        RouteDraftState.initialize(loadPoints("route_draft"), loadPoints("flower_draft"),
+            loadRouteOrigin(), prefs.getBoolean("route_draft_loop", false))
         SavedRouteState.initialize(readSavedRoutes())
         WalkSpeedState.initialize(WalkSpeedPreset.fromSavedDefault(
             prefs.getString("walk_speed_default", null),
@@ -361,7 +389,8 @@ class AppPreferences(private val context: Context) {
     fun saveRouteDraft(points: List<Coordinate>) {
         synchronized(RouteDraftState) {
             if (RouteDraftState.snapshot().stops != points) {
-                savePoints("route_draft", points)
+                val current = RouteDraftState.snapshot()
+                persistRouteDraft(points, current.origin, current.loop)
                 RouteDraftState.publish(points)
             }
         }
@@ -374,6 +403,35 @@ class AppPreferences(private val context: Context) {
             saveRouteDraft(points)
             true
         }
+    /** Explicit plan anchors/options are draft data, not a live location share. */
+    fun saveRouteOptionsIfCurrent(expectedRevision: Long, origin: Coordinate?, loop: Boolean): Boolean =
+        synchronized(RouteDraftState) {
+            if (!RouteDraftState.canCommit(expectedRevision)) return@synchronized false
+            val stops = RouteDraftState.snapshot().stops
+            persistRouteDraft(stops, origin, loop)
+            RouteDraftState.publish(stops, origin, loop)
+            true
+        }
+
+    /** Commit the new origin and all remaining stops together. No GPS side effect. */
+    fun promoteFirstRouteStopIfCurrent(expectedRevision: Long): Boolean =
+        synchronized(RouteDraftState) {
+            if (!RouteDraftState.canCommit(expectedRevision)) return@synchronized false
+            val draft = RouteDraftState.snapshot()
+            val next = RoutePointDraft.promoteFirst(draft.stops) ?: return@synchronized false
+            persistRouteDraft(next.stops, next.origin, draft.loop)
+            RouteDraftState.publish(next.stops, next.origin, draft.loop)
+            true
+        }
+
+    fun loadSavedRouteDraftIfCurrent(expectedRevision: Long, route: SavedRoute): Boolean =
+        synchronized(RouteDraftState) {
+            if (!RouteDraftState.canCommit(expectedRevision)) return@synchronized false
+            persistRouteDraft(route.stops, route.origin, route.loop)
+            RouteDraftState.publish(route.stops, route.origin, route.loop)
+            true
+        }
+
     fun saveFlowerDraft(points: List<Coordinate>) {
         synchronized(RouteDraftState) {
             savePoints("flower_draft", points)
@@ -390,6 +448,25 @@ class AppPreferences(private val context: Context) {
         }
     }.getOrDefault(emptyList())
 
+    private fun loadRouteOrigin(): Coordinate? = runCatching {
+        val stored = prefs.getString("route_draft_origin", null) ?: return@runCatching null
+        val item = JSONObject(stored)
+        Coordinate(item.getDouble("lat"), item.getDouble("lon"))
+    }.getOrNull()
+
+    /** Keep the legacy waypoint JSON format; write the associated draft options in one edit. */
+    private fun persistRouteDraft(points: List<Coordinate>, origin: Coordinate?, loop: Boolean) {
+        require(points.size <= RoutePointDraft.MAX_STOPS)
+        val json = JSONArray()
+        points.forEach { json.put(JSONObject().put("lat", it.latitude).put("lon", it.longitude)) }
+        val edit = prefs.edit().putString("route_draft", json.toString())
+            .putBoolean("route_draft_loop", loop)
+        if (origin == null) edit.remove("route_draft_origin")
+        else edit.putString("route_draft_origin", JSONObject()
+            .put("lat", origin.latitude).put("lon", origin.longitude).toString())
+        edit.apply()
+    }
+
     private fun savePoints(key: String, points: List<Coordinate>) {
         require(points.size <= 15)
         val json = JSONArray()
@@ -397,13 +474,35 @@ class AppPreferences(private val context: Context) {
         prefs.edit().putString(key, json.toString()).apply()
     }
 
+    /**
+     * Capture both persisted libraries under their existing in-process writer
+     * locks, in a fixed order (places then routes). Fail closed on damaged
+     * records or an out-of-sync route cache; this is not a disk durability check.
+     */
+    internal fun savedLibrarySnapshot(): SavedDataBackupCodec.Snapshot =
+        synchronized(SavedPlacesLock) {
+            synchronized(SavedRouteState) {
+                val snapshot = SavedLibrarySnapshotReader.read(
+                    prefs.getString("places", null),
+                    prefs.getString("saved_routes", null),
+                )
+                check(snapshot.routes == SavedRouteState.routes.value) {
+                    "Saved route storage and cache differ"
+                }
+                snapshot
+            }
+        }
+
     fun savedRoutes(): List<SavedRoute> = SavedRouteState.routes.value
 
-    fun addSavedRoute(name: String, mode: WalkMode, stops: List<Coordinate>): SavedRoute =
+    fun addSavedRoute(
+        name: String, mode: WalkMode, stops: List<Coordinate>,
+        origin: Coordinate? = null, loop: Boolean = false,
+    ): SavedRoute =
         synchronized(SavedRouteState) {
             val current = SavedRouteState.routes.value
             require(current.size < 100) { "最多可收藏 100 條路線，請先刪除不需要的路線" }
-            val route = SavedRoute.create(name, mode, stops)
+            val route = SavedRoute.create(name, mode, stops, origin, loop)
             val next = listOf(route) + current
             persistSavedRoutes(next)
             SavedRouteState.routes.value = next
@@ -432,7 +531,9 @@ class AppPreferences(private val context: Context) {
 
     fun loadSavedRouteIntoDraft(route: SavedRoute) {
         if (route.mode == WalkMode.FLOWERS) saveFlowerDraft(route.stops)
-        else saveRouteDraft(route.stops)
+        else check(loadSavedRouteDraftIfCurrent(RouteDraftState.snapshot().revision, route)) {
+            "路線已變更或規劃中，請重新載入收藏"
+        }
     }
 
     private fun readSavedRoutes(): List<SavedRoute> = runCatching {
@@ -453,6 +554,10 @@ class AppPreferences(private val context: Context) {
                     mode = WalkMode.valueOf(entry.getString("mode")),
                     stops = stops,
                     createdAtMillis = entry.optLong("createdAt", 0L),
+                    origin = entry.optJSONObject("origin")?.let { point ->
+                        runCatching { Coordinate(point.getDouble("lat"), point.getDouble("lon")) }.getOrNull()
+                    },
+                    loop = entry.optBoolean("loop", false),
                 )
             }.getOrNull()
         }
@@ -471,6 +576,9 @@ class AppPreferences(private val context: Context) {
                     .put("name", route.name)
                     .put("mode", route.mode.name)
                     .put("createdAt", route.createdAtMillis)
+                    .put("origin", route.origin?.let { JSONObject().put("lat", it.latitude).put("lon", it.longitude) }
+                        ?: JSONObject.NULL)
+                    .put("loop", route.loop)
                     .put("points", points))
             }
         }

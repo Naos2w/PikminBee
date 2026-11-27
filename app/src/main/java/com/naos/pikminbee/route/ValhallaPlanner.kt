@@ -2,18 +2,23 @@ package com.naos.pikminbee.route
 
 import com.naos.pikminbee.domain.Coordinate
 import com.naos.pikminbee.domain.WalkingGeometry
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
+import java.net.ConnectException
+import java.net.SocketTimeoutException
 import java.net.URL
 import java.util.Locale
 
 /** Rate-limited community Valhalla service: no SLA and no straight-line fallback. */
 object ValhallaPlanner {
-    class RouteException(message: String) : Exception(message)
+    class RouteException(message: String, val retryable: Boolean = false) : Exception(message)
     private const val ENDPOINT = "https://valhalla1.openstreetmap.de/route"
     private const val OPTIMISE_ENDPOINT = "https://valhalla1.openstreetmap.de/optimized_route"
     private const val MAX_RESPONSE_BYTES = 3_000_000
@@ -34,7 +39,9 @@ object ValhallaPlanner {
 
     suspend fun plan(points: List<Coordinate>): List<Coordinate> = planDetailed(points).geometry
 
-    suspend fun planDetailed(points: List<Coordinate>): RoadPlan = withContext(Dispatchers.IO) {
+    suspend fun planDetailed(
+        points: List<Coordinate>, isStillWanted: () -> Boolean = { true },
+    ): RoadPlan = withContext(Dispatchers.IO) {
         if (points.size !in 2..16) throw RouteException("請選擇至少兩個、最多十六個路線點")
         if (WalkingGeometry.lengthMeters(points) > 40_000.0) throw RouteException("路線超過 40 公里")
         val key = points.joinToString("|") {
@@ -43,11 +50,8 @@ object ValhallaPlanner {
         synchronized(cache) {
             cache[key]?.takeIf { System.currentTimeMillis() - it.first < 3_600_000L }?.second
         }?.let { return@withContext it }
-        synchronized(cache) {
-            val now = System.currentTimeMillis()
-            if (now - lastRequestMillis < 2_000L) throw RouteException("道路查詢過於頻繁，請稍後重試")
-            lastRequestMillis = now
-        }
+        ensureActive()
+        if (!isStillWanted()) throw CancellationException("規劃已取消")
         val locations = JSONArray()
         points.forEach { point ->
             locations.put(JSONObject().put("lat", point.latitude).put("lon", point.longitude)
@@ -56,7 +60,22 @@ object ValhallaPlanner {
         val json = JSONObject().put("locations", locations)
             .put("costing", "pedestrian").put("directions_type", "none")
             .put("shape_format", "polyline6").put("units", "km").toString()
-        val result = parseDetailedResponse(post(json), points)
+        reserveRequest()
+        val response = try {
+            post(json)
+        } catch (first: RouteException) {
+            if (!first.retryable) throw first
+            // One bounded retry for transient connection/server failures only.
+            // Respect the existing rate limit and do not retry after cancellation.
+            delay(2_500L)
+            ensureActive()
+            if (!isStillWanted()) throw CancellationException("規劃已取消")
+            reserveRequest()
+            post(json)
+        }
+        ensureActive()
+        if (!isStillWanted()) throw CancellationException("規劃已取消")
+        val result = parseDetailedResponse(response, points)
         synchronized(cache) {
             cache[key] = System.currentTimeMillis() to result
             while (cache.size > 8) cache.remove(cache.keys.first())
@@ -118,6 +137,12 @@ object ValhallaPlanner {
             if (loop) emptyList() else listOf(stops.last())
     }
 
+    private fun reserveRequest() = synchronized(cache) {
+        val now = System.currentTimeMillis()
+        if (now - lastRequestMillis < 2_000L) throw RouteException("道路查詢過於頻繁，請稍後重試")
+        lastRequestMillis = now
+    }
+
     private fun post(json: String, endpoint: String = ENDPOINT): String {
         val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
@@ -132,8 +157,12 @@ object ValhallaPlanner {
             conn.outputStream.use { it.write(json.toByteArray(Charsets.UTF_8)) }
             val status = conn.responseCode
             if (status != 200) {
-                val detail = conn.errorStream?.bufferedReader()?.use { it.readText().take(180) }.orEmpty()
-                throw RouteException("道路服務 HTTP $status：$detail")
+                conn.errorStream?.close()
+                throw when (status) {
+                    429 -> RouteException("道路服務限流（HTTP 429），請稍後重試")
+                    500, 502, 503, 504 -> RouteException("道路服務暫時無法使用（HTTP $status）", retryable = true)
+                    else -> RouteException("道路服務無法規劃（HTTP $status），請檢查路點或稍後重試")
+                }
             }
             conn.inputStream.use { stream ->
                 val output = ByteArrayOutputStream()
@@ -148,6 +177,10 @@ object ValhallaPlanner {
             }
         } catch (e: RouteException) {
             throw e
+        } catch (e: SocketTimeoutException) {
+            throw RouteException("道路服務連線或讀取逾時", retryable = true)
+        } catch (e: ConnectException) {
+            throw RouteException("暫時無法連接道路服務", retryable = true)
         } catch (e: Exception) {
             throw RouteException("道路查詢失敗：" + (e.message ?: "網路無法連線"))
         } finally {
@@ -167,11 +200,13 @@ object ValhallaPlanner {
         val snapDistances = MutableList(stops.size) { 0.0 }
         repeat(legs.length()) { leg ->
             val vertices = decodePolyline6(legs.getJSONObject(leg).optString("shape"))
-            if (vertices.size < 2) throw RouteException("路線缺少有效節點")
+            if (vertices.size < 2) throw RouteException("第 ${leg + 1} 段路線缺少有效節點")
             val snapStart = WalkingGeometry.distanceMeters(vertices.first(), stops[leg])
             val snapEnd = WalkingGeometry.distanceMeters(vertices.last(), stops[leg + 1])
             if (snapStart > MAX_SNAP_METERS || snapEnd > MAX_SNAP_METERS) {
-                throw RouteException("附近 200 公尺內找不到可步行的道路或步道，請稍微調整路點")
+                val invalidAnchor = if (snapStart > MAX_SNAP_METERS) leg else leg + 1
+                val label = if (invalidAnchor == 0) "起點" else "第 ${invalidAnchor} 個路點"
+                throw RouteException("$label 附近 200 公尺內找不到可步行道路，請稍微調整位置")
             }
             // At a junction, adjacent legs may snap differently. Show the
             // larger measured offset instead of hiding the discrepancy.

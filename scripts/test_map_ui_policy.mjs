@@ -1,7 +1,57 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
-import { BRIGHT_STYLE_URL, samePosition, currentPosition, createCameraFocus, visibleMapPadding, countryFlagPath, destinationTime, routePresentation, appliedSpeedLabel } from "../app/src/main/assets/lan/map-ui-policy.mjs";
+import { BRIGHT_STYLE_URL, samePosition, currentPosition, createCameraFocus, visibleMapPadding, countryFlagPath, destinationTime, routePresentation, appliedSpeedLabel, createRouteArrivalNotice, routeCameraPoint, routeLegGeometry, sessionRenewalPrompt } from "../app/src/main/assets/lan/map-ui-policy.mjs";
+
+test("active route leg is display-only and disappears outside the current online route",()=>{
+  const a={lat:0,lon:0}, b={lat:0,lon:1}, c={lat:0,lon:2};
+  const state={mode:"ROUTE",phase:"MOVING",completedGeometry:[a,b],activeLegGeometry:[b,c]};
+  assert.deepEqual(routeLegGeometry(state,"ROUTE"),{completed:[a,b],active:[b,c]});
+  assert.deepEqual(routeLegGeometry({...state,phase:"PAUSED"},"ROUTE"),{completed:[a,b],active:[b,c]});
+  for(const [s,m,online] of [[state,"TELEPORT",true],[state,"ROUTE",false],[{...state,phase:"PARKED"},"ROUTE",true],[{...state,mode:"TELEPORT"},"ROUTE",true]]) {
+    assert.deepEqual(routeLegGeometry(s,m,online),{completed:[],active:[]});
+  }
+  assert.deepEqual(routeLegGeometry({...state,activeLegGeometry:[b,{lat:Infinity,lon:0}]},"ROUTE").active,[]);
+});
+test("renewal prompt appears within five minutes, requires explicit action and never extends expired access",()=>{
+  assert.deepEqual(sessionRenewalPrompt(301,false,false,true),{visible:false,canRequest:false});
+  assert.deepEqual(sessionRenewalPrompt(300,false,false,true),{visible:true,canRequest:true});
+  assert.deepEqual(sessionRenewalPrompt(120,true,false,true),{visible:false,canRequest:true});
+  assert.deepEqual(sessionRenewalPrompt(120,false,true,true),{visible:true,canRequest:false});
+  assert.deepEqual(sessionRenewalPrompt(120,false,false,false),{visible:true,canRequest:false});
+  assert.deepEqual(sessionRenewalPrompt(0,false,true,true),{visible:false,canRequest:false});
+});
+test("route camera following is restricted to the current active route and healthy display",()=>{
+  const point={lat:0,lon:0};
+  const active={mode:"ROUTE",phase:"MOVING",mockActive:true,position:point};
+  assert.deepEqual(routeCameraPoint(active,true),point);
+  assert.deepEqual(routeCameraPoint({...active,phase:"PAUSED"},true),point);
+  assert.equal(routeCameraPoint(active,false),null);
+  for (const state of [null,{...active,phase:"PARKED"},{...active,phase:"IDLE"},
+    {...active,mode:"TELEPORT"},{...active,mockActive:false},
+    {...active,position:null},{...active,position:{lat:91,lon:0}},
+    {...active,position:{lat:0,lon:Infinity}}]) assert.equal(routeCameraPoint(state,true),null);
+});
+
+test("route arrival notices consume only new authoritative events",()=>{
+  const notice=createRouteArrivalNotice();
+  const parked={phase:"PARKED",mode:"ROUTE",mockActive:true};
+  const arrived={...parked,routeArrivalId:"first"};
+  assert.equal(notice.observe(arrived),"hide","initial historical event is a baseline");
+  assert.equal(notice.observe(arrived),"none");
+  assert.equal(notice.observe({...parked,progress:{fraction:1}}),"hide","progress alone is not an arrival");
+  assert.equal(notice.observe({...arrived,phase:"MOVING"}),"hide");
+  assert.equal(notice.observe({...arrived,phase:"PAUSED"}),"hide");
+  assert.equal(notice.observe({...arrived,mockActive:false}),"hide");
+  assert.equal(notice.observe({...arrived,mode:"TELEPORT"}),"hide");
+  assert.equal(notice.observe({...arrived,routeArrivalId:"second"}),"show");
+  assert.equal(notice.observe({...arrived,routeArrivalId:"second"}),"none","dismissal stays final");
+  assert.equal(notice.observe(parked),"hide");
+  assert.equal(notice.observe({...arrived,routeArrivalId:"second"}),"none");
+  notice.reset();
+  assert.equal(notice.observe({...arrived,routeArrivalId:"third"}),"hide","renewal/reload cannot replay");
+  assert.equal(notice.observe({...arrived,routeArrivalId:"fourth"}),"show");
+});
 
 test("display only the confirmed applied speed and distinguish resume pace", () => {
   const state = {phase:"MOVING", speedPreset:"WALK", speedKmh:1.4, speedAppliedKmh:5.2};
@@ -59,6 +109,9 @@ test("parked route A cannot hide new draft or prepared route B", () => {
   const ready = routePresentation({...stopped,previews:{ROUTE:preview}},"ROUTE",false);
   assert.equal(ready.prepared,preview);
   assert.deepEqual(ready.road,newRoad);
+  const stale = routePresentation({...stopped,previews:{ROUTE:{...preview,canStart:false}}},"ROUTE",false);
+  assert.deepEqual(stale.road,newRoad,"stale start retains drawing");
+  assert.equal(stale.prepared.canStart,false);
   assert.deepEqual(ready.draft,[]);
   for (const state of [{...stopped,planning:true,previews:{ROUTE:preview}},
                        {...stopped,previews:{ROUTE:{...preview,loop:true}}}]) {

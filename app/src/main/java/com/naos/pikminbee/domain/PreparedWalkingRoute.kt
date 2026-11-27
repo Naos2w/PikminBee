@@ -21,11 +21,15 @@ data class PreparedWalkingRoute(
     val originSnapMetres: Double get() = snapMetres.firstOrNull() ?: 0.0
     val requiresSnapConfirmation: Boolean get() = maxSnapMetres > 40.0
 
+    /** The drawing belongs to the current draft even if the live start later moves. */
+    fun matchesDraft(currentStops: List<Coordinate>, currentLoop: Boolean): Boolean =
+        stops == currentStops && loop == currentLoop
+
     fun isCurrent(
         currentOrigin: Coordinate?,
         currentStops: List<Coordinate>,
         currentLoop: Boolean = loop,
     ): Boolean =
-        currentOrigin != null && stops == currentStops && loop == currentLoop &&
+        currentOrigin != null && matchesDraft(currentStops, currentLoop) &&
             WalkingGeometry.distanceMeters(origin, currentOrigin) <= 30.0
 }

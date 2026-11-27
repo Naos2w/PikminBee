@@ -64,6 +64,9 @@ fun FavouritesPanel(
     canAddPlace: Boolean,
     savingPlace: Boolean,
     onAddPlace: () -> Unit,
+    initialRoutes: Boolean = false,
+    canAddRoute: Boolean = false,
+    onAddRoute: () -> Unit = {},
     backfillBusy: Boolean,
     backfillMessage: String,
     onBackfill: () -> Unit,
@@ -71,7 +74,7 @@ fun FavouritesPanel(
 ) {
     val context = LocalContext.current
     var search by remember { mutableStateOf("") }
-    var showingRoutes by remember { mutableStateOf(false) }
+    var showingRoutes by remember { mutableStateOf(initialRoutes) }
     var deleting by remember { mutableStateOf<SavedPlace?>(null) }
     var renaming by remember { mutableStateOf<SavedPlace?>(null) }
     var newName by remember { mutableStateOf("") }
@@ -98,9 +101,10 @@ fun FavouritesPanel(
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text("收藏地點與路線", color = foreground, fontWeight = FontWeight.SemiBold,
                 fontSize = 18.sp, modifier = Modifier.weight(1f))
-            IconButton(onClick = onAddPlace, enabled = canAddPlace && !savingPlace,
-                modifier = Modifier.semantics { contentDescription = "收藏目前選取的位置" }) {
-                Text(if (savingPlace) "…" else "+", fontSize = 25.sp, color = foreground)
+            IconButton(onClick = if (showingRoutes) onAddRoute else onAddPlace,
+                enabled = if (showingRoutes) canAddRoute else canAddPlace && !savingPlace,
+                modifier = Modifier.semantics { contentDescription = if (showingRoutes) "收藏目前路線" else "收藏目前選取的位置" }) {
+                Text(if (!showingRoutes && savingPlace) "…" else "+", fontSize = 25.sp, color = foreground)
             }
             Box {
                 IconButton(onClick = { headerMenuOpen = true },

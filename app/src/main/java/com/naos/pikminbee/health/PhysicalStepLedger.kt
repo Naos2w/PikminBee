@@ -52,7 +52,15 @@ object PhysicalStepIntervalCodec {
  */
 class PhysicalStepLedger(context: Context) {
     companion object { private val transactionLock = Any() }
-    private val prefs = context.getSharedPreferences("pikminbee_physical_step_sessions", Context.MODE_PRIVATE)
+    // Isolate newly observed records and fresh consent; legacy data is read-only.
+    private val prefs = context.getSharedPreferences("pikminbee_physical_step_sessions_v2", Context.MODE_PRIVATE)
+    private val legacy = context.getSharedPreferences("pikminbee_physical_step_sessions", Context.MODE_PRIVATE)
+
+    fun legacyRecordCount(): Int = PhysicalStepIntervalCodec.decode(legacy.getString("sessions", "[]") ?: "[]").size
+    fun legacyPendingCount(): Int = PhysicalStepIntervalCodec.decode(legacy.getString("sessions", "[]") ?: "[]").count { !it.synced } +
+        if (legacy.getLong("batch_steps", 0) > 0) 1 else 0
+    fun lastSyncNote(): String = prefs.getString("last_sync_note", "尚未同步") ?: "尚未同步"
+    fun setSyncNote(note: String) { prefs.edit().putString("last_sync_note", note.take(120)).apply() }
 
     private fun todayKey(now: Long): String =
         Instant.ofEpochMilli(now).atZone(ZoneId.systemDefault()).toLocalDate().toString()
@@ -66,6 +74,12 @@ class PhysicalStepLedger(context: Context) {
 
     @Synchronized fun pending() = all().filterNot { it.synced }
 
+    @Synchronized fun pendingCount(): Int = synchronized(transactionLock) {
+        val pending = pending()
+        val batchId = prefs.getString("batch_id", null)
+        pending.size + if (batchId != null && prefs.getLong("batch_steps", 0) > 0 && all().none { it.id == batchId }) 1 else 0
+    }
+
     @Synchronized fun todaysCount(now: Long = System.currentTimeMillis()): Long =
         if (prefs.getString("day", "") == todayKey(now))
             prefs.getLong("daily_steps", 0L) else 0L
@@ -73,17 +87,15 @@ class PhysicalStepLedger(context: Context) {
     @Synchronized fun addFromSensor(delta: Long, observedAtMillis: Long, previousAtMillis: Long) {
         synchronized(transactionLock) {
         require(delta in 1..10_000)
-        require(observedAtMillis > 0)
+        require(observedAtMillis > 0 && previousAtMillis in 1 until observedAtMillis &&
+            observedAtMillis - previousAtMillis <= 14_400_000L)
         val currentDay = todayKey(observedAtMillis)
         if (prefs.getString("day", "") != currentDay) {
             if (!flushPending()) throw IllegalStateException("無法保存前一天的感測步數")
         }
         val batchId = prefs.getString("batch_id", null) ?: UUID.randomUUID().toString()
         val oldStart = prefs.getLong("batch_start", 0)
-        val firstStart = previousAtMillis.takeIf {
-            it in 1 until observedAtMillis && observedAtMillis - it <= 14_400_000L
-        } ?: (observedAtMillis - 1_000)
-        val start = if (oldStart > 0) oldStart else firstStart
+        val start = if (oldStart > 0) oldStart else previousAtMillis
         val latestEnd = observedAtMillis.coerceAtLeast(start + 1)
         val sum = prefs.getLong("batch_steps", 0) + delta
         val storedDaily = todaysCount(observedAtMillis)
