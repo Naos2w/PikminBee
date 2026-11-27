@@ -59,6 +59,10 @@ class PhysicalStepLedger(context: Context) {
     fun legacyRecordCount(): Int = PhysicalStepIntervalCodec.decode(legacy.getString("sessions", "[]") ?: "[]").size
     fun legacyPendingCount(): Int = PhysicalStepIntervalCodec.decode(legacy.getString("sessions", "[]") ?: "[]").count { !it.synced } +
         if (legacy.getLong("batch_steps", 0) > 0) 1 else 0
+    /** Legacy display only: never add old totals to HC or export old records. */
+    fun legacyTodaysCount(now: Long = System.currentTimeMillis()): Long? =
+        if (legacy.getString("day", "") == todayKey(now) && legacy.contains("daily_steps"))
+            legacy.getLong("daily_steps", 0L).takeIf { it >= 0L } else null
     fun lastSyncNote(): String = prefs.getString("last_sync_note", "尚未同步") ?: "尚未同步"
     fun setSyncNote(note: String) { prefs.edit().putString("last_sync_note", note.take(120)).apply() }
 
