@@ -24,6 +24,9 @@ import com.naos.pikminbee.ui.FloatingControls
 import com.naos.pikminbee.domain.FloatingRouteDraft
 import com.naos.pikminbee.location.OverlayMapSelection
 import com.naos.pikminbee.health.EstimatedStepCounter
+import com.naos.pikminbee.health.EstimatedStepLedger
+import com.naos.pikminbee.health.EstimatedStepsSyncWorker
+import com.naos.pikminbee.health.RouteEstimateCheckpoint
 import com.naos.pikminbee.health.EstimatedWalkStatus
 import com.naos.pikminbee.data.AppPreferences
 import com.naos.pikminbee.data.PreparedRouteState
@@ -165,6 +168,8 @@ class MockLocationService : Service() {
     private val mockGpsJitter = MockGpsJitter()
     private var estimatedStepPersistTicker = 0
     private var walkOriginSteps = 0L
+    private val routeEstimateLedger by lazy { EstimatedStepLedger.routeSync(this) }
+    private val routeEstimateCheckpoint = RouteEstimateCheckpoint()
     private var speedMetersPerSecond = WalkSpeedPreset.DEFAULT.metresPerSecond
     private var loopRoute = false
     private var routeArrivalNotified = false
@@ -193,10 +198,19 @@ class MockLocationService : Service() {
                 )
                 if (movement.acceptedMetres > 0.0) {
                     advancedMetres = movement.acceptedMetres
+                    val beforeSteps = estimatedSteps.snapshot().estimatedSteps
                     val snapshot = estimatedSteps.addTravel(movement.acceptedMetres)
                     EstimatedWalkStatus.state.value = snapshot
                     LocationStatus.walkEstimatedSteps.value =
                         estimatedSteps.estimatedSince(walkOriginSteps)
+                    if (mode == WalkMode.ROUTE) {
+                        val end = System.currentTimeMillis()
+                        routeEstimateCheckpoint.recordMovement(
+                            end - (deltaSeconds * 1000.0).toLong().coerceAtLeast(1L), end, now,
+                            snapshot.estimatedSteps - beforeSteps, routeEstimateLedger.optIn(),
+                        )
+                        flushRouteEstimateChunks()
+                    }
                     if (++estimatedStepPersistTicker >= 15) {
                         saveEstimatedSteps()
                         refreshNotification()
@@ -224,6 +238,7 @@ class MockLocationService : Service() {
                     LocationStatus.appliedSpeedKmh.value =
                         RouteSurfaceStatusPolicy.visibleRouteSpeedKmh(
                             phase, speedMetersPerSecond * 3.6)
+                    finishRouteEstimateInterval()
                     saveEstimatedSteps()
                     refreshNotification()
                     if (RouteCompletionAlertPolicy.shouldAlert(
@@ -513,6 +528,7 @@ class MockLocationService : Service() {
                     return START_NOT_STICKY
                 }
                 clearOldArrivalNotification(RouteLifecycleChange.RESTORE_VIRTUAL_GPS)
+                finishRouteEstimateInterval()
                 saveEstimatedSteps()
                 cancelFlowerPlanning()
                 phase = WalkPhase.PARKED
@@ -544,6 +560,7 @@ class MockLocationService : Service() {
             }
             ACTION_PAUSE_ROUTE -> {
                 if (phase == WalkPhase.MOVING) {
+                    finishRouteEstimateInterval()
                     saveEstimatedSteps()
                     phase = WalkPhase.PAUSED
                     LocationStatus.phase.value = phase
@@ -575,6 +592,7 @@ class MockLocationService : Service() {
                 }
                 if (phase == WalkPhase.MOVING || phase == WalkPhase.PAUSED) {
                     clearOldArrivalNotification(RouteLifecycleChange.MANUAL_STOP)
+                    finishRouteEstimateInterval()
                     phase = WalkPhase.PARKED
                     LocationStatus.phase.value = phase
                     LocationStatus.display.value = "步行已停止 · 保留目前位置"
@@ -594,6 +612,7 @@ class MockLocationService : Service() {
             }
             ACTION_CLEAR_ROUTE -> {
                 clearOldArrivalNotification(RouteLifecycleChange.CLEAR)
+                finishRouteEstimateInterval()
                 saveEstimatedSteps()
                 cancelFlowerPlanning()
                 track = emptyList()
@@ -625,6 +644,7 @@ class MockLocationService : Service() {
                 cancelFlowerPlanning()
                 if (!ensureProvider()) return START_NOT_STICKY
                 clearOldArrivalNotification(RouteLifecycleChange.TELEPORT)
+                finishRouteEstimateInterval()
                 phase = WalkPhase.IDLE
                 mode = null
                 track = emptyList()
@@ -673,6 +693,29 @@ class MockLocationService : Service() {
         }
     }
 
+
+    /** Checkpoints are local first; WorkManager owns the permission-gated export. */
+    private fun flushRouteEstimateChunks() {
+        val saved = routeEstimateCheckpoint.drain { chunk ->
+            runCatching {
+                routeEstimateLedger.add(chunk.startMillis, chunk.endMillis, chunk.steps) != null
+            }.getOrElse {
+                Log.w("PikminBee", "Route estimate checkpoint could not be saved", it)
+                false
+            }
+        }
+        if (saved > 0) {
+            saveEstimatedSteps()
+            if (routeEstimateLedger.optIn()) runCatching {
+                EstimatedStepsSyncWorker.enqueue(this)
+            }.onFailure { Log.w("PikminBee", "Route estimate sync could not be enqueued", it) }
+        }
+    }
+
+    private fun finishRouteEstimateInterval() {
+        routeEstimateCheckpoint.finish()
+        flushRouteEstimateChunks()
+    }
 
     private fun saveEstimatedSteps() {
         val snapshot = estimatedSteps.snapshot()
@@ -768,6 +811,7 @@ class MockLocationService : Service() {
         }
         if (!ensureProvider()) return false
         clearOldArrivalNotification(RouteLifecycleChange.START)
+        finishRouteEstimateInterval()
         // A newly configured stride affects only this new walk, never historical totals.
         estimatedSteps.setStrideForNextTravel(appPreferences.virtualStrideMetres())
         saveEstimatedSteps()
@@ -985,6 +1029,7 @@ class MockLocationService : Service() {
         // a disconnected Web session must never see it as a new arrival.
         LocationStatus.routeArrivalId.value = null
         mockGpsJitter.reset()
+        finishRouteEstimateInterval()
         saveEstimatedSteps()
         cancelFlowerPlanning()
         if (clearCheckpoint) journal.clear()

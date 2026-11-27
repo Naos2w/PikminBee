@@ -50,14 +50,19 @@ object EstimatedStepSessionCodec {
     }.getOrDefault(emptyList())
 }
 
-class EstimatedStepLedger(context: Context) {
+class EstimatedStepLedger(context: Context, private val activeRouteSync: Boolean = false) {
     companion object {
         private val transactionLock = Any()
+        /** Fresh opt-in and queue; the 0.28.1 ledger remains available for history only. */
+        fun routeSync(context: Context) = EstimatedStepLedger(context, activeRouteSync = true)
         /** Signals UI readers when the queue changes, including after background sync. */
         val changes = MutableStateFlow(0L)
         private fun changed() { changes.value += 1L }
     }
-    private val prefs = context.getSharedPreferences("pikminbee_virtual_step_sessions", Context.MODE_PRIVATE)
+    private val prefs = context.getSharedPreferences(
+        if (activeRouteSync) "pikminbee_virtual_step_sessions_v2" else "pikminbee_virtual_step_sessions",
+        Context.MODE_PRIVATE,
+    )
 
     @Synchronized fun pending(): List<EstimatedStepSession> = all().filterNot { it.synced }
 
@@ -102,10 +107,11 @@ class EstimatedStepLedger(context: Context) {
         }
     }
 
-    fun optIn(): Boolean = prefs.getBoolean("sync_virtual_estimates_to_hc", false)
+    fun optIn(): Boolean = activeRouteSync && prefs.getBoolean("sync_virtual_estimates_to_hc", false)
 
     fun setOptIn(value: Boolean) {
-        // Never enable without the user explicitly selecting this setting.
+        check(activeRouteSync) { "Legacy estimates cannot be opted into export" }
+        // Never reuse consent from the old ledger.
         prefs.edit().putBoolean("sync_virtual_estimates_to_hc", value).apply()
     }
 }

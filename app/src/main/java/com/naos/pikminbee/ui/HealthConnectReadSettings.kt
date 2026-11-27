@@ -52,6 +52,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.naos.pikminbee.health.EstimatedStepLedger
+import com.naos.pikminbee.health.HealthConnectStepSync
 import com.naos.pikminbee.health.EstimatedWalkStatus
 import com.naos.pikminbee.health.HealthConnectRealSteps
 import com.naos.pikminbee.health.HealthDisplayPreferences
@@ -69,7 +70,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.NumberFormat
 
-/** Restore the independent, consent-based real step features without exporting route estimates. */
+/** Independent consent and provenance for sensor steps and manual route estimates. */
 @Composable
 fun HealthConnectReadSettings(palette: NaosPalette) {
     val foreground = palette.ink
@@ -79,6 +80,8 @@ fun HealthConnectReadSettings(palette: NaosPalette) {
     val scope = rememberCoroutineScope()
     val ledger = remember(context) { PhysicalStepLedger(context) }
     val estimates = remember(context) { EstimatedStepLedger(context) }
+    val routeLedger = remember(context) { EstimatedStepLedger.routeSync(context) }
+    val routeSyncResult by HealthConnectStepSync.lastSyncResult.collectAsState()
     val displayPrefs = remember(context) { HealthDisplayPreferences(context) }
     val sensor by PhysicalStepsStatus.state.collectAsState()
     val estimate by EstimatedWalkStatus.state.collectAsState()
@@ -98,6 +101,9 @@ fun HealthConnectReadSettings(palette: NaosPalette) {
     var loading by remember { mutableStateOf(false) }
     var syncBusy by remember { mutableStateOf(false) }
     var syncEnabled by remember { mutableStateOf(ledger.optIn()) }
+    var routeSyncAuthorized by remember { mutableStateOf(routeLedger.optIn()) }
+    var routePending by remember { mutableStateOf(routeLedger.pending().size) }
+    var routeSyncBusy by remember { mutableStateOf(false) }
     var overlayEnabled by remember { mutableStateOf(displayPrefs.showOverlaySteps()) }
     var pending by remember { mutableStateOf(ledger.pendingCount()) }
     var recorded by remember { mutableStateOf(ledger.todaysCount()) }
@@ -129,6 +135,8 @@ fun HealthConnectReadSettings(palette: NaosPalette) {
         recorded = ledger.todaysCount()
         syncNote = ledger.lastSyncNote()
         syncEnabled = ledger.optIn()
+        routeSyncAuthorized = routeLedger.optIn()
+        routePending = routeLedger.pending().size
         legacyPending = estimates.pending().size
         legacySynced = estimates.all().count { it.synced }
     }
@@ -183,7 +191,22 @@ fun HealthConnectReadSettings(palette: NaosPalette) {
         if (HealthConnectRealSteps.READ_STEPS in granted) { readAllowed = true; read() }
         if (HealthConnectRealSteps.WRITE_STEPS in granted) {
             writeAllowed = true
-            feedback = "已授權寫入；仍需主動開啟真實感測步數同步。"
+            feedback = "已授權 Health Connect 寫入。"
+        }
+    }
+    fun authorizeRouteSync() {
+        // The user's route-specific authorization is recorded once, not a mode switch.
+        // An existing hardware-step grant alone must not authorize a different source.
+        routeLedger.setOptIn(true)
+        routeSyncAuthorized = true
+        feedback = "已授權路線估算同步；之後行走期間自動同步。"
+    }
+    val routeHcRequest = rememberLauncherForActivityResult(PermissionController.createRequestPermissionResultContract()) { granted ->
+        if (HealthConnectRealSteps.WRITE_STEPS in granted) {
+            writeAllowed = true
+            authorizeRouteSync()
+        } else {
+            feedback = "尚未授權寫入；路線估算仍可在本機使用。"
         }
     }
     val activityRequest = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -223,6 +246,18 @@ fun HealthConnectReadSettings(palette: NaosPalette) {
         syncEnabled = next
         if (next) runCatching { RealSensorSyncWorker.enqueue(context) }
         else runCatching { RealSensorSyncWorker.cancel(context) }
+    }
+    fun requestRouteSyncAuthorization() {
+        if (!providerAvailable) return
+        scope.launch {
+            if (HealthConnectRealSteps.hasPermission(context, HealthConnectRealSteps.WRITE_STEPS)) {
+                writeAllowed = true
+                authorizeRouteSync()
+            } else {
+                runCatching { routeHcRequest.launch(setOf(HealthConnectRealSteps.WRITE_STEPS)) }
+                    .onFailure { feedback = "無法開啟 Health Connect 授權。" }
+            }
+        }
     }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         HealthCard(palette) {
@@ -297,7 +332,18 @@ fun HealthConnectReadSettings(palette: NaosPalette) {
                     Text("步", color = muted, fontSize = 11.sp)
                 }
             }
-            Text("獨立路線估算，非實際運動，不寫入 HC。", color = muted, fontSize = 11.sp)
+            Text("路線估算非手機實測步數；首次授權後，行走期間每分鐘自動同步手動紀錄。", color = muted, fontSize = 11.sp)
+            HorizontalDivider(color = palette.stroke)
+            HealthRow(palette, NaosActionGlyph.REFRESH, "路線估算步數同步", when {
+                !providerAvailable -> "Health Connect 不可用"
+                !writeAllowed || !routeSyncAuthorized -> "尚未授權"
+                routePending > 0 -> "待同步 $routePending 筆 · 行走時自動同步"
+                else -> "已授權 · 行走時自動同步"
+            }) {
+                if (providerAvailable && (!writeAllowed || !routeSyncAuthorized)) {
+                    TextButton(onClick = ::requestRouteSyncAuthorization) { Text("授權") }
+                }
+            }
         }
         HealthCard(palette) {
             HealthNavigationRow(palette, NaosActionGlyph.DONE, "權限管理") { detail = "permissions" }
@@ -337,12 +383,12 @@ fun HealthConnectReadSettings(palette: NaosPalette) {
                                     }
                                 Text("手機感測器只在主動開始後記錄；可隨時停止。", color = muted)
                             }
-                            if (canWrite || writeAllowed || syncEnabled) {
+                            if (providerAvailable || writeAllowed || syncEnabled || routeSyncAuthorized) {
                                 Text("寫入權限 · " + if (writeAllowed) "已授權" else "未授權", color = foreground)
-                                TextButton(enabled = canWrite, onClick = { requestHealthPermission(HealthConnectRealSteps.WRITE_STEPS) }) {
-                                    Text("管理真實步數寫入授權")
+                                TextButton(enabled = providerAvailable, onClick = { requestHealthPermission(HealthConnectRealSteps.WRITE_STEPS) }) {
+                                    Text("管理步數寫入授權")
                                 }
-                                Text("只同步新收集的真實感測器紀錄，與模擬估算分開。", color = muted)
+                                Text("真實感測與路線手動估算分別授權。路線授權後行走時自動同步；可撤銷 HC 寫入權限。", color = muted)
                             }
                             TextButton(onClick = {
                                 clearRead()
@@ -366,13 +412,31 @@ fun HealthConnectReadSettings(palette: NaosPalette) {
                                 }
                             }) { Text(if (syncBusy) "同步中…" else "立即同步真實紀錄") }
                             Text("只傳送新版本的實際感測紀錄。舊資料保留且不重傳。", color = muted)
+                            HorizontalDivider(color = palette.stroke)
+                            Text("待同步路線估算：$routePending 筆", color = foreground)
+                            Text("最近同步：${routeSyncResult?.note ?: "尚未同步"}", color = muted)
+                            TextButton(enabled = providerAvailable && writeAllowed && routeSyncAuthorized && routePending > 0 && !routeSyncBusy, onClick = {
+                                routeSyncBusy = true
+                                scope.launch {
+                                    try {
+                                        feedback = HealthConnectStepSync.syncPending(context).note
+                                        refreshLedger()
+                                        if (readAllowed) read()
+                                    } finally { routeSyncBusy = false }
+                                }
+                            }) { Text(if (routeSyncBusy) "同步中…" else "立即同步路線估算") }
                         }
                         else -> {
                             Text("待同步感測器紀錄：$pending 筆", color = foreground)
                             TextButton(enabled = pending > 0 && !sensor.tracking && !syncEnabled && !syncBusy,
                                 onClick = { confirmDiscard = "sensor" }) { Text("清除未同步感測器紀錄") }
                             HorizontalDivider(color = palette.stroke)
-                            Text("舊版估算紀錄：$legacyPending 筆未同步／$legacySynced 筆歷史已同步；不再寫入 HC。", color = muted)
+                            Text("待同步路線估算：$routePending 筆", color = foreground)
+                            TextButton(enabled = routePending > 0 && (!routeSyncAuthorized || !writeAllowed) && !routeSyncBusy &&
+                                routePhase != com.naos.pikminbee.domain.WalkPhase.MOVING && routePhase != com.naos.pikminbee.domain.WalkPhase.PAUSED,
+                                onClick = { confirmDiscard = "route" }) { Text("清除未同步路線估算") }
+                            HorizontalDivider(color = palette.stroke)
+                            Text("舊版估算紀錄：$legacyPending 筆未同步／$legacySynced 筆歷史已同步；不自動重傳。", color = muted)
                             TextButton(enabled = legacyPending > 0, onClick = { confirmDiscard = "estimate" }) {
                                 Text("清除舊版未同步估算紀錄")
                             }
@@ -396,8 +460,11 @@ fun HealthConnectReadSettings(palette: NaosPalette) {
             confirmButton = { TextButton(onClick = {
                 confirmDiscard = null
                 scope.launch {
-                    val ok = if (kind == "sensor") PhysicalStepSync.discardPending(context)
-                        else withContext(Dispatchers.IO) { runCatching { estimates.discardPending() }.isSuccess }
+                    val ok = when (kind) {
+                        "sensor" -> PhysicalStepSync.discardPending(context)
+                        "route" -> HealthConnectStepSync.discardPending(context)
+                        else -> withContext(Dispatchers.IO) { runCatching { estimates.discardPending() }.isSuccess }
+                    }
                     feedback = if (ok) "已清除指定未同步紀錄。" else "無法清除；請停止計步與同步後再試。"
                     refreshLedger()
                 }
