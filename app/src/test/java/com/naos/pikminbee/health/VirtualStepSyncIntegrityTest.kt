@@ -12,37 +12,37 @@ class VirtualStepSyncIntegrityTest {
     private fun session(id: String, steps: Long = 100L) =
         EstimatedStepSession(id, 1_000L, 61_000L, steps)
 
-    @Test fun doesNotStartWhenOptInIsOff() = runBlocking {
+    @Test fun doesNotStartWhenSystemWritePermissionIsMissing() = runBlocking {
         var writes = 0
         val result = VirtualStepSyncIntegrity.drain(
             sessions = listOf(session("a")),
-            optedIn = { false },
+            hasWritePermission = { false },
             stillPending = { true },
             insert = { writes++ },
             acknowledge = {},
         )
         assertEquals(0, writes)
-        assertTrue(result.optedOut)
+        assertTrue(result.permissionDenied)
         assertEquals(0, result.acknowledged)
     }
 
-    @Test fun turningOffSyncDuringBatchStopsBeforeTheNextRemoteWrite() = runBlocking {
-        var optedIn = true
+    @Test fun revokingPermissionDuringBatchStopsBeforeTheNextRemoteWrite() = runBlocking {
+        var hasWritePermission = true
         val uploaded = mutableListOf<String>()
         val acknowledged = mutableListOf<String>()
         val result = VirtualStepSyncIntegrity.drain(
             sessions = listOf(session("a"), session("b"), session("c")),
-            optedIn = { optedIn },
+            hasWritePermission = { hasWritePermission },
             stillPending = { true },
             insert = {
                 uploaded += it.id
-                if (it.id == "a") optedIn = false
+                if (it.id == "a") hasWritePermission = false
             },
             acknowledge = { acknowledged += it },
         )
         assertEquals(listOf("a"), uploaded)
         assertEquals(listOf("a"), acknowledged)
-        assertTrue(result.optedOut)
+        assertTrue(result.permissionDenied)
         assertEquals(1, result.acknowledged)
     }
 
@@ -51,7 +51,7 @@ class VirtualStepSyncIntegrityTest {
         val uploaded = mutableListOf<String>()
         val result = VirtualStepSyncIntegrity.drain(
             sessions = listOf(session("a"), session("b"), session("c")),
-            optedIn = { true },
+            hasWritePermission = { true },
             stillPending = { it in remaining },
             insert = {
                 uploaded += it.id
@@ -71,7 +71,7 @@ class VirtualStepSyncIntegrityTest {
         suspend fun retryOnce(): VirtualStepSyncIntegrity.BatchResult =
             VirtualStepSyncIntegrity.drain(
                 sessions = listOf(session("record-1", 347L)),
-                optedIn = { true },
+                hasWritePermission = { true },
                 stillPending = { it in pending },
                 insert = {
                     remoteByClientId[VirtualStepSyncIntegrity.clientRecordId(it.id)] = it.steps
@@ -97,7 +97,7 @@ class VirtualStepSyncIntegrityTest {
         val pending = mutableSetOf("first", "second", "third")
         val result = VirtualStepSyncIntegrity.drain(
             sessions = listOf(session("first"), session("second"), session("third")),
-            optedIn = { true },
+            hasWritePermission = { true },
             stillPending = { it in pending },
             insert = { if (it.id == "second") error("permission revoked") },
             acknowledge = { pending.remove(it) },
@@ -112,7 +112,7 @@ class VirtualStepSyncIntegrityTest {
             runBlocking {
                 VirtualStepSyncIntegrity.drain(
                     sessions = listOf(session("a")),
-                    optedIn = { true },
+                    hasWritePermission = { true },
                     stillPending = { true },
                     insert = { throw CancellationException("worker stopped") },
                     acknowledge = {},
@@ -126,7 +126,7 @@ class VirtualStepSyncIntegrityTest {
         var uploaded = 0
         val result = VirtualStepSyncIntegrity.drainAll(
             sessions = entries,
-            optedIn = { true },
+            hasWritePermission = { true },
             stillPending = { true },
             insert = { uploaded++ },
             acknowledge = {},

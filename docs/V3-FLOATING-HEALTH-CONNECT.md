@@ -38,13 +38,15 @@ settings, skippable permissions, Health Connect and related state screens.
 - Session records persist locally with stable UUID-based record IDs, start/end times,
   estimated step counts and sync acknowledgements. Pending data is never silently
   discarded on failed network/IPC sync or a service stop.
-- **Default HC export is OFF**. Only after the user explicitly enables estimated
-  step export and grants WRITE_STEPS can the app insert these records.
+- **Updated owner decision (2026-11-27):** route estimates are queued while moving;
+  HC export is automatic when Android grants WRITE_STEPS. There is no additional
+  app-side authorization preference or switch. Legacy history is not imported.
 - Export virtual estimates with \`Metadata.manualEntry\`, not an automatically
   recorded or physically sensed method. \`clientRecordId\` is stable on retries.
-- WorkManager performs opt-in background export after each completed session.
+- WorkManager exports pending estimates at periodic moving checkpoints and pause/stop/arrival.
   If the user revokes permission, leave records pending until re-authorized.
-- Users can switch off future exports and clear local *unsynced* virtual records.
+- Users can revoke the Android write permission to stop exports and clear local
+  *unsynced* route estimates when the route is stopped.
   Already exported records must be managed in Health Connect; deleting the local
   queue does not delete previously exported health data.
 - Different apps/sensors can supply overlapping step data. Do **not** claim
@@ -61,9 +63,10 @@ settings, skippable permissions, Health Connect and related state screens.
    pause/resume/stop without losing the draft.
 3. Estimated step count rises only while moving, including a looping flower route;
    pausing and teleporting do not add steps. Check minutely rounding and persistence.
-4. HC permission request can be granted/refused/revoked; opt-in OFF makes zero writes.
-5. With permission and opt-in, a completed simulated session appears in HC as a
-   manually entered StepsRecord. Retrying/force stopping does not produce duplicates.
+4. HC permission request can be granted/refused/revoked; missing/revoked permission makes zero writes.
+5. With system write permission, new route intervals are exported as manually entered
+   StepsRecords during movement without another app-side switch or authorization.
+   Retrying does not produce duplicate records.
 6. No HC records are exported on merely opening the app or restoring a previous position.
 7. Compare actual Android UI against the approved OpenPencil design on POCO.
 8. Follow normal PR CI and explicit staging UAT packaging, preserving signer and
