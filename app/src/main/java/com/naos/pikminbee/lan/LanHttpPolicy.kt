@@ -27,8 +27,13 @@ object LanHttpPolicy {
         if (headers["host"] != authority) return 403
         if (headers["transfer-encoding"] != null) return 400
         if (method == "POST" && headers["origin"] != "http://$authority") return 403
-        val length = headers["content-length"]?.toIntOrNull() ?: 0
+        val rawLength = headers["content-length"]
+        // Only ASCII decimal framing is supported. Malformed or overflowing
+        // lengths must never be treated as an absent header.
+        if (rawLength != null && (rawLength.isEmpty() || rawLength.any { it !in '0'..'9' })) return 400
+        val length = if (rawLength == null) 0 else rawLength.toIntOrNull() ?: return 413
         if (length !in 0..MAX_BODY_BYTES || (method == "POST" && length == 0)) return 413
+        if (method == "GET" && length != 0) return 400
         if (method == "POST" &&
             headers["content-type"]?.substringBefore(';')?.trim()?.lowercase() != "application/json") {
             return 415

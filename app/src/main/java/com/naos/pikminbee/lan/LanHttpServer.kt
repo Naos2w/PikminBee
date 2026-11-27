@@ -30,6 +30,35 @@ data class LanReply(
     fun payloadBytes(): ByteArray = binaryBody ?: body.toByteArray(StandardCharsets.UTF_8)
 }
 
+/** Own every accepted private-LAN client until rejection, completion or shutdown. */
+internal class LanClientSockets {
+    private val clients = mutableSetOf<Socket>()
+    private var closed = false
+
+    @Synchronized
+    fun register(socket: Socket): Boolean {
+        if (closed) {
+            runCatching { socket.close() }
+            return false
+        }
+        clients.add(socket)
+        return true
+    }
+
+    @Synchronized
+    fun release(socket: Socket) {
+        runCatching { socket.close() }
+        clients.remove(socket)
+    }
+
+    @Synchronized
+    fun closeAll() {
+        closed = true
+        clients.forEach { runCatching { it.close() } }
+        clients.clear()
+    }
+}
+
 /**
  * Tiny bounded, single-request HTTP/1.1 server for an explicitly enabled private Wi-Fi IP.
  * No remote upload, no chunked encoding, no proxy, no wildcard bind, no WebSocket yet.
@@ -40,6 +69,7 @@ class LanHttpServer(
     private val handler: (LanRequest) -> LanReply,
 ) {
     private val running = AtomicBoolean(false)
+    private val clients = LanClientSockets()
     private val workers = ThreadPoolExecutor(
         2, 2, 0L, TimeUnit.MILLISECONDS,
         ArrayBlockingQueue(16),
@@ -51,6 +81,7 @@ class LanHttpServer(
 
     fun start() {
         check(!running.get()) { "LAN server is already running" }
+        check(!workers.isShutdown) { "LAN server has been stopped" }
         check(localIp.isSiteLocalAddress) { "LAN listener needs a private IPv4 address" }
         val socket = ServerSocket(port, 16, localIp)
         socket.soTimeout = 1_500
@@ -62,11 +93,17 @@ class LanHttpServer(
                     val client = socket.accept()
                     if (!client.inetAddress.isSiteLocalAddress) {
                         client.close()
-                    } else {
+                    } else if (clients.register(client)) {
                         try {
-                            workers.execute { handle(client) }
+                            workers.execute {
+                                try {
+                                    if (running.get()) handle(client)
+                                } finally {
+                                    clients.release(client)
+                                }
+                            }
                         } catch (_: java.util.concurrent.RejectedExecutionException) {
-                            client.close()
+                            clients.release(client)
                         }
                     }
                 } catch (_: java.net.SocketTimeoutException) {
@@ -84,6 +121,9 @@ class LanHttpServer(
         running.set(false)
         runCatching { server?.close() }
         server = null
+        // Interrupting the executor alone neither closes blocked socket reads
+        // nor releases accepted clients still waiting in its queue.
+        clients.closeAll()
         workers.shutdownNow()
         acceptThread?.interrupt()
     }
@@ -133,10 +173,13 @@ class LanHttpServer(
                     pendingId = headers["x-pikminbee-pending"],
                     remoteAddress = peer.inetAddress.hostAddress.orEmpty(),
                 )
+                if (!running.get()) return@runCatching
                 val answer = handler(request)
-                write(peer, answer)
+                if (running.get()) write(peer, answer)
             }.onFailure {
-                runCatching { write(peer, LanReply(500, "{\"error\":\"internal error\"}")) }
+                if (running.get()) {
+                    runCatching { write(peer, LanReply(500, "{\"error\":\"internal error\"}")) }
+                }
             }
         }
     }
