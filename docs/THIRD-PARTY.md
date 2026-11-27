@@ -213,6 +213,45 @@ All four 64-bit ELF inputs pass the PT_LOAD check (12/12 segments). MapLibre's s
 
 Follow the current [Android 16 KB guidance](https://developer.android.com/guide/practices/page-sizes) on the integrated release binary: inspect all packaged .so files with llvm-readelf, check ZIP alignment (zipalign -c -P 16 -v 4 on the actual APK), bundle configuration, GNU_RELRO and 16 KiB emulator/device operation. No new APK/AAB, packaging change, dependency upgrade, or device test was performed. G4 and G5 remain open.
 
+### Integrated develop dependency delta (2026-11-27, supersedes the historical 111-coordinate snapshot)
+
+Rebased evidence (without rewriting existing commits): merged develop `08d21df0208960521ff6ac59d99a08bb0796f566` into the audit worktree at `3c080d23c1bd682f6c61a74e7b48c7da5b05d2c8`. Offline `:app:dependencies --configuration releaseRuntimeClasspath` completed in 10s, BUILD SUCCESSFUL, no FAILED dependency rows. Deduplicated selected group:artifact:version from non-constraint rows: **134 coordinates**, 24 additions and one removal compared with the historical 111 above. These include metadata/platforms, not 134 packaged binaries. Direct Health Connect and WorkManager dependencies were restored in develop; no Ads module was observed. No change to the runtime dependency declarations is made by this audit.
+
+All 24 added coordinates have exactly one cached POM. Direct licence names are transcribed/normalised below; missing declarations remain unresolved, not assumed proprietary or cleared.
+
+| Added resolved coordinate | Direct POM licence |
+| --- | --- |
+| `androidx.concurrent:concurrent-futures-ktx:1.1.0` | Apache-2.0 |
+| `androidx.health.connect:connect-client:1.1.0` | Apache-2.0 |
+| `androidx.health.connect:connect-client-proto:1.1.0` | Apache-2.0 |
+| `androidx.health.connect:connect-client-external-protobuf:1.1.0` | BSD-3-Clause |
+| `androidx.lifecycle:lifecycle-service:2.9.4` | Apache-2.0 |
+| `androidx.room:room-common-jvm:2.7.0` | Apache-2.0 |
+| `androidx.room:room-common:2.7.0` | Apache-2.0 |
+| `androidx.room:room-runtime-android:2.7.0` | Apache-2.0 |
+| `androidx.room:room-runtime:2.7.0` | Apache-2.0 |
+| `androidx.sqlite:sqlite-android:2.5.0` | Apache-2.0 |
+| `androidx.sqlite:sqlite-framework-android:2.5.0` | Apache-2.0 |
+| `androidx.sqlite:sqlite-framework:2.5.0` | Apache-2.0 |
+| `androidx.sqlite:sqlite:2.5.0` | Apache-2.0 |
+| `androidx.tracing:tracing-ktx:1.2.0` | Apache-2.0 |
+| `androidx.work:work-runtime-ktx:2.12.0` | Apache-2.0 |
+| `androidx.work:work-runtime:2.12.0` | Apache-2.0 |
+| `com.google.code.findbugs:jsr305:3.0.2` | Apache-2.0 |
+| `com.google.errorprone:error_prone_annotations:2.11.0` | Apache-2.0 |
+| `com.google.guava:failureaccess:1.0.1` | Missing; parent guava-parent:26.0-android |
+| `com.google.guava:guava:31.1-android` | Missing; parent guava-parent:31.1-android |
+| `com.google.guava:listenablefuture:9999.0-empty-to-avoid-conflict-with-guava` | Missing; parent guava-parent:26.0-android |
+| `com.google.j2objc:j2objc-annotations:1.3` | Apache-2.0 |
+| `org.checkerframework:checker-qual:3.12.0` | MIT |
+| `org.jetbrains.kotlinx:kotlinx-coroutines-guava:1.10.2` | Apache-2.0 |
+
+Removed selected coordinate: `com.google.guava:listenablefuture:1.0` is replaced by the 9999.0 placeholder above. The earlier archive audit for 1.0 is historical, not applicable to the selected placeholder. Combining the unchanged 110 coordinates with this delta gives 123 Apache-2.0, 4 Android SDK licence, 2 historical BSD labels plus 1 BSD-3-Clause, 1 MIT and 3 missing direct declarations. Exact upstream/parent licences, embedded notices and redistribution obligations still require review.
+
+Read-only ZIP entry inspection of 12 cached AAR/JAR files for selected Health Connect, WorkManager, Room, SQLite and Guava modules found no top-level `.so` entries. Nine AndroidX archives had `META-INF/androidx/.../LICENSE.txt`; the three Guava-family archives had no named licence/notice/copyright entry. This is not recursive nested archive or final binary verification. Preserve exact notices, including protobuf's distinct licence; do not classify all AndroidX as Apache solely by group name. Final native ABI, packaged notices and app-visible attribution remain open.
+
+Health Connect permissions, genuine sensor provenance, independent opt-in, WorkManager cancellation/retention and no route-estimate export remain #169/#170/#171 and device-policy gates; licensing evidence does not establish permitted health-data use. No network traffic with personal data, signing, APK/AAB packaging, dependency upgrade or device operation was performed. G5 remains open pending provider capacity, exact native/Guava notices and rendered attribution.
+
 ### Capacity model for decision, not observed traffic
 
 Assume 100 / 1,000 / 10,000 daily active users, 30 days, two uncached route queries per active user/day, two uncached place saves/day (one Photon + one TimeAPI request each), and two map sessions/day. These are stress-planning assumptions before measuring real adoption/cache hit rate, not permission to send requests.
