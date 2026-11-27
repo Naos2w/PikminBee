@@ -116,6 +116,23 @@ class FloatingDailyStepsCacheTest {
         assertEquals(0L, cache.currentValue(day, 4L))
     }
 
+    @Test fun visiblePageRefreshReplacesDailyCountAndLeavingInvalidatesIt() {
+        val cache = FloatingDailyStepsCache()
+        val day = key()
+        val first = cache.begin(day, 100L)!!
+        assertTrue(cache.complete(first, day, day, 200L, 800L))
+        assertEquals(800L, cache.currentValue(day, 500L))
+        assertNull(cache.begin(day, 5_100L))
+        val refresh = cache.begin(day, 60_100L)!!
+        assertTrue(cache.complete(refresh, day, day, 60_200L, 850L))
+        assertEquals(850L, cache.currentValue(day, 60_300L))
+        val inFlight = cache.begin(day, 60_400L, force = true)!!
+        cache.invalidate()
+        assertFalse(cache.complete(inFlight, day, day, 60_500L, 900L))
+        assertNull(cache.currentValue(day, 60_600L))
+        assertNotNull(cache.begin(day, 60_700L))
+    }
+
     @Test fun frequentFiveSecondUiTicksDoNotCauseFrequentHealthConnectReads() {
         val cache = FloatingDailyStepsCache()
         val day = key()
