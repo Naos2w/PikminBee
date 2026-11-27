@@ -17,11 +17,11 @@ class HealthPermissionsRationaleActivity : Activity() {
             setPadding(pad, pad * 2, pad, pad)
         }
         content.addView(TextView(this).apply {
-            text = "Health Connect 步數（唯讀）"
+            text = "Health Connect 與實際步數"
             textSize = 22f
         })
         content.addView(TextView(this).apply {
-            text = "授權後，只有你在 App 內主動查詢時才讀取今日步數彙總。資料可能來自手機、手錶、其他 App 或手動紀錄，並非本 App 驗證的實際運動。\n\n不寫入健康資料、不同步模擬步數、不在背景讀取、不傳送至 Web 或其他服務、不儲存查詢結果。路線估算與 Health Connect 完全分開。可在 Health Connect 隨時撤銷權限。"
+            text = "今日步數彙總可能來自手機、手錶、其他 App 或手動紀錄。讀取及寫入分別授權。只有不具系統原生計步的手機，才提供手動啟動的實際感測器計步；另行同意後同步新收集的手機感測器紀錄。\n\n不寫入模擬路線估算，不重新傳送舊紀錄，不將健康資料傳送至 Web、廣告或其他服務。懸浮統計可獨立開關；若系統不允許讀取就顯示不可用或本機感測器計步。可隨時停止計步、關閉同步及撤銷 Health Connect 權限。"
             textSize = 16f
             setPadding(0, pad, 0, pad)
         })

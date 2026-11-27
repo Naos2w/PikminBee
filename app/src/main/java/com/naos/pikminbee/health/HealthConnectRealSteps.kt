@@ -2,6 +2,8 @@ package com.naos.pikminbee.health
 
 import android.content.Context
 import android.content.Intent
+import android.os.Build
+import android.os.ext.SdkExtensions
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.permission.HealthPermission
 import androidx.health.connect.client.records.StepsRecord
@@ -14,9 +16,22 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 
-/** Only user-requested foreground aggregate reads; no record writes or background jobs. */
+/** System HC capability and aggregate reads, separate from the genuine sensor writer. */
 object HealthConnectRealSteps {
     val READ_STEPS = HealthPermission.getReadPermission(StepsRecord::class)
+    val WRITE_STEPS = HealthPermission.getWritePermission(StepsRecord::class)
+
+    /** Native recording takes precedence over the legacy sensor fallback. */
+    fun nativeDeviceStepsSupported(): Boolean =
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE &&
+            SdkExtensions.getExtensionVersion(Build.VERSION_CODES.UPSIDE_DOWN_CAKE) >= 20
+
+    suspend fun hasPermission(context: Context, permission: String): Boolean = withContext(Dispatchers.IO) {
+        if (status(context) != HealthConnectClient.SDK_AVAILABLE) return@withContext false
+        try { permission in HealthConnectClient.getOrCreate(context).permissionController.getGrantedPermissions() }
+        catch (e: CancellationException) { throw e }
+        catch (_: Exception) { false }
+    }
     fun status(context: Context): Int = runCatching {
         HealthConnectClient.getSdkStatus(context)
     }.getOrDefault(HealthConnectClient.SDK_UNAVAILABLE)
