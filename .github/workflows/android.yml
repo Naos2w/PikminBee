@@ -58,6 +58,7 @@ jobs:
         run: |
           python3 -m unittest discover -s scripts -p 'test_version*.py'
           python3 -m unittest discover -s scripts -p 'test_apk_size*.py'
+          python3 -m unittest discover -s scripts -p 'test_cold_start_baseline.py'
           python3 scripts/bump_version.py check
       - name: Verify map and shared coordinate formats
         run: node --test scripts/test_map_ui_policy.mjs scripts/test_coordinate_formats.mjs
