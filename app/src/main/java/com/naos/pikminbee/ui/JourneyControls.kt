@@ -70,6 +70,7 @@ fun JourneyControls(
     onRoutePrimary: () -> Unit,
     onRouteStop: () -> Unit,
     onUseCurrentOrigin: () -> Unit = {},
+    onPromoteFirstStop: (Long) -> Unit = {},
     onSaveRoute: () -> Unit = {},
     onLocateStop: (Coordinate) -> Unit = {},
     onMoveStop: (Long, Int, Int) -> Unit = { _, _, _ -> },
@@ -103,8 +104,15 @@ fun JourneyControls(
                 Text("收藏", fontSize = 12.sp)
             }
         }
-        TextButton(onClick = onUseCurrentOrigin, enabled = canEdit) {
-            Text("改用目前位置為起點", fontSize = 12.sp)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            TextButton(onClick = onUseCurrentOrigin, enabled = canEdit,
+                modifier = Modifier.weight(1f)) {
+                Text("改用目前位置為起點", fontSize = 12.sp)
+            }
+            if (!flower) TextButton(onClick = { onPromoteFirstStop(draftRevision) },
+                enabled = canEdit && stops.isNotEmpty(), modifier = Modifier.weight(1f)) {
+                Text("第一點設為起點", fontSize = 12.sp)
+            }
         }
         RouteWaypointList(
             stops = stops,

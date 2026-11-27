@@ -1,8 +1,26 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
-import { BRIGHT_STYLE_URL, samePosition, currentPosition, createCameraFocus, visibleMapPadding, countryFlagPath, destinationTime, routePresentation, appliedSpeedLabel, createRouteArrivalNotice, routeCameraPoint } from "../app/src/main/assets/lan/map-ui-policy.mjs";
+import { BRIGHT_STYLE_URL, samePosition, currentPosition, createCameraFocus, visibleMapPadding, countryFlagPath, destinationTime, routePresentation, appliedSpeedLabel, createRouteArrivalNotice, routeCameraPoint, routeLegGeometry, sessionRenewalPrompt } from "../app/src/main/assets/lan/map-ui-policy.mjs";
 
+test("active route leg is display-only and disappears outside the current online route",()=>{
+  const a={lat:0,lon:0}, b={lat:0,lon:1}, c={lat:0,lon:2};
+  const state={mode:"ROUTE",phase:"MOVING",completedGeometry:[a,b],activeLegGeometry:[b,c]};
+  assert.deepEqual(routeLegGeometry(state,"ROUTE"),{completed:[a,b],active:[b,c]});
+  assert.deepEqual(routeLegGeometry({...state,phase:"PAUSED"},"ROUTE"),{completed:[a,b],active:[b,c]});
+  for(const [s,m,online] of [[state,"TELEPORT",true],[state,"ROUTE",false],[{...state,phase:"PARKED"},"ROUTE",true],[{...state,mode:"TELEPORT"},"ROUTE",true]]) {
+    assert.deepEqual(routeLegGeometry(s,m,online),{completed:[],active:[]});
+  }
+  assert.deepEqual(routeLegGeometry({...state,activeLegGeometry:[b,{lat:Infinity,lon:0}]},"ROUTE").active,[]);
+});
+test("renewal prompt appears within five minutes, requires explicit action and never extends expired access",()=>{
+  assert.deepEqual(sessionRenewalPrompt(301,false,false,true),{visible:false,canRequest:false});
+  assert.deepEqual(sessionRenewalPrompt(300,false,false,true),{visible:true,canRequest:true});
+  assert.deepEqual(sessionRenewalPrompt(120,true,false,true),{visible:false,canRequest:true});
+  assert.deepEqual(sessionRenewalPrompt(120,false,true,true),{visible:true,canRequest:false});
+  assert.deepEqual(sessionRenewalPrompt(120,false,false,false),{visible:true,canRequest:false});
+  assert.deepEqual(sessionRenewalPrompt(0,false,true,true),{visible:false,canRequest:false});
+});
 test("route camera following is restricted to the current active route and healthy display",()=>{
   const point={lat:0,lon:0};
   const active={mode:"ROUTE",phase:"MOVING",mockActive:true,position:point};

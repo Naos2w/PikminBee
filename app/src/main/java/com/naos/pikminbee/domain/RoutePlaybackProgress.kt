@@ -10,12 +10,16 @@ data class WalkingProgressSnapshot(
     val waypointCount: Int = 0,
     val remainingSeconds: Long = 0L,
     val looping: Boolean = false,
+    // Read-only display boundaries, measured along the existing routed geometry.
+    val activeLegStartMetres: Double? = null,
+    val activeLegEndMetres: Double? = null,
 ) {
     val fraction: Float get() = if (totalMetres <= 0.0) 0f
         else (travelledMetres / totalMetres).toFloat().coerceIn(0f, 1f)
     /** Display the actual leg, not just the upcoming waypoint index. */
     val activeLegLabel: String get() = when {
         waypointCount <= 0 -> "尚無路點"
+        nextWaypoint == null && activeLegEndMetres != null -> if (looping) "${waypointCount} → 起點" else "${waypointCount} → 終點"
         nextWaypoint == null -> "已抵達第 ${waypointCount} 點"
         nextWaypoint <= 1 -> "起點 → 1"
         else -> "${nextWaypoint - 1} → ${nextWaypoint}"
@@ -67,6 +71,10 @@ object RoutePlaybackProgress {
             waypointCount = stopThresholds.size,
             remainingSeconds = eta,
             looping = looping,
+            activeLegStartMetres = if (travelled < totalMetres - 0.1 && stopThresholds.isNotEmpty())
+                stopThresholds.getOrNull(reached - 1) ?: 0.0 else null,
+            activeLegEndMetres = if (travelled < totalMetres - 0.1 && stopThresholds.isNotEmpty())
+                stopThresholds.getOrNull(reached) ?: totalMetres else null,
         )
     }
 }
