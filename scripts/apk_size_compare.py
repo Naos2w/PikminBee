@@ -32,7 +32,16 @@ def compare(baseline, candidate):
     overhead = candidate["archive_overhead_bytes"] - baseline["archive_overhead_bytes"]
     if sum(deltas.values()) + overhead != after - before:
         raise ValueError("Category deltas do not reconcile with APK sizes")
+    # Incremental APK packaging can leave large unused ZIP regions. Report
+    # the actual file size, but flag suspicious overhead rather than claiming
+    # the category reduction alone is a download-size improvement.
+    warnings = []
+    for label, report in (("baseline", baseline), ("candidate", candidate)):
+        archive_overhead = report["archive_overhead_bytes"]
+        if archive_overhead > 1024 * 1024 and archive_overhead * 20 > report["apk_bytes"]:
+            warnings.append(f"{label}: unusually large ZIP overhead; repeat with clean packaging")
     return {
+        "packaging_warnings": warnings,
         "source_sha": sha,
         "abis": baseline["abis"],
         "baseline": baseline,

@@ -51,6 +51,21 @@ class ApkSizeCompareTest(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     compare(baseline, candidate)
 
+    def test_warns_about_large_packaging_overhead(self):
+        with tempfile.TemporaryDirectory() as directory:
+            baseline = self.fixture(directory, "base.apk", 1000)
+            candidate = self.fixture(directory, "candidate.apk", 500)
+            # A valid ZIP may have unused bytes before its first entry.
+            path = Path(directory) / "candidate.apk"
+            path.write_bytes(b"\x00" * (2 * 1024 * 1024) + path.read_bytes())
+            candidate = audit(path, SHA, "arm64-v8a")
+            result = compare(baseline, candidate)
+            self.assertEqual(1, len(result["packaging_warnings"]))
+            self.assertIn("candidate:", result["packaging_warnings"][0])
+            self.assertGreater(result["delta_bytes"], 0)
+            self.assertEqual([], compare(baseline, self.fixture(
+                directory, "clean.apk", 500))["packaging_warnings"])
+
     def test_growth_is_reported_as_negative_reduction(self):
         with tempfile.TemporaryDirectory() as directory:
             baseline = self.fixture(directory, "base.apk", 500)
