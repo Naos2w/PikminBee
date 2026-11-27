@@ -2,6 +2,11 @@ package com.naos.pikminbee.data
 
 import com.naos.pikminbee.domain.Coordinate
 import com.naos.pikminbee.domain.WalkMode
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.io.IOException
+import java.io.InputStream
+import java.io.OutputStream
 import java.nio.ByteBuffer
 import java.security.MessageDigest
 import org.junit.Assert.*
@@ -81,6 +86,69 @@ class SavedDataBackupCodecTest {
         val modeOffset = 16 + 4 + route.id.toByteArray().size + 4 + route.name.toByteArray().size
         rejected { SavedDataBackupCodec.decode(sign(bytes.copyOf().also { it[modeOffset] = 9 })) }
         rejected { SavedDataBackupCodec.decode(sign(bytes.copyOf().also { ByteBuffer.wrap(it).putInt(modeOffset + 1, 16) })) }
+    }
+
+    @Test fun streamReadSupportsShortReadsWithoutAvailableAndDoesNotClose() {
+        val bytes = SavedDataBackupCodec.encode(snapshot)
+        var closed = false
+        val input = object : ByteArrayInputStream(bytes) {
+            override fun available() = 0
+            override fun read(b: ByteArray, off: Int, len: Int) =
+                super.read(b, off, minOf(len, 3))
+            override fun close() { closed = true }
+        }
+        assertEquals(snapshot, SavedDataBackupCodec.readFrom(input))
+        assertFalse(closed)
+    }
+
+    @Test fun streamReadStopsAtCapacityPlusOne() {
+        var consumed = 0
+        val input = object : InputStream() {
+            override fun read(): Int { consumed++; return 0 }
+            override fun read(b: ByteArray, off: Int, len: Int): Int {
+                consumed += len
+                return len
+            }
+        }
+        rejected { SavedDataBackupCodec.readFrom(input) }
+        assertEquals(SavedDataBackupCodec.MAX_BYTES + 1, consumed)
+    }
+
+    @Test fun stalledAndFailedStreamsDoNotReturnPartialSnapshots() {
+        val stalled = object : InputStream() {
+            override fun read() = 0
+            override fun read(b: ByteArray, off: Int, len: Int) = 0
+        }
+        assertThrows(IOException::class.java) { SavedDataBackupCodec.readFrom(stalled) }
+        val failed = object : InputStream() {
+            override fun read(): Int = throw IOException("Injected")
+            override fun read(b: ByteArray, off: Int, len: Int): Int =
+                throw IOException("Injected")
+        }
+        assertThrows(IOException::class.java) { SavedDataBackupCodec.readFrom(failed) }
+        val bytes = SavedDataBackupCodec.encode(snapshot)
+        rejected { SavedDataBackupCodec.readFrom(ByteArrayInputStream(bytes.copyOf(bytes.size - 1))) }
+    }
+
+    @Test fun privateWriteValidatesBeforeWritingAndLeavesStreamOpen() {
+        var closed = false
+        val output = object : ByteArrayOutputStream() {
+            override fun close() { closed = true }
+        }
+        rejected { SavedDataBackupCodec.writeToPrivateStorage(snapshot.copy(places = listOf(place, place)), output) }
+        assertEquals(0, output.size())
+        SavedDataBackupCodec.writeToPrivateStorage(snapshot, output)
+        assertArrayEquals(SavedDataBackupCodec.encode(snapshot), output.toByteArray())
+        assertFalse(closed)
+    }
+
+    @Test fun privateWritePropagatesIoFailure() {
+        val output = object : OutputStream() {
+            override fun write(b: Int) { throw IOException("Injected") }
+        }
+        assertThrows(IOException::class.java) {
+            SavedDataBackupCodec.writeToPrivateStorage(snapshot, output)
+        }
     }
 
     private fun payload(snapshot: SavedDataBackupCodec.Snapshot): ByteArray =

@@ -7,6 +7,8 @@ import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.IOException
+import java.io.InputStream
+import java.io.OutputStream
 import java.nio.ByteBuffer
 import java.nio.CharBuffer
 import java.security.MessageDigest
@@ -67,6 +69,37 @@ internal object SavedDataBackupCodec {
         val payload = buffer.toByteArray()
         require(payload.size <= MAX_BYTES - DIGEST_BYTES)
         return payload + digest(payload)
+    }
+
+    /**
+     * Read an untrusted stream without depending on its declared length or available().
+     * The caller owns the stream and must close it. At most MAX_BYTES + 1 bytes
+     * are consumed; no partial snapshot is returned on corruption or IO failure.
+     */
+    fun readFrom(input: InputStream): Snapshot {
+        val output = ByteArrayOutputStream()
+        val buffer = ByteArray(8192)
+        while (true) {
+            val remaining = MAX_BYTES - output.size()
+            val count = input.read(buffer, 0, minOf(buffer.size, remaining + 1))
+            if (count == -1) break
+            if (count <= 0) throw IOException("Backup stream made no progress")
+            require(count <= remaining) { "Backup exceeds capacity" }
+            output.write(buffer, 0, count)
+        }
+        return decode(output.toByteArray())
+    }
+
+    /**
+     * Validate the complete snapshot before touching a caller-owned output.
+     * This format contains private coordinates and is NOT encrypted. This method
+     * is for private storage; external export requires a separately reviewed
+     * explicit user choice and destination. Flush/close and any atomic publish
+     * are the caller's responsibility; a failed stream may contain partial bytes.
+     */
+    fun writeToPrivateStorage(snapshot: Snapshot, output: OutputStream) {
+        val bytes = encode(snapshot)
+        output.write(bytes)
     }
 
     /** Reject the whole snapshot on any malformed or unsupported record. */

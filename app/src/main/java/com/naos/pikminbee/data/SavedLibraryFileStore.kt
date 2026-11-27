@@ -23,20 +23,7 @@ internal class SavedLibraryFileStore(
     @Synchronized
     fun read(): SavedDataBackupCodec.Snapshot {
         // Missing or damaged storage is never interpreted as an empty library.
-        val bytes = file.inputStream().use { input ->
-            val output = java.io.ByteArrayOutputStream()
-            val buffer = ByteArray(8192)
-            while (true) {
-                val count = input.read(buffer)
-                if (count == -1) break
-                require(output.size() <= SavedDataBackupCodec.MAX_BYTES - count) {
-                    "Library file exceeds capacity"
-                }
-                output.write(buffer, 0, count)
-            }
-            output.toByteArray()
-        }
-        return SavedDataBackupCodec.decode(bytes)
+        return file.inputStream().use(SavedDataBackupCodec::readFrom)
     }
 
     /** Explicit initialization for a validated, independently reviewed migration. */
@@ -56,14 +43,13 @@ internal class SavedLibraryFileStore(
     }
 
     private fun write(snapshot: SavedDataBackupCodec.Snapshot) {
-        val bytes = SavedDataBackupCodec.encode(snapshot)
         val target = file.absoluteFile
         val parent = requireNotNull(target.parentFile)
         // Same directory ensures the rename cannot cross filesystem boundaries.
         val temporary = File.createTempFile(".library-", ".tmp", parent)
         try {
             FileOutputStream(temporary).use { output ->
-                output.write(bytes)
+                SavedDataBackupCodec.writeToPrivateStorage(snapshot, output)
                 output.fd.sync()
             }
             // Fail closed if atomic replacement is unsupported; no copy fallback.
