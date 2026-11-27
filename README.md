@@ -4,7 +4,7 @@
 
 PikminBee is a free, ad-free Android location and route testing app built with Kotlin and Jetpack Compose.
 
-**Project status:** develop prepares UAT 0.33.2 / DEV 0.33.3; device acceptance remains open. This is a personal, free, ad-free development project. Existing flower records, legacy route metadata and GPX compatibility remain readable/exportable; previously retired flower recognition and dedicated flower route modes remain retired.
+**Project status:** develop prepares UAT 0.33.3 / DEV 0.33.4; device acceptance remains open. This is a personal, free, ad-free development project. Existing flower records, legacy route metadata and GPX compatibility remain readable/exportable; previously retired flower recognition and dedicated flower route modes remain retired.
 
 - Maps: OpenFreeMap Liberty/Dark via MapLibre; optional official Google Maps SDK (requires your own API key).
 - Interface: iOS-27-inspired frosted controls with accessible contrasts and a clear light/dark theme.
