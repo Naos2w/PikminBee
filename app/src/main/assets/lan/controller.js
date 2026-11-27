@@ -293,21 +293,29 @@ function closeMapContextMenu() {
   mapContextSelection = null;
   $("map-context-menu").classList.add("hidden");
 }
-function contextActionTarget(selection) {
+function contextActionTarget(selection, action = "primary") {
   if (!selection || selection.mode !== mode || settingsOpen ||
       !token || token !== selection.session || !connected || !remoteLinkHealthy ||
       !latest || Date.now() >= sessionDeadlineMs || routeEditingBusy()) return null;
   if (mode === "ROUTE") {
-    if (selection.revision !== latest.routeRevision || $("add").disabled) return null;
-    return $("add");
+    if (selection.revision !== latest.routeRevision || !Number.isSafeInteger(selection.revision)) return null;
+    if (action === "view") return $("map-context-view");
+    if (action === "origin") return $("set-origin").disabled ? null : $("set-origin");
+    return $("add").disabled ? null : $("add");
   }
-  if (mode === "TELEPORT" && latest.mockPermissionReady && !$("teleport").disabled)
+  if (action === "primary" && mode === "TELEPORT" && latest.mockPermissionReady && !$("teleport").disabled)
     return $("teleport");
   return null;
 }
+function availableContextActions(selection) {
+  return ["primary", "view", "origin"].filter(action => contextActionTarget(selection, action));
+}
 function updateMapContextMenu() {
-  if (mapContextSelection && !contextActionTarget(mapContextSelection))
-    closeMapContextMenu();
+  if (!mapContextSelection) return;
+  const actions = availableContextActions(mapContextSelection);
+  if (!actions.length) { closeMapContextMenu(); return; }
+  for (const [action,id] of [["primary","map-context-action"],["view","map-context-view"],["origin","map-context-origin"]])
+    $(id).classList.toggle("hidden", !actions.includes(action));
 }
 function openMapContextMenu(event) {
   const original = event.originalEvent;
@@ -318,8 +326,10 @@ function openMapContextMenu(event) {
   const point = parseCoordinate(event.lngLat.lat + ", " + event.lngLat.wrap().lng);
   if (!point) return;
   const selection = {point, mode, session:token, revision:latest?.routeRevision};
-  if (!contextActionTarget(selection)) return;
+  const actions = availableContextActions(selection);
+  if (!actions.length) return;
   mapContextSelection = selection;
+  updateMapContextMenu();
   const menu = $("map-context-menu");
   $("map-context-label").textContent = mode === "ROUTE" ? "加入路點" : "瞬移至此";
   $("map-context-icon").setAttribute("d", mode === "ROUTE" ?
@@ -330,7 +340,7 @@ function openMapContextMenu(event) {
   const rect = menu.getBoundingClientRect();
   menu.style.left = Math.max(8, Math.min(original.clientX, window.innerWidth - rect.width - 8)) + "px";
   menu.style.top = Math.max(8, Math.min(original.clientY, window.innerHeight - rect.height - 8)) + "px";
-  $("map-context-action").focus({preventScroll:true});
+  $(actions.includes("primary") ? "map-context-action" : actions.includes("view") ? "map-context-view" : "map-context-origin").focus({preventScroll:true});
 }
 $("map-context-action").addEventListener("click", () => {
   const selection = mapContextSelection;
@@ -342,6 +352,24 @@ $("map-context-action").addEventListener("click", () => {
   // Reuse the existing explicit confirmation/permission or revision-checked
   // route editor. Opening the menu never changes coordinates or sends a command.
   target.click();
+});
+$("map-context-view").addEventListener("click", () => {
+  const selection = mapContextSelection;
+  const valid = contextActionTarget(selection, "view");
+  closeMapContextMenu();
+  if (valid) focusMapPosition(selection.point, 16);
+});
+$("map-context-origin").addEventListener("click", async () => {
+  const selection = mapContextSelection;
+  const valid = contextActionTarget(selection, "origin");
+  closeMapContextMenu();
+  if (!valid) return;
+  if (!confirm("將此位置設為路線起點？舊預覽會清除，不會移動 GPS。")) return;
+  if (!contextActionTarget(selection, "origin")) return;
+  showCoordinate(selection.point);
+  const point = readCoordinate();
+  if (await act("/api/origin", {...point,expectedRevision:selection.revision}))
+    focusMapPosition(point, 16);
 });
 document.addEventListener("pointerdown", event => {
   if (!$("map-context-menu").contains(event.target)) closeMapContextMenu();

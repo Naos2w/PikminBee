@@ -291,6 +291,15 @@ createServer(async (req,res)=>{
     // Synthetic historical physical coordinate stays only until its original TTL.
     send(res,{message:'合成虛擬位置已啟用（未操控手機）'},202);return;
   }
+  if(req.method==='POST'&&url==='/api/origin'){
+    const data=await readBody(req);
+    if(state.planning||['MOVING','PAUSED'].includes(state.phase)||data.expectedRevision!==state.routeRevision||
+        !Number.isFinite(data.lat)||!Number.isFinite(data.lon)||Math.abs(data.lat)>90||Math.abs(data.lon)>180){
+      send(res,{error:'路線版本或合成起點無效'},409);return;
+    }
+    state.origin={lat:data.lat,lon:data.lon};state.routeRevision++;state.previews={};
+    send(res,{message:'本機合成路線起點已更新；沒有操控手機'},202);return;
+  }
   if(req.method==='POST'&&['/api/points/add','/api/points/reorder','/api/points/remove','/api/points/replace','/api/points/clear','/api/points/undo','/api/points/promote-origin'].includes(url)){
     let body='';
     for await(const chunk of req)body+=chunk;

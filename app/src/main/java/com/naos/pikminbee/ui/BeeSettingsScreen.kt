@@ -106,7 +106,7 @@ fun BeeSettingsScreen(
     val installed = InstalledAppVersion.read(LocalContext.current)
     val titles = mapOf("route" to "進階路徑設定",
         "gps" to "GPS 測試", "overlay" to "懸浮控制教學", "wifi" to "Wi-Fi 控制",
-        "permission" to "權限", "health" to "Health Connect")
+        "permission" to "權限", "health" to "步數與健康")
     BackHandler(enabled = section != null) { section = null }
     Column(
         Modifier.fillMaxSize().background(palette.bg)
@@ -210,7 +210,7 @@ fun BeeSettingsScreen(
                 Triple("overlay", NaosActionGlyph.MORE, "教學"),
                 Triple("wifi", NaosActionGlyph.WIFI, lan.connection.label),
                 Triple("permission", NaosActionGlyph.STEPS, ""),
-                Triple("health", NaosActionGlyph.STEPS, "步數與健康資料"),
+                Triple("health", NaosActionGlyph.STEPS, "Health Connect"),
             )
             rows.forEach { (id, glyph, value) ->
                 Surface(modifier = Modifier.fillMaxWidth().clickable { section = id },
@@ -233,6 +233,8 @@ fun BeeSettingsScreen(
                     Text("版本碼：${installed.code?.toString() ?: "待確認"}", color = muted, fontSize = 10.sp)
                 }
             }
+        } else if (section == "health") {
+            HealthConnectReadSettings(palette = palette)
         } else Surface(
             modifier = Modifier.fillMaxWidth(),
             shape = androidx.compose.foundation.shape.RoundedCornerShape(22.dp),
@@ -302,7 +304,6 @@ fun BeeSettingsScreen(
                 )
 
                     }
-                    "health" -> HealthConnectReadSettings(foreground = foreground, muted = muted)
                     "about" -> SelectionContainer {
                         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                             Text(installed.displayName, color = foreground, fontSize = 16.sp)
