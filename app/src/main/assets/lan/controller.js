@@ -1048,7 +1048,14 @@ function renderMap() {
             await act("/api/points/replace",{mode:"ROUTE",index,...target,expectedRevision:revision});
         } catch(error){setMessage(error.message);}
       });
-      content.append(button);return content;
+      content.append(button);
+      if(index===0) {
+        const promote=document.createElement("button");promote.type="button";
+        promote.className="waypoint-reselect waypoint-promote-origin";promote.textContent="第一點設為起點";
+        promote.addEventListener("click",()=>promoteFirstOrigin(revision));
+        content.append(promote);
+      }
+      return content;
     }
     routeMarkers.forEach(marker => marker.remove());
     routeMarkers = stops.map((item,i) =>
@@ -1288,6 +1295,23 @@ function renderRouteOrder() {
   if(!stops.length){const empty=document.createElement("li");empty.className="muted";empty.textContent="選取位置後加入路點";list.append(empty);}
 }
 
+async function promoteFirstOrigin(revision) {
+  if(mode!=="ROUTE" || !connected || !remoteLinkHealthy || !token || Date.now()>=sessionDeadlineMs ||
+      routeEditingBusy() || !Number.isSafeInteger(revision) || revision!==latest?.routeRevision ||
+      !latest?.routeStops?.length) {
+    setMessage("路線已變更或目前無法編輯，請重新確認");return;
+  }
+  const first={...latest.routeStops[0]};
+  if(!confirm("將第一個路點設為起點？其餘路點將重新編號，並清除舊道路預覽。此操作不會移動 GPS。"))return;
+  if(await act("/api/points/promote-origin",{mode:"ROUTE",index:0,expectedRevision:revision})) {
+    if(latest?.origin && latest.origin.lat===first.lat && latest.origin.lon===first.lon) {
+      focusMapPosition(first,16);
+      setMessage(latest.routeStops?.length?"已將第一點設為起點；其餘路點重新編號，請重新規劃":"已設定新起點，請加入下一個路點");
+    }
+  }
+}
+$("promote-first-origin").addEventListener("click",()=>promoteFirstOrigin(latest?.routeRevision));
+
 function updateRouteControls() {
   updateRouteCameraControl();
   const navigating = mode === "ROUTE";
@@ -1309,6 +1333,8 @@ function updateRouteControls() {
     "尚未指定起點 · 在地圖選擇後按「設為起點」";
   $("add").disabled = !navigating || busy || stops.length >= max;
   $("set-origin").disabled = !navigating || busy;
+  $("promote-first-origin").disabled = !navigating || !connected || !remoteLinkHealthy || routeEditingBusy() ||
+    !stops.length || !Number.isSafeInteger(latest?.routeRevision);
   $("undo").disabled = !navigating || busy || stops.length === 0;
   $("clear").disabled = !navigating || busy || stops.length === 0;
   $("plan").disabled = !navigating || busy || !hasOrigin || stops.length === 0 || stops.length > max;

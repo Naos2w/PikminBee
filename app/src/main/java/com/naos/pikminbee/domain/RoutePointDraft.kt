@@ -13,6 +13,12 @@ object RoutePointDraft {
 
     data class Update(val stops: List<Coordinate>, val outcome: Outcome, val index: Int = -1)
 
+    data class OriginPromotion(val origin: Coordinate, val stops: List<Coordinate>)
+
+    /** Explicit draft-only conversion, never a device-position command. */
+    fun promoteFirst(stops: List<Coordinate>): OriginPromotion? =
+        stops.firstOrNull()?.let { OriginPromotion(it, stops.drop(1)) }
+
     fun select(
         stops: List<Coordinate>, origin: Coordinate?,
         picked: Coordinate, replaceIndex: Int? = null,

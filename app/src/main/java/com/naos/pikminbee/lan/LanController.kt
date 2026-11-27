@@ -387,6 +387,20 @@ class LanController(private val context: Context) {
                     .fold({ accepted("已送出瞬移指令") },
                         { error(409, "無法瞬移：" + (it.message ?: "請確認手機狀態")) })
             }
+            "/api/points/promote-origin" -> {
+                if (walking() || starting.get() || RouteDraftState.planning.value)
+                    return error(409, "路線規劃或行走中，不能修改起點")
+                val json = parse(req.body) ?: return error(400, "JSON 無效")
+                if (json.optString("mode") != "ROUTE" || json.optInt("index", -1) != 0 ||
+                    !json.has("expectedRevision")) return error(400, "只可明確選擇第一個路點及目前版本")
+                val expected = json.optLong("expectedRevision", -1)
+                synchronized(RouteDraftState) {
+                    if (walking() || starting.get() || !prefs.promoteFirstRouteStopIfCurrent(expected))
+                        return error(409, "路線已變更或沒有路點，請重新確認")
+                    invalidate(WalkMode.ROUTE)
+                }
+                accepted("已將第一點設為起點；其餘路點重新編號，請重新規劃。尚未移動 GPS")
+            }
             "/api/points/add", "/api/points/reorder", "/api/points/remove", "/api/points/replace",
             "/api/points/undo", "/api/points/clear" -> {
                 if (walking() || starting.get() || RouteDraftState.planning.value)

@@ -3,6 +3,7 @@ package com.naos.pikminbee.data
 import android.content.Context
 import com.naos.pikminbee.BuildConfig
 import com.naos.pikminbee.domain.Coordinate
+import com.naos.pikminbee.domain.RoutePointDraft
 import com.naos.pikminbee.ui.NaosThemeFamily
 import com.naos.pikminbee.ui.NaosGlassMaterial
 import com.naos.pikminbee.domain.WalkMode
@@ -109,9 +110,10 @@ object RouteDraftState {
     val flowerStops = MutableStateFlow<List<Coordinate>>(emptyList())
     private var initialized = false
 
-    @Synchronized fun initialize(route: List<Coordinate>, flowers: List<Coordinate>) {
+    @Synchronized fun initialize(route: List<Coordinate>, flowers: List<Coordinate>,
+        origin: Coordinate? = null, loop: Boolean = false) {
         if (initialized) return
-        publish(route)
+        publish(route, origin, loop)
         flowerStops.value = flowers
         initialized = true
     }
@@ -173,7 +175,8 @@ class AppPreferences(private val context: Context) {
     private val prefs = context.getSharedPreferences("pikminbee_preferences", Context.MODE_PRIVATE)
 
     init {
-        RouteDraftState.initialize(loadPoints("route_draft"), loadPoints("flower_draft"))
+        RouteDraftState.initialize(loadPoints("route_draft"), loadPoints("flower_draft"),
+            loadRouteOrigin(), prefs.getBoolean("route_draft_loop", false))
         SavedRouteState.initialize(readSavedRoutes())
         WalkSpeedState.initialize(WalkSpeedPreset.fromSavedDefault(
             prefs.getString("walk_speed_default", null),
@@ -386,7 +389,8 @@ class AppPreferences(private val context: Context) {
     fun saveRouteDraft(points: List<Coordinate>) {
         synchronized(RouteDraftState) {
             if (RouteDraftState.snapshot().stops != points) {
-                savePoints("route_draft", points)
+                val current = RouteDraftState.snapshot()
+                persistRouteDraft(points, current.origin, current.loop)
                 RouteDraftState.publish(points)
             }
         }
@@ -403,14 +407,27 @@ class AppPreferences(private val context: Context) {
     fun saveRouteOptionsIfCurrent(expectedRevision: Long, origin: Coordinate?, loop: Boolean): Boolean =
         synchronized(RouteDraftState) {
             if (!RouteDraftState.canCommit(expectedRevision)) return@synchronized false
-            RouteDraftState.publish(RouteDraftState.snapshot().stops, origin, loop)
+            val stops = RouteDraftState.snapshot().stops
+            persistRouteDraft(stops, origin, loop)
+            RouteDraftState.publish(stops, origin, loop)
+            true
+        }
+
+    /** Commit the new origin and all remaining stops together. No GPS side effect. */
+    fun promoteFirstRouteStopIfCurrent(expectedRevision: Long): Boolean =
+        synchronized(RouteDraftState) {
+            if (!RouteDraftState.canCommit(expectedRevision)) return@synchronized false
+            val draft = RouteDraftState.snapshot()
+            val next = RoutePointDraft.promoteFirst(draft.stops) ?: return@synchronized false
+            persistRouteDraft(next.stops, next.origin, draft.loop)
+            RouteDraftState.publish(next.stops, next.origin, draft.loop)
             true
         }
 
     fun loadSavedRouteDraftIfCurrent(expectedRevision: Long, route: SavedRoute): Boolean =
         synchronized(RouteDraftState) {
             if (!RouteDraftState.canCommit(expectedRevision)) return@synchronized false
-            savePoints("route_draft", route.stops)
+            persistRouteDraft(route.stops, route.origin, route.loop)
             RouteDraftState.publish(route.stops, route.origin, route.loop)
             true
         }
@@ -430,6 +447,25 @@ class AppPreferences(private val context: Context) {
             runCatching { Coordinate(item.getDouble("lat"), item.getDouble("lon")) }.getOrNull()
         }
     }.getOrDefault(emptyList())
+
+    private fun loadRouteOrigin(): Coordinate? = runCatching {
+        val stored = prefs.getString("route_draft_origin", null) ?: return@runCatching null
+        val item = JSONObject(stored)
+        Coordinate(item.getDouble("lat"), item.getDouble("lon"))
+    }.getOrNull()
+
+    /** Keep the legacy waypoint JSON format; write the associated draft options in one edit. */
+    private fun persistRouteDraft(points: List<Coordinate>, origin: Coordinate?, loop: Boolean) {
+        require(points.size <= RoutePointDraft.MAX_STOPS)
+        val json = JSONArray()
+        points.forEach { json.put(JSONObject().put("lat", it.latitude).put("lon", it.longitude)) }
+        val edit = prefs.edit().putString("route_draft", json.toString())
+            .putBoolean("route_draft_loop", loop)
+        if (origin == null) edit.remove("route_draft_origin")
+        else edit.putString("route_draft_origin", JSONObject()
+            .put("lat", origin.latitude).put("lon", origin.longitude).toString())
+        edit.apply()
+    }
 
     private fun savePoints(key: String, points: List<Coordinate>) {
         require(points.size <= 15)

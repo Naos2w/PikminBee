@@ -291,7 +291,7 @@ createServer(async (req,res)=>{
     // Synthetic historical physical coordinate stays only until its original TTL.
     send(res,{message:'合成虛擬位置已啟用（未操控手機）'},202);return;
   }
-  if(req.method==='POST'&&['/api/points/add','/api/points/reorder','/api/points/remove','/api/points/replace','/api/points/clear','/api/points/undo'].includes(url)){
+  if(req.method==='POST'&&['/api/points/add','/api/points/reorder','/api/points/remove','/api/points/replace','/api/points/clear','/api/points/undo','/api/points/promote-origin'].includes(url)){
     let body='';
     for await(const chunk of req)body+=chunk;
     const request=JSON.parse(body||'{}');
@@ -303,7 +303,12 @@ createServer(async (req,res)=>{
     const old=state[items].slice();
     const index=request.index;
     const valid=i=>Number.isInteger(i)&&i>=0&&i<old.length;
-    if(url.endsWith('reorder')){
+    if(url.endsWith('promote-origin')){
+      if(request.mode!=='ROUTE'||request.index!==0||request.expectedRevision!==state.routeRevision||!old.length){
+        send(res,{error:'無效的第一路點或草稿版本'},409);return;
+      }
+      state.origin=old.shift();
+    } else if(url.endsWith('reorder')){
       const from=request.from, to=request.to;
       if(!valid(from)||!valid(to)||request.expectedRevision!==state.routeRevision){
         send(res,{error:'路點順序無效'},409);return;

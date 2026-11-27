@@ -217,6 +217,8 @@ private fun PikminBeeScreen() {
     val routeRoadPreview = preparedRoute?.geometry.orEmpty()
     var routeEditingStopIndex by remember { mutableStateOf<Int?>(null) }
     var routeStopActionIndex by remember { mutableStateOf<Int?>(null) }
+    var routeStopActionRevision by remember { mutableStateOf<Long?>(null) }
+    var promoteFirstStopRevision by remember { mutableStateOf<Long?>(null) }
     var pendingTeleport by remember { mutableStateOf<Coordinate?>(null) }
     var mapExplore by remember { mutableStateOf(false) }
     var cameraSerial by remember { mutableIntStateOf(0) }
@@ -290,6 +292,8 @@ private fun PikminBeeScreen() {
     LaunchedEffect(routeDraft.revision) {
         routeEditingStopIndex = null
         routeStopActionIndex = null
+        routeStopActionRevision = null
+        promoteFirstStopRevision = null
     }
 
     var phoneLocationRefresh by remember { mutableIntStateOf(0) }
@@ -953,11 +957,45 @@ private fun PikminBeeScreen() {
             })
         }
         if (activePage == BeePage.MAP && tab == ToolTab.ROUTE) {
+            promoteFirstStopRevision?.let { expected ->
+                val first = roadStops.firstOrNull()
+                AlertDialog(
+                    onDismissRequest = { promoteFirstStopRevision = null },
+                    title = { Text("將第一個路點設為起點？") },
+                    text = { Text("原第 1 點會成為路線起點，其餘路點依序重新編號，並清除舊道路預覽。此操作只修改草稿及地圖，不移動 GPS。") },
+                    confirmButton = { TextButton(enabled = first != null && !planning && !activeRouteWalk &&
+                        expected == routeDraft.revision, onClick = {
+                        promoteFirstStopRevision = null
+                        if (first != null && LocationStatus.phase.value !in listOf(WalkPhase.MOVING, WalkPhase.PAUSED) &&
+                            prefs.promoteFirstRouteStopIfCurrent(expected)) {
+                            routeEditingStopIndex = null
+                            routeStopActionIndex = null
+                            selectionExplicit = false
+                            focusMapPoint(first)
+                            closeDetailsRequest++
+                            message = if (roadStops.size == 1) "已設定新起點，請加入下一個路點"
+                                else "已將第一點設為起點；其餘路點重新編號，請重新規劃"
+                        } else message = "路線已變更或目前無法編輯，請重新確認"
+                    }) { Text("設為起點") } },
+                    dismissButton = { TextButton(onClick = { promoteFirstStopRevision = null }) { Text("取消") } },
+                )
+            }
             routeStopActionIndex?.let { index ->
                 AlertDialog(
                     onDismissRequest = { routeStopActionIndex = null },
                     title = { Text("第 ${index + 1} 點") },
-                    text = { Text("重新選擇位置，或從路徑中刪除此點。其餘路點會重新依序編號。") },
+                    text = {
+                        Column {
+                            Text("重新選擇位置，或從路徑中刪除此點。其餘路點會重新依序編號。")
+                            if (index == 0) TextButton(
+                                enabled = !planning && !activeRouteWalk && routeStopActionRevision == routeDraft.revision,
+                                onClick = {
+                                    promoteFirstStopRevision = routeStopActionRevision
+                                    routeStopActionIndex = null
+                                },
+                            ) { Text("將第一點設為起點") }
+                        }
+                    },
                     confirmButton = {
                         TextButton(onClick = {
                             routeStopActionIndex = null
@@ -1146,8 +1184,10 @@ private fun PikminBeeScreen() {
                         stopRouteCameraFollow()
                         coordinateInputDismissToken++
                         if (index in roadStops.indices) {
+                            routeStopActionRevision = routeDraft.revision
                             routeStopActionIndex = index
-                            message = "已點選第 ${index + 1} 點，可刪除或重新選位置"
+                            message = if (index == 0) "已點選第一點，可設為起點、刪除或重新選位置"
+                                else "已點選第 ${index + 1} 點，可刪除或重新選位置"
                         }
                     }
                     else -> null
@@ -1281,6 +1321,12 @@ private fun PikminBeeScreen() {
                                             PreparedRouteState.set(WalkMode.ROUTE, null)
                                             message = "已改用目前位置為規劃起點"
                                         }
+                                    },
+                                    onPromoteFirstStop = { expected ->
+                                        if (expected == RouteDraftState.snapshot().revision && !planning &&
+                                            LocationStatus.phase.value !in listOf(WalkPhase.MOVING, WalkPhase.PAUSED))
+                                            promoteFirstStopRevision = expected
+                                        else message = "路線已變更或目前無法編輯，請重新確認"
                                     },
                                     onSaveRoute = {
                                         saveRouteRevision = routeDraft.revision
