@@ -33,6 +33,7 @@ import com.naos.pikminbee.data.FreeMapStyle
 import com.naos.pikminbee.data.MapBasemapPolicy
 import com.naos.pikminbee.domain.Coordinate
 import com.naos.pikminbee.domain.WalkingGeometry
+import com.naos.pikminbee.domain.RouteMapSegments
 import com.naos.pikminbee.flower.FlowerSpot
 import com.naos.pikminbee.flower.FlowerEvidence
 import org.maplibre.android.MapLibre
@@ -48,7 +49,7 @@ import org.maplibre.android.annotations.PolylineOptions as LibrePolylineOptions
 import org.maplibre.android.geometry.LatLngBounds as LibreLatLngBounds
 import org.maplibre.android.camera.CameraUpdateFactory as LibreCameraUpdateFactory
 
-/** An explicit, one-shot camera instruction. Live GPS updates never move the camera. */
+/** A one-shot camera instruction, including updates while the user explicitly enables following. */
 data class MapCameraRequest(
     val id: Int,
     val target: MapCameraGeometry.ViewTarget,
@@ -72,6 +73,7 @@ fun LocationMap(
     start: Coordinate?,
     stops: List<Coordinate>,
     road: List<Coordinate>,
+    routeSegments: RouteMapSegments = RouteMapSegments(),
     previewRoad: Boolean,
     flowerSpots: List<FlowerSpot>,
     cameraRequest: MapCameraRequest? = null,
@@ -80,6 +82,7 @@ fun LocationMap(
     onCameraApplied: (Int) -> Unit = {},
     mapExplore: Boolean = false,
     onCameraFailure: (String) -> Unit = {},
+    onCameraGesture: () -> Unit = {},
     onPick: (Coordinate) -> Unit,
     onFlowerPick: (FlowerSpot) -> Unit,
     onStopPick: ((Int) -> Unit)? = null,
@@ -87,15 +90,15 @@ fun LocationMap(
     interactive: Boolean = true,
 ) {
     when (provider) {
-        MapProvider.OPEN_FREE_MAP -> OpenFreeMapPane(dark, selected, selectionActive, current, currentIsMock, start, stops, road, previewRoad, flowerSpots,
-            cameraRequest, viewport, onViewport, onCameraApplied, mapExplore, onCameraFailure,
+        MapProvider.OPEN_FREE_MAP -> OpenFreeMapPane(dark, selected, selectionActive, current, currentIsMock, start, stops, road, routeSegments, previewRoad, flowerSpots,
+            cameraRequest, viewport, onViewport, onCameraApplied, mapExplore, onCameraFailure, onCameraGesture,
             onPick, onFlowerPick, onStopPick, modifier, interactive)
         MapProvider.GOOGLE_MAPS -> if (BuildConfig.HAS_GOOGLE_MAPS_KEY) {
-            GoogleMapsPane(dark, selected, selectionActive, current, currentIsMock, start, stops, road, previewRoad, flowerSpots,
-                cameraRequest, viewport, onViewport, onCameraApplied, mapExplore, onCameraFailure, onPick, onFlowerPick, onStopPick, modifier, interactive)
+            GoogleMapsPane(dark, selected, selectionActive, current, currentIsMock, start, stops, road, routeSegments, previewRoad, flowerSpots,
+                cameraRequest, viewport, onViewport, onCameraApplied, mapExplore, onCameraFailure, onCameraGesture, onPick, onFlowerPick, onStopPick, modifier, interactive)
         } else {
-            OpenFreeMapPane(dark, selected, selectionActive, current, currentIsMock, start, stops, road, previewRoad, flowerSpots,
-                cameraRequest, viewport, onViewport, onCameraApplied, mapExplore, onCameraFailure,
+            OpenFreeMapPane(dark, selected, selectionActive, current, currentIsMock, start, stops, road, routeSegments, previewRoad, flowerSpots,
+                cameraRequest, viewport, onViewport, onCameraApplied, mapExplore, onCameraFailure, onCameraGesture,
                 onPick, onFlowerPick, onStopPick, modifier, interactive)
         }
     }
@@ -106,10 +109,11 @@ private fun OpenFreeMapPane(
     dark: Boolean, selected: Coordinate, selectionActive: Boolean,
     current: Coordinate?, currentIsMock: Boolean,
     start: Coordinate?, stops: List<Coordinate>,
-    road: List<Coordinate>, previewRoad: Boolean, flowerSpots: List<FlowerSpot>,
+    road: List<Coordinate>, routeSegments: RouteMapSegments, previewRoad: Boolean, flowerSpots: List<FlowerSpot>,
     cameraRequest: MapCameraRequest?, viewport: MapViewport?,
     onViewport: (MapViewport) -> Unit, onCameraApplied: (Int) -> Unit, mapExplore: Boolean,
     onCameraFailure: (String) -> Unit,
+    onCameraGesture: () -> Unit,
     onPick: (Coordinate) -> Unit, onFlowerPick: (FlowerSpot) -> Unit,
     onStopPick: ((Int) -> Unit)?,
     modifier: Modifier,
@@ -123,6 +127,7 @@ private fun OpenFreeMapPane(
     val latestOnStopPick by rememberUpdatedState(onStopPick)
     val latestStops by rememberUpdatedState(stops)
     val latestOnCameraFailure by rememberUpdatedState(onCameraFailure)
+    val latestOnCameraGesture by rememberUpdatedState(onCameraGesture)
     val latestViewport by rememberUpdatedState(viewport)
     val latestOnViewport by rememberUpdatedState(onViewport)
     val latestCameraRequest by rememberUpdatedState(cameraRequest)
@@ -147,6 +152,7 @@ private fun OpenFreeMapPane(
     var flowerMarkers by remember { mutableStateOf(emptyList<org.maplibre.android.annotations.Marker>()) }
     var shownFlowers by remember { mutableStateOf(emptyList<FlowerSpot>()) }
     var line by remember { mutableStateOf<org.maplibre.android.annotations.Polyline?>(null) }
+    var legLines by remember { mutableStateOf(emptyList<org.maplibre.android.annotations.Polyline>()) }
     DisposableEffect(view, lifecycleOwner) {
         var disposed = false
         val observer = LifecycleEventObserver { _, event ->
@@ -201,6 +207,10 @@ private fun OpenFreeMapPane(
                     .bearing(pose?.bearing ?: 0.0)
                     .tilt(pose?.tilt ?: 0.0).build()
             ))
+            ready.addOnCameraMoveStartedListener { reason ->
+                if (!disposed && reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE)
+                    latestOnCameraGesture()
+            }
             ready.addOnCameraIdleListener {
                 if (!disposed) {
                     val camera = ready.cameraPosition
@@ -290,10 +300,12 @@ private fun OpenFreeMapPane(
             } else startMarker?.position = position
         }
     }
-    LaunchedEffect(map, styleVersion, stops, road, previewRoad, obscuredStops) {
+    LaunchedEffect(map, styleVersion, stops, road, routeSegments, previewRoad, obscuredStops) {
         val m = map ?: return@LaunchedEffect
         if (styleVersion == 0) return@LaunchedEffect
         stopMarkers.forEach { m.removeMarker(it.second) }
+        legLines.forEach { m.removePolyline(it) }
+        legLines = emptyList()
         line?.let { m.removePolyline(it) }
         stopMarkers = stops.mapIndexedNotNull { index, coordinate ->
             if (index in obscuredStops) return@mapIndexedNotNull null
@@ -308,6 +320,16 @@ private fun OpenFreeMapPane(
             .addAll(road.map { LibreLatLng(it.latitude, it.longitude) })
             .color(if (previewRoad) android.graphics.Color.rgb(42, 175, 211)
                 else android.graphics.Color.rgb(232, 151, 39)).width(5f)) else null
+        fun addSegment(points: List<Coordinate>, color: Int, width: Float) =
+            m.addPolyline(LibrePolylineOptions().addAll(points.map { LibreLatLng(it.latitude, it.longitude) })
+                .color(color).width(width))
+        legLines = buildList {
+            if (routeSegments.completed.size >= 2) add(addSegment(routeSegments.completed, android.graphics.Color.rgb(137, 150, 163), 5f))
+            if (routeSegments.active.size >= 2) {
+                add(addSegment(routeSegments.active, android.graphics.Color.WHITE, 12f))
+                add(addSegment(routeSegments.active, android.graphics.Color.rgb(8, 123, 230), 8f))
+            }
+        }
     }
     LaunchedEffect(map, styleVersion, flowerSpots) {
         val m = map ?: return@LaunchedEffect
@@ -321,7 +343,7 @@ private fun OpenFreeMapPane(
                     if (flower.evidence == FlowerEvidence.PERSONALLY_CHECKED) " · 本人確認" else " · 待確認"))
         }
     }
-    // Explicit camera actions only: do not follow the GPS marker at every tick.
+    // Camera changes require an explicit action or an explicitly enabled follow mode.
     // The map layout needs non-zero dimensions before the bounds update is valid.
     LaunchedEffect(map, styleVersion, cameraRequest) {
         val m = map ?: return@LaunchedEffect
@@ -367,10 +389,11 @@ private fun GoogleMapsPane(
     dark: Boolean, selected: Coordinate, selectionActive: Boolean,
     current: Coordinate?, currentIsMock: Boolean,
     start: Coordinate?, stops: List<Coordinate>,
-    road: List<Coordinate>, previewRoad: Boolean, flowerSpots: List<FlowerSpot>,
+    road: List<Coordinate>, routeSegments: RouteMapSegments, previewRoad: Boolean, flowerSpots: List<FlowerSpot>,
     cameraRequest: MapCameraRequest?, viewport: MapViewport?,
     onViewport: (MapViewport) -> Unit, onCameraApplied: (Int) -> Unit, mapExplore: Boolean,
     onCameraFailure: (String) -> Unit,
+    onCameraGesture: () -> Unit,
     onPick: (Coordinate) -> Unit, onFlowerPick: (FlowerSpot) -> Unit,
     onStopPick: ((Int) -> Unit)?,
     modifier: Modifier,
@@ -384,6 +407,7 @@ private fun GoogleMapsPane(
     val latestOnStopPick by rememberUpdatedState(onStopPick)
     val latestStops by rememberUpdatedState(stops)
     val latestOnCameraFailure by rememberUpdatedState(onCameraFailure)
+    val latestOnCameraGesture by rememberUpdatedState(onCameraGesture)
     val latestViewport by rememberUpdatedState(viewport)
     val latestOnViewport by rememberUpdatedState(onViewport)
     val latestCameraRequest by rememberUpdatedState(cameraRequest)
@@ -401,6 +425,7 @@ private fun GoogleMapsPane(
     var flowerMarkers by remember { mutableStateOf(emptyList<com.google.android.gms.maps.model.Marker>()) }
     var shownFlowers by remember { mutableStateOf(emptyList<FlowerSpot>()) }
     var line by remember { mutableStateOf<com.google.android.gms.maps.model.Polyline?>(null) }
+    var legLines by remember { mutableStateOf(emptyList<com.google.android.gms.maps.model.Polyline>()) }
     DisposableEffect(view, lifecycleOwner) {
         var disposed = false
         val observer = LifecycleEventObserver { _, event ->
@@ -453,6 +478,10 @@ private fun GoogleMapsPane(
                     .bearing(pose?.bearing?.toFloat() ?: 0f)
                     .tilt(pose?.tilt?.toFloat() ?: 0f).build()
             ))
+            ready.setOnCameraMoveStartedListener { reason ->
+                if (!disposed && reason == GoogleMap.OnCameraMoveStartedListener.REASON_GESTURE)
+                    latestOnCameraGesture()
+            }
             ready.setOnCameraIdleListener {
                 if (!disposed) {
                     val camera = ready.cameraPosition
@@ -529,9 +558,11 @@ private fun GoogleMapsPane(
             } else startMarker?.position = position
         }
     }
-    LaunchedEffect(map, stops, road, previewRoad, obscuredStops) {
+    LaunchedEffect(map, stops, road, routeSegments, previewRoad, obscuredStops) {
         val m = map ?: return@LaunchedEffect
         stopMarkers.forEach { it.second.remove() }
+        legLines.forEach { it.remove() }
+        legLines = emptyList()
         line?.remove()
         stopMarkers = stops.mapIndexedNotNull { index, coordinate ->
             if (index in obscuredStops) return@mapIndexedNotNull null
@@ -547,6 +578,16 @@ private fun GoogleMapsPane(
             .addAll(road.map { GoogleLatLng(it.latitude, it.longitude) })
             .color(if (previewRoad) android.graphics.Color.rgb(42, 175, 211)
                 else android.graphics.Color.rgb(232, 151, 39)).width(6f)) else null
+        fun addSegment(points: List<Coordinate>, color: Int, width: Float, z: Float) =
+            m.addPolyline(GooglePolylineOptions().addAll(points.map { GoogleLatLng(it.latitude, it.longitude) })
+                .color(color).width(width).zIndex(z))
+        legLines = buildList {
+            if (routeSegments.completed.size >= 2) add(addSegment(routeSegments.completed, android.graphics.Color.rgb(137, 150, 163), 6f, 1f))
+            if (routeSegments.active.size >= 2) {
+                add(addSegment(routeSegments.active, android.graphics.Color.WHITE, 13f, 2f))
+                add(addSegment(routeSegments.active, android.graphics.Color.rgb(8, 123, 230), 9f, 3f))
+            }
+        }
     }
     LaunchedEffect(map, flowerSpots) {
         val m = map ?: return@LaunchedEffect

@@ -44,14 +44,11 @@ fun RouteLibraryPanel(
 ) {
     var name by remember(mode) { mutableStateOf("") }
     var editing by remember(mode) { mutableStateOf<SavedRoute?>(null) }
-    var expanded by remember(mode) { mutableStateOf(false) }
     var deleteCandidate by remember { mutableStateOf<SavedRoute?>(null) }
 
     Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-        TextButton(onClick = { expanded = !expanded }) {
-            Text(if (expanded) "收起已收藏路線" else "收藏路線／GPX（" + routes.size + "）")
-        }
-        if (expanded) {
+        Text("收藏路線／GPX（" + routes.size + "）", color = foreground, fontWeight = FontWeight.SemiBold)
+        run {
             Text(
                 "儲存目前的路點，下次可直接載入。舊巡花收藏也會以一般路線草稿開啟，不會自動開始行走。",
                 color = muted, fontSize = 12.sp,
@@ -97,7 +94,8 @@ fun RouteLibraryPanel(
                             Text(route.name, color = foreground, fontSize = 14.sp,
                                 fontWeight = FontWeight.SemiBold, maxLines = 1)
                             Text(route.stops.size.toString() + " 個路點 · " +
-                                (if (route.mode == WalkMode.FLOWERS) "舊巡花收藏 · 可轉一般路線" else "道路"),
+                                (if (route.mode == WalkMode.FLOWERS) "舊巡花收藏 · 可轉一般路線" else if (route.loop) "循環" else "道路") +
+                                (if (route.origin == null) " · 未儲存起點" else " · 已儲存起點"),
                                 color = muted, fontSize = 11.sp)
                             Row(Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(2.dp)) {
