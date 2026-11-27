@@ -18,7 +18,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Button
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Checkbox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -136,30 +135,24 @@ fun WifiControlPanel(
         }
         if (lan.pendingDevice.isNotBlank() && lan.connection.approvalId.isNotBlank()) {
             val approvalId = lan.connection.approvalId
-            var shareOnApproval by remember(approvalId) {
-                mutableStateOf(false)
-            }
             Text("待核准連線／續期：${lan.pendingDevice}",
                 color = foreground, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(checked = shareOnApproval, onCheckedChange = { shareOnApproval = it })
-                Text("分享最近真實位置（選填）", color = foreground, fontSize = 12.sp)
-            }
-            Text("僅限本次核准的瀏覽器，快照最多 30 分鐘；私人 Wi-Fi 的 HTTP 未加密。",
+            Text("選擇本次核准範圍；最近真實位置快照最多 30 分鐘，僅供該瀏覽器。私人 Wi-Fi 的 HTTP 未加密。",
                 color = muted, fontSize = 11.sp)
-            Row(Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Button(onClick = {
-                    context.startService(LanControlService.approveCommand(
-                        context, approvalId, shareOnApproval))
-                }, modifier = Modifier.weight(1f)) {
-                    Text(if (shareOnApproval) "核准並分享" else if (lan.connection.renewal) "核准續期" else "核准裝置",
-                        fontSize = 12.sp)
+                    context.startService(LanControlService.approveCommand(context, approvalId, false))
+                }, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (lan.connection.renewal) "續期 · 僅控制" else "核准 · 僅控制")
                 }
                 OutlinedButton(onClick = {
-                    context.startService(LanControlService.command(
-                        context, LanControlService.DENY))
-                }, modifier = Modifier.weight(1f)) { Text("拒絕", fontSize = 12.sp) }
+                    context.startService(LanControlService.approveCommand(context, approvalId, true))
+                }, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (lan.connection.renewal) "續期並分享真實位置" else "核准並分享真實位置")
+                }
+                TextButton(onClick = {
+                    context.startService(LanControlService.command(context, LanControlService.DENY))
+                }, modifier = Modifier.fillMaxWidth()) { Text("拒絕") }
             }
         }
         Text(lan.note, color = muted, fontSize = 12.sp)
