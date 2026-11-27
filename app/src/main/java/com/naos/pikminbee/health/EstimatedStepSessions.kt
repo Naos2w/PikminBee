@@ -50,10 +50,10 @@ object EstimatedStepSessionCodec {
     }.getOrDefault(emptyList())
 }
 
-class EstimatedStepLedger(context: Context, private val activeRouteSync: Boolean = false) {
+class EstimatedStepLedger(context: Context, activeRouteSync: Boolean = false) {
     companion object {
         private val transactionLock = Any()
-        /** Fresh opt-in and queue; the 0.28.1 ledger remains available for history only. */
+        /** Separate current queue; the 0.28.1 ledger remains available for history only. */
         fun routeSync(context: Context) = EstimatedStepLedger(context, activeRouteSync = true)
         /** Signals UI readers when the queue changes, including after background sync. */
         val changes = MutableStateFlow(0L)
@@ -107,11 +107,4 @@ class EstimatedStepLedger(context: Context, private val activeRouteSync: Boolean
         }
     }
 
-    fun optIn(): Boolean = activeRouteSync && prefs.getBoolean("sync_virtual_estimates_to_hc", false)
-
-    fun setOptIn(value: Boolean) {
-        check(activeRouteSync) { "Legacy estimates cannot be opted into export" }
-        // Never reuse consent from the old ledger.
-        prefs.edit().putBoolean("sync_virtual_estimates_to_hc", value).apply()
-    }
 }

@@ -207,7 +207,7 @@ class MockLocationService : Service() {
                         val end = System.currentTimeMillis()
                         routeEstimateCheckpoint.recordMovement(
                             end - (deltaSeconds * 1000.0).toLong().coerceAtLeast(1L), end, now,
-                            snapshot.estimatedSteps - beforeSteps, routeEstimateLedger.optIn(),
+                            snapshot.estimatedSteps - beforeSteps,
                         )
                         flushRouteEstimateChunks()
                     }
@@ -706,7 +706,7 @@ class MockLocationService : Service() {
         }
         if (saved > 0) {
             saveEstimatedSteps()
-            if (routeEstimateLedger.optIn()) runCatching {
+            runCatching {
                 EstimatedStepsSyncWorker.enqueue(this)
             }.onFailure { Log.w("PikminBee", "Route estimate sync could not be enqueued", it) }
         }

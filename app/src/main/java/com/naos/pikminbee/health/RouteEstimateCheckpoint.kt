@@ -14,11 +14,7 @@ internal class RouteEstimateCheckpoint {
     private val ready = ArrayDeque<Chunk>()
 
     fun recordMovement(startMillis: Long, endMillis: Long, elapsedMillis: Long,
-                       deltaSteps: Long, enabled: Boolean) {
-        if (!enabled) {
-            finish()
-            return
-        }
+                       deltaSteps: Long) {
         if (startMillis <= 0L || endMillis <= startMillis || deltaSteps < 0L) return
         // Do not merge across a backwards wall-clock jump or a long interruption.
         active?.let {
