@@ -62,11 +62,6 @@ class PlaceLookup(context: Context) {
         suggestion
     }
 
-    /** Resolve only for a verified real physical fix; caller owns that safety gate. */
-    suspend fun zoneForVerifiedPhysical(point: Coordinate): String? = withContext(Dispatchers.IO) {
-        resolveZoneCached(point)
-    }
-
     private fun resolveZoneCached(point: Coordinate): String? {
         val key = "zone:" + cacheKey(point)
         val cached = cache.getString(key, null)

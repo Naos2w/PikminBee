@@ -25,7 +25,6 @@ import com.naos.pikminbee.data.PlaceLookup
 import com.naos.pikminbee.data.PlaceSuggestion
 import com.naos.pikminbee.data.PlaceSuggestionPolicy
 import com.naos.pikminbee.data.SavedPlaceMetadataPolicy
-import com.naos.pikminbee.data.VerifiedRealTimeZone
 import com.naos.pikminbee.data.WalkSpeedState
 import com.naos.pikminbee.domain.WalkSpeedPreset
 import com.naos.pikminbee.domain.WalkSpeedProfile
@@ -113,7 +112,6 @@ class LanController(private val context: Context) {
     // coordinates or the sharing grant in SharedPreferences/browser storage.
     @Volatile private var physicalShareSessionToken: String? = null
     @Volatile private var physicalSnapshot: LanPhysicalSnapshot? = null
-    @Volatile private var verifiedTimeZoneReference: VerifiedRealTimeZone? = null
     @Volatile private var lastObservedMock = false
     private fun origin(): Coordinate? = RouteDraftState.snapshot().origin ?: LocationStatus.selected.value
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -236,7 +234,6 @@ class LanController(private val context: Context) {
         physicalShareSessionToken = null
         physicalSnapshot = null
         realFix = null
-        verifiedTimeZoneReference = null
         realGpsState = "idle"
         previews.clear()
         placeLookups.clear()
@@ -793,7 +790,6 @@ class LanController(private val context: Context) {
         if (providers.isEmpty()) return error(409, "手機定位服務未啟用")
         val generation = realRequestGeneration.incrementAndGet()
         realFix = null
-        // A failed new fix request does not invalidate an earlier verified zone.
         realFixTimestampMillis = 0L
         realFixAccuracyMetres = -1f
         realRequestedAtMillis = System.currentTimeMillis()
@@ -842,16 +838,8 @@ class LanController(private val context: Context) {
                 realFixAccuracyMetres.takeIf { it >= 0f })
         }
         realGpsState = "ready"
-        // Only the explicitly requested, verified non-mock fix may set the
-        // reference time zone; never fall back to system/Taiwan/mock time.
-        scope.launch {
-            val resolved = placeLookup.zoneForVerifiedPhysical(point)
-            if (generation == realRequestGeneration.get() &&
-                !LocationStatus.mockActive.value && LocationStatus.selected.value == null &&
-                resolved != null) {
-                verifiedTimeZoneReference = VerifiedRealTimeZone(resolved, fix.time)
-            }
-        }
+        // A physical sharing grant is local-only; do not transmit this fix
+        // to external geocoding or time-zone services.
     }
 
     private fun walking(): Boolean = LocationStatus.phase.value in
@@ -951,8 +939,7 @@ class LanController(private val context: Context) {
         if (mocked && !lastObservedMock) {
             realRequestGeneration.incrementAndGet()
             realFix = null
-            // Invalidate the real-coordinate response but NOT a fresh, previously
-            // verified physical time-zone reference. Never substitute mock GPS.
+            // Invalidate the real-coordinate response. Never substitute mock GPS.
             realGpsState = "idle"
         }
         lastObservedMock = mocked
@@ -970,8 +957,6 @@ class LanController(private val context: Context) {
             realGpsState == "idle" -> "idle"
             else -> "unavailable"
         }
-        val realZone = verifiedTimeZoneReference
-            ?.takeIf { it.freshId(now) != null }
         return JSONObject()
             .put("sessionExpiresInSeconds", pairing.secondsRemaining(requesterToken, requesterPeer))
             .put("connectionPhase", pairing.connection().phase.name)
@@ -983,10 +968,6 @@ class LanController(private val context: Context) {
             .put("note", LanStatus.display.value.note)
             .put("position", position?.let { JSONObject().put("lat", it.latitude).put("lon", it.longitude) })
             .put("mockActive", LocationStatus.mockActive.value)
-            .put("realTimeZoneId", realZone?.freshId(now) ?: JSONObject.NULL)
-            .put("realTimeZoneExpiresAtMillis", realZone
-                ?.let { it.physicalFixAtMillis + VerifiedRealTimeZone.MAX_AGE_MILLIS }
-                ?: JSONObject.NULL)
             .put("realGpsState", gpsState)
             .put("realLocationSharingApproved",
                 requesterToken != null && requesterToken == physicalShareSessionToken)

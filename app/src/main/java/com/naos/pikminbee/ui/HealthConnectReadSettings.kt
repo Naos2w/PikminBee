@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.hardware.Sensor
 import android.hardware.SensorManager
 import android.os.Build
+import android.os.SystemClock
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -92,6 +93,8 @@ fun HealthConnectReadSettings(palette: NaosPalette) {
     var activityAllowed by remember { mutableStateOf(false) }
     var resumed by remember { mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
     var job by remember { mutableStateOf<Job?>(null) }
+    val readCache = remember { FloatingDailyStepsCache() }
+    var readGeneration by remember { mutableStateOf(0L) }
     var loading by remember { mutableStateOf(false) }
     var syncBusy by remember { mutableStateOf(false) }
     var syncEnabled by remember { mutableStateOf(ledger.optIn()) }
@@ -114,8 +117,10 @@ fun HealthConnectReadSettings(palette: NaosPalette) {
     fun activityPermissionGranted() = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
         ContextCompat.checkSelfPermission(context, Manifest.permission.ACTIVITY_RECOGNITION) == PackageManager.PERMISSION_GRANTED
     fun clearRead() {
+        readGeneration++
         job?.cancel()
         job = null
+        readCache.invalidate()
         loading = false
         result = null
     }
@@ -127,15 +132,28 @@ fun HealthConnectReadSettings(palette: NaosPalette) {
         legacyPending = estimates.pending().size
         legacySynced = estimates.all().count { it.synced }
     }
-    fun read() {
-        clearRead()
-        if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return
+    fun read(force: Boolean = true) {
+        if (!readAllowed || !lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return
+        val day = FloatingDayKey.now()
+        if (readCache.ensurePeriod(day)) clearRead()
+        if (job?.isActive == true) return
+        val now = SystemClock.elapsedRealtime()
+        if (result is HealthConnectRealSteps.Result.Available && readCache.currentValue(day, now) == null)
+            result = null
+        val ticket = readCache.begin(day, now, force) ?: return
+        if (force) result = null
+        val generation = ++readGeneration
         loading = true
         job = scope.launch {
             try {
                 val value = HealthConnectRealSteps.todayAggregate(context)
-                if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) result = value
-            } finally { loading = false }
+                val count = (value as? HealthConnectRealSteps.Result.Available)?.count
+                if (readGeneration == generation && readAllowed &&
+                    lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) &&
+                    readCache.complete(ticket, day, FloatingDayKey.now(), SystemClock.elapsedRealtime(), count)) {
+                    result = value
+                }
+            } finally { if (readGeneration == generation) loading = false }
         }
     }
     DisposableEffect(lifecycle) {
@@ -155,7 +173,8 @@ fun HealthConnectReadSettings(palette: NaosPalette) {
             readAllowed = HealthConnectRealSteps.hasPermission(context, HealthConnectRealSteps.READ_STEPS)
             writeAllowed = HealthConnectRealSteps.hasPermission(context, HealthConnectRealSteps.WRITE_STEPS)
             activityAllowed = activityPermissionGranted()
-            if (!readAllowed && result is HealthConnectRealSteps.Result.Available) clearRead()
+            if (!resumed || !lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) break
+            if (readAllowed) read(force = false) else clearRead()
             refreshLedger()
             delay(5_000L)
         }
@@ -209,7 +228,7 @@ fun HealthConnectReadSettings(palette: NaosPalette) {
         HealthCard(palette) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(daily.title, color = muted, fontSize = 13.sp, modifier = Modifier.weight(1f))
-                IconButton(enabled = !loading && providerAvailable && readAllowed, onClick = ::read) {
+                IconButton(enabled = !loading && providerAvailable && readAllowed, onClick = { read() }) {
                     NaosActionIcon(NaosActionGlyph.REFRESH, if (readAllowed) palette.accent else muted,
                         Modifier.semantics { contentDescription = "重新讀取今日步數" })
                 }
@@ -224,8 +243,8 @@ fun HealthConnectReadSettings(palette: NaosPalette) {
                 HealthConnectRealSteps.Result.PermissionRequired -> "尚未授權讀取"
                 HealthConnectRealSteps.Result.ProviderUnavailable -> "Health Connect 不可用"
                 HealthConnectRealSteps.Result.ReadFailed -> "查詢失敗，請重試"
-                is HealthConnectRealSteps.Result.Available -> "本次查詢結果"
-                null -> if (loading) "讀取中…" else if (readAllowed) "點右上角更新" else "授權後可查詢 HC 彙總"
+                is HealthConnectRealSteps.Result.Available -> "已更新 · 頁面開啟時自動刷新"
+                null -> if (loading) "讀取中…" else if (readAllowed) "準備更新" else "授權後可查詢 HC 彙總"
             }
             Text(note, color = muted, fontSize = 12.sp)
             if (!readAllowed && providerAvailable) TextButton(
@@ -256,7 +275,7 @@ fun HealthConnectReadSettings(palette: NaosPalette) {
                 Text("設定寫入權限")
             }
             HorizontalDivider(color = palette.stroke)
-            HealthRow(palette, NaosActionGlyph.MORE, "懸浮視窗步數", "展開時顯示今日統計") {
+            HealthRow(palette, NaosActionGlyph.MORE, "懸浮視窗步數", "預設顯示 · 展開時更新") {
                 Switch(checked = overlayEnabled, onCheckedChange = {
                     displayPrefs.setShowOverlaySteps(it); overlayEnabled = it
                 })
@@ -342,6 +361,7 @@ fun HealthConnectReadSettings(palette: NaosPalette) {
                                     try {
                                         feedback = PhysicalStepSync.syncPending(context).note
                                         refreshLedger()
+                                        if (readAllowed) read()
                                     } finally { syncBusy = false }
                                 }
                             }) { Text(if (syncBusy) "同步中…" else "立即同步真實紀錄") }
@@ -355,6 +375,9 @@ fun HealthConnectReadSettings(palette: NaosPalette) {
                             Text("舊版估算紀錄：$legacyPending 筆未同步／$legacySynced 筆歷史已同步；不再寫入 HC。", color = muted)
                             TextButton(enabled = legacyPending > 0, onClick = { confirmDiscard = "estimate" }) {
                                 Text("清除舊版未同步估算紀錄")
+                            }
+                            ledger.legacyTodaysCount()?.let { previous ->
+                                Text("舊版今日感測紀錄：${number(previous)} 步（獨立歷史統計）", color = foreground)
                             }
                             Text("舊版感測紀錄：${ledger.legacyRecordCount()} 筆；舊版待同步 ${ledger.legacyPendingCount()} 筆。保留於本機，不會自動重傳或清除。", color = muted)
                         }
