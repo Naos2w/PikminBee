@@ -18,6 +18,7 @@ internal object SavedDataRestorePreview {
         LEGACY_ROUTE_REVIEW,
         ID_CONFLICT,
         ROUTE_CAPACITY,
+        PLACE_CAPACITY,
     }
 
     data class Counts(val new: Int, val identical: Int, val conflicting: Int)
@@ -62,6 +63,9 @@ internal object SavedDataRestorePreview {
         }
         if (existingRoutes.size.toLong() + routes.new > MAX_ROUTES) {
             blockers.add(Blocker.ROUTE_CAPACITY)
+        }
+        if (existingPlaces.size.toLong() + places.new > 10_000) {
+            blockers.add(Blocker.PLACE_CAPACITY)
         }
         return Result(places, routes, blockers.toSet())
     }
