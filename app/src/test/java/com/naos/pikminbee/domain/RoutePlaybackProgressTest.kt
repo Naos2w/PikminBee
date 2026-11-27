@@ -48,6 +48,41 @@ class RoutePlaybackProgressTest {
             2000.0, 2000.0, 1.4, checkpoints, false).activeLegLabel)
     }
 
+    @Test fun displayHighlightsOnlyTheCurrentOrderedRoadLeg() {
+        val a = Coordinate(25.0, 121.0)
+        val b = Coordinate(25.001, 121.0)
+        val c = Coordinate(25.002, 121.0)
+        val d = Coordinate(25.003, 121.0)
+        val road = listOf(a,b,c,d)
+        val thresholds = RoutePlaybackProgress.thresholds(road, listOf(b,c,d))
+        val total = WalkingGeometry.lengthMeters(road)
+        val first = RoutePlaybackProgress.snapshot(1.0,total,1.0,thresholds,false)
+        assertEquals(listOf(a,b), RouteMapSegments.from(road,first).active)
+        assertTrue(RouteMapSegments.from(road,first).completed.isEmpty())
+        val second = RoutePlaybackProgress.snapshot(thresholds[0]+1.0,total,1.0,thresholds,false)
+        assertEquals(listOf(a,b), RouteMapSegments.from(road,second).completed)
+        assertEquals(listOf(b,c), RouteMapSegments.from(road,second).active)
+        val third = RoutePlaybackProgress.snapshot(thresholds[1]+1.0,total,1.0,thresholds,false)
+        assertEquals(listOf(a,b,c), RouteMapSegments.from(road,third).completed)
+        assertEquals(listOf(c,d), RouteMapSegments.from(road,third).active)
+        val arrived = RoutePlaybackProgress.snapshot(total,total,1.0,thresholds,false)
+        assertEquals(RouteMapSegments(), RouteMapSegments.from(road,arrived))
+        assertEquals(RouteMapSegments(), RouteMapSegments.from(listOf(a,d),second))
+        assertEquals(RouteMapSegments(), RouteMapSegments.from(road,second.copy(totalMetres=1.0)))
+    }
+
+    @Test fun closingLegIsShownWithoutInventingArrival() {
+        val a=Coordinate(25.0,121.0)
+        val b=Coordinate(25.001,121.0)
+        val c=Coordinate(25.001,121.001)
+        val road=listOf(a,b,c,a)
+        val thresholds=RoutePlaybackProgress.thresholds(road,listOf(b,c))
+        val total=WalkingGeometry.lengthMeters(road)
+        val last=RoutePlaybackProgress.snapshot(thresholds.last()+1.0,total,1.0,thresholds,true)
+        assertEquals("2 → 起點",last.activeLegLabel)
+        assertEquals(listOf(c,a),RouteMapSegments.from(road,last).active)
+    }
+
     @Test fun emptyRoadDoesNotInventProgress() {
         assertTrue(RoutePlaybackProgress.thresholds(emptyList(), emptyList()).isEmpty())
         val value = RoutePlaybackProgress.snapshot(50.0, 0.0, 0.0, emptyList(), false)

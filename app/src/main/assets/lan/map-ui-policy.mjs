@@ -80,6 +80,21 @@ export function createRouteArrivalNotice() {
   };
 }
 
+/** Only use phone-confirmed visual leg geometry for an active route. */
+export function routeLegGeometry(state, mode, online = true) {
+  if (!online || mode !== "ROUTE" || state?.mode !== "ROUTE" ||
+      !["MOVING","PAUSED"].includes(state.phase)) return {completed:[],active:[]};
+  const points = items => Array.isArray(items) && items.length >= 2 &&
+    items.every(p => Number.isFinite(p?.lat) && Number.isFinite(p?.lon) && Math.abs(p.lat) <= 90 && Math.abs(p.lon) <= 180) ? items : [];
+  return {completed:points(state.completedGeometry),active:points(state.activeLegGeometry)};
+}
+
+/** Warn before expiry. Never creates or extends a session. */
+export function sessionRenewalPrompt(remaining, dismissed, renewing, online) {
+  const eligible = Number.isFinite(remaining) && remaining > 0 && remaining <= 300;
+  return {visible:eligible && (!dismissed || renewing), canRequest:eligible && online && !renewing};
+}
+
 /** The running route and the current draft are different states. A parked
  * route is history, not an active road; never let it mask a new preview. */
 export function routePresentation(state, mode, loop) {

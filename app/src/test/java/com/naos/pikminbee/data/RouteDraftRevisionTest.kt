@@ -32,6 +32,32 @@ class RouteDraftRevisionTest {
         }
     }
 
+    @Test fun firstPointConversionAdvancesDraftRevisionAndInvalidatesRoadPreview() {
+        val old = RouteDraftState.snapshot()
+        val oldPreview = PreparedRouteState.route.value
+        val origin = Coordinate(20.0, 120.0)
+        val first = Coordinate(20.01, 120.01)
+        val second = Coordinate(20.02, 120.02)
+        try {
+            RouteDraftState.publish(listOf(first, second), origin, true)
+            val before = RouteDraftState.snapshot()
+            PreparedRouteState.route.value = com.naos.pikminbee.domain.PreparedWalkingRoute(
+                origin, before.stops, listOf(origin,first,second,origin), true)
+            val next = com.naos.pikminbee.domain.RoutePointDraft.promoteFirst(before.stops)!!
+            RouteDraftState.publish(next.stops, next.origin, before.loop)
+            val after = RouteDraftState.snapshot()
+            assertEquals(first, after.origin)
+            assertEquals(listOf(second), after.stops)
+            assertTrue(after.loop)
+            assertEquals(before.revision + 1, after.revision)
+            assertFalse(RouteDraftState.canCommit(before.revision))
+            assertNull(PreparedRouteState.route.value)
+        } finally {
+            RouteDraftState.publish(old.stops, old.origin, old.loop)
+            PreparedRouteState.route.value = oldPreview
+        }
+    }
+
     @Test fun savedRouteRetainsExplicitOriginLoopAndOrderedStops() {
         val origin = Coordinate(20.0, 120.0)
         val stops = listOf(Coordinate(20.01, 120.01), Coordinate(20.02, 120.02))

@@ -1,9 +1,10 @@
 import {parseCoordinate} from "/coordinate-format.mjs";
-import { BRIGHT_STYLE_URL, samePosition, currentPosition, createCameraFocus, visibleMapPadding, countryFlagPath, destinationTime, routePresentation, appliedSpeedLabel, createRouteArrivalNotice, routeCameraPoint } from "/map-ui-policy.mjs";
+import { BRIGHT_STYLE_URL, samePosition, currentPosition, createCameraFocus, visibleMapPadding, countryFlagPath, destinationTime, routePresentation, appliedSpeedLabel, createRouteArrivalNotice, routeCameraPoint, routeLegGeometry, sessionRenewalPrompt } from "/map-ui-policy.mjs";
 const $ = id => document.getElementById(id);
 let token = null;
 let sessionDeadlineMs = 0;
 let renewingSession = false;
+let renewalPromptDismissed = false;
 let mode = "TELEPORT";
 let settingsOpen = false;
 let savedRecords = null;
@@ -23,7 +24,7 @@ let mapStyleReady = false, mapWatchdog = null, mapResizeObserver = null;
 let mapLastError = "";
 let positionMarker = null, realMarker = null, originMarker = null, selectionMarker = null;
 let routeMarkers = [];
-let lastStopsKey = "", lastLineKey = "", lastDraftKey = "", lastOrderKey = "";
+let lastStopsKey = "", lastLineKey = "", lastLegKey = "", lastDraftKey = "", lastOrderKey = "";
 let focusRealWhenReady = false;
 const cameraFocus = createCameraFocus();
 let routeCameraFollowing = false, lastFollowPoint = null;
@@ -74,6 +75,7 @@ function renderRouteArrivalNotice(state) {
   const action = routeArrivalNotice.observe(state);
   if (action === "hide") hideRouteArrivalNotice();
   if (action === "show") $("route-arrival-notice").classList.remove("hidden");
+  $("route-arrival-detail").textContent = "手機已確認抵達終點";
 }
 $("route-arrival-dismiss").addEventListener("click", hideRouteArrivalNotice);
 let brightDarkPalette = null, originalBrightPaint = new Map();
@@ -85,7 +87,10 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 function updateSessionExpiry() {
   const visible = !!token;
   $("session-panel").classList.toggle("hidden", !visible);
-  if (!visible) return;
+  if (!visible) {
+    $("renewal-notice").classList.add("hidden");
+    return;
+  }
   const remaining = Math.max(0, Math.ceil((sessionDeadlineMs - Date.now()) / 1000));
   const hours = String(Math.floor(remaining / 3600)).padStart(2, "0");
   const minutes = String(Math.floor(remaining % 3600 / 60)).padStart(2, "0");
@@ -97,11 +102,25 @@ function updateSessionExpiry() {
     ? "控制授權時間已到，請重新配對"
     : remaining <= 600 ? "控制授權即將到期，請在手機核准續期" : "控制授權剩餘時間";
   $("session-panel").classList.toggle("is-urgent", remaining <= 600);
-  $("session-renew").disabled = renewingSession || remaining <= 0;
+  $("session-renew").disabled = renewingSession || !remoteLinkHealthy || remaining <= 0;
   $("session-renew").textContent = renewingSession
     ? "等待核准…" : "續期";
   $("session-renew").title = "從手機核准延長 2 小時";
+  const renewal = sessionRenewalPrompt(remaining, renewalPromptDismissed, renewingSession, remoteLinkHealthy);
+  $("renewal-notice").classList.toggle("hidden", !renewal.visible);
+  $("renewal-confirm").disabled = !renewal.canRequest;
+  $("renewal-decline").disabled = renewingSession;
+  $("renewal-confirm").textContent = renewingSession ? "待手機核准…" : "申請延長";
+  $("renewal-countdown").textContent = renewingSession
+    ? "已送出續期要求，請在手機確認；原授權到期後仍會失效。"
+    : "剩餘 " + minutes + ":" + seconds + "，是否申請延長 2 小時？" +
+      (remoteLinkHealthy ? "" : "（暫時離線，待網路恢復再申請。）");
 }
+$("renewal-confirm").addEventListener("click", () => $("session-renew").click());
+$("renewal-decline").addEventListener("click", () => {
+  renewalPromptDismissed = true;
+  updateSessionExpiry();
+});
 
 async function call(path, method = "GET", body = null, useToken = true) {
   const headers = {};
@@ -127,6 +146,7 @@ async function call(path, method = "GET", body = null, useToken = true) {
     resetRouteArrivalNotice();
     closeMapContextMenu();
     sessionDeadlineMs = 0;
+    renewalPromptDismissed = false;
     remoteLinkHealthy = false;
     latest = null; // clear any in-memory sensitive physical snapshot on revocation
     current = null;
@@ -140,7 +160,8 @@ async function call(path, method = "GET", body = null, useToken = true) {
     $("controls").classList.remove("is-visible");
     $("pairbox").style.display = "block";
     $("connection").textContent = "配對已失效";
-    setPairMessage("會話已失效，請重新從手機取得配對碼。");
+    setPairMessage("授權已到期或由手機撤銷。若要繼續連線，請重新從手機取得配對碼。");
+    renderMap();
     throw Error("配對已失效");
   }
   if (!response.ok) throw Error(data.error || "手機拒絕這項操作");
@@ -176,6 +197,7 @@ $("connect").addEventListener("click", async () => {
     token = approved.token; connected = true; remoteLinkHealthy = true;
     setRouteCameraFollow(false);
     resetRouteArrivalNotice();
+    renewalPromptDismissed = false;
     sessionDeadlineMs = Date.now() + Math.max(0, approved.expiresInSeconds || 0) * 1000;
     updateSessionExpiry();
     document.body.classList.add("remote-active");
@@ -195,7 +217,7 @@ $("pin").addEventListener("keydown", event => {
 });
 
 $("session-renew").addEventListener("click", async () => {
-  if (!token || renewingSession || sessionDeadlineMs <= Date.now()) return;
+  if (!token || renewingSession || !remoteLinkHealthy || sessionDeadlineMs <= Date.now()) return;
   renewingSession = true;
   updateSessionExpiry();
   try {
@@ -211,7 +233,8 @@ $("session-renew").addEventListener("click", async () => {
       if (!result.token) continue;
       token = result.token;
       setRouteCameraFollow(false);
-      resetRouteArrivalNotice();
+      // Same explicitly reapproved browser: keep the arrival event de-duplication state.
+      renewalPromptDismissed = false;
       sessionDeadlineMs = Date.now() + Math.max(0, result.expiresInSeconds || 0) * 1000;
       // A renewed token must not inherit the previous precise GPS sharing grant.
       latest = null;
@@ -827,7 +850,7 @@ function reloadMap() {
   clearMapWait();
   map = null; mapStyleReady = false; mapLastError = "";
   positionMarker = null; realMarker = null; originMarker = null; selectionMarker = null;
-  routeMarkers = []; lastLineKey = ""; lastDraftKey = ""; lastStopsKey = "";
+  routeMarkers = []; lastLineKey = ""; lastLegKey = ""; lastDraftKey = ""; lastStopsKey = "";
   $("map").replaceChildren();
   initialiseMap();
 }
@@ -884,7 +907,7 @@ async function initialiseMap() {
       mapStyleReady = true;
       originalBrightPaint = new Map();
       applyBrightPalette();
-      lastLineKey = ""; lastDraftKey = "";
+      lastLineKey = ""; lastLegKey = ""; lastDraftKey = "";
       renderMap();
       flushMapFocus();
     });
@@ -1025,7 +1048,14 @@ function renderMap() {
             await act("/api/points/replace",{mode:"ROUTE",index,...target,expectedRevision:revision});
         } catch(error){setMessage(error.message);}
       });
-      content.append(button);return content;
+      content.append(button);
+      if(index===0) {
+        const promote=document.createElement("button");promote.type="button";
+        promote.className="waypoint-reselect waypoint-promote-origin";promote.textContent="第一點設為起點";
+        promote.addEventListener("click",()=>promoteFirstOrigin(revision));
+        content.append(promote);
+      }
+      return content;
     }
     routeMarkers.forEach(marker => marker.remove());
     routeMarkers = stops.map((item,i) =>
@@ -1054,8 +1084,9 @@ function renderMap() {
     }
     lastDraftKey = draftKey;
   }
+  if (!mapStyleReady) return;
   const lineKey = mode + "|" + JSON.stringify(road);
-  if (lineKey === lastLineKey || !mapStyleReady) return;
+  if (lineKey !== lastLineKey) {
   const coords = road.map(point => [point.lon,point.lat]);
   const data = {type:"FeatureCollection",features:coords.length>=2?[{
     type:"Feature",properties:{},geometry:{type:"LineString",coordinates:coords}
@@ -1067,6 +1098,27 @@ function renderMap() {
       paint:{"line-color":"#d39339","line-width":5,"line-opacity":.95}});
   }
   lastLineKey = lineKey;
+  }
+  const legs = routeLegGeometry(latest, mode, connected && remoteLinkHealthy && Date.now() < sessionDeadlineMs);
+  const legKey = JSON.stringify(legs);
+  if (legKey === lastLegKey) return;
+  function renderLeg(id, points, layers) {
+    const data = {type:"FeatureCollection",features:points.length>=2?[{
+      type:"Feature",properties:{},geometry:{type:"LineString",coordinates:points.map(p=>[p.lon,p.lat])}
+    }]:[]};
+    if (map.getSource(id)) map.getSource(id).setData(data);
+    else {
+      map.addSource(id,{type:"geojson",data});
+      for(const layer of layers) map.addLayer({id:layer.id,type:"line",source:id,
+        layout:{"line-cap":"round","line-join":"round"},paint:layer.paint});
+    }
+  }
+  renderLeg("bee-completed-leg",legs.completed,[{id:"bee-completed-leg-line",paint:{"line-color":"#8996a3","line-width":5}}]);
+  renderLeg("bee-active-leg",legs.active,[
+    {id:"bee-active-leg-halo",paint:{"line-color":"#ffffff","line-width":12}},
+    {id:"bee-active-leg-line",paint:{"line-color":"#087be6","line-width":8}}
+  ]);
+  lastLegKey = legKey;
 }
 function formatDistance(metres) {
   return metres >= 1000 ? (metres/1000).toFixed(2) + " 公里" :
@@ -1243,6 +1295,23 @@ function renderRouteOrder() {
   if(!stops.length){const empty=document.createElement("li");empty.className="muted";empty.textContent="選取位置後加入路點";list.append(empty);}
 }
 
+async function promoteFirstOrigin(revision) {
+  if(mode!=="ROUTE" || !connected || !remoteLinkHealthy || !token || Date.now()>=sessionDeadlineMs ||
+      routeEditingBusy() || !Number.isSafeInteger(revision) || revision!==latest?.routeRevision ||
+      !latest?.routeStops?.length) {
+    setMessage("路線已變更或目前無法編輯，請重新確認");return;
+  }
+  const first={...latest.routeStops[0]};
+  if(!confirm("將第一個路點設為起點？其餘路點將重新編號，並清除舊道路預覽。此操作不會移動 GPS。"))return;
+  if(await act("/api/points/promote-origin",{mode:"ROUTE",index:0,expectedRevision:revision})) {
+    if(latest?.origin && latest.origin.lat===first.lat && latest.origin.lon===first.lon) {
+      focusMapPosition(first,16);
+      setMessage(latest.routeStops?.length?"已將第一點設為起點；其餘路點重新編號，請重新規劃":"已設定新起點，請加入下一個路點");
+    }
+  }
+}
+$("promote-first-origin").addEventListener("click",()=>promoteFirstOrigin(latest?.routeRevision));
+
 function updateRouteControls() {
   updateRouteCameraControl();
   const navigating = mode === "ROUTE";
@@ -1264,6 +1333,8 @@ function updateRouteControls() {
     "尚未指定起點 · 在地圖選擇後按「設為起點」";
   $("add").disabled = !navigating || busy || stops.length >= max;
   $("set-origin").disabled = !navigating || busy;
+  $("promote-first-origin").disabled = !navigating || !connected || !remoteLinkHealthy || routeEditingBusy() ||
+    !stops.length || !Number.isSafeInteger(latest?.routeRevision);
   $("undo").disabled = !navigating || busy || stops.length === 0;
   $("clear").disabled = !navigating || busy || stops.length === 0;
   $("plan").disabled = !navigating || busy || !hasOrigin || stops.length === 0 || stops.length > max;
@@ -1463,7 +1534,11 @@ async function refresh() {
       if (renewingSession && error.message === "等待續期完成，忽略舊狀態")
         return;
       remoteLinkHealthy = false;
-      hideRouteArrivalNotice();
+      // A previously confirmed completion is still a fact during temporary loss
+      // of network. Keep an undismissed notice, but mark it as last confirmed.
+      if (!$("route-arrival-notice").classList.contains("hidden"))
+        $("route-arrival-detail").textContent = "最後已確認抵達終點 · 網頁暫時離線";
+      updateSessionExpiry();
       cameraFocus.clear();
       focusRealWhenReady = false;
       $("connection").textContent = "暫時離線";

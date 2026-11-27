@@ -9,6 +9,18 @@ class RoutePointDraftTest {
     private val second = Coordinate(25.035, 121.567)
     private val replacement = Coordinate(25.036, 121.568)
 
+    @Test fun explicitFirstPointPromotionKeepsOrderAndSupportsOriginOnlyDraft() {
+        val original = listOf(first, second, replacement)
+        val next = RoutePointDraft.promoteFirst(original)!!
+        assertEquals(first, next.origin)
+        assertEquals(listOf(second, replacement), next.stops)
+        assertEquals(listOf(first, second, replacement), original)
+        val single = RoutePointDraft.promoteFirst(listOf(first))!!
+        assertEquals(first, single.origin)
+        assertTrue(single.stops.isEmpty())
+        assertNull(RoutePointDraft.promoteFirst(emptyList()))
+    }
+
     @Test fun tapImmediatelyAddsNextNumberedDestination() {
         val one = RoutePointDraft.select(emptyList(), origin, first)
         val two = RoutePointDraft.select(one.stops, origin, second)
