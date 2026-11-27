@@ -1,7 +1,6 @@
 package com.naos.pikminbee.ui
 
 import android.content.Context
-import android.content.res.ColorStateList
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.text.InputType
@@ -11,7 +10,6 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
-import android.widget.CheckBox
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -246,25 +244,23 @@ internal class FloatingWifiPanel(
     private val device = widgets.label(12f)
     private var approvalId = ""
     private var renewal = false
-    private val shareChoice = CheckBox(context).apply {
-        text = "分享最近真實位置（選填）"
-        textSize = 12f
-        minHeight = widgets.dp(48)
-        setTextColor(palette().ink.toArgb())
-        buttonTintList = ColorStateList.valueOf(palette().accent.toArgb())
+    private val sharingNotice = widgets.label(11f, 3).apply {
+        text = "選擇本次核准範圍；最近真實位置快照最多 30 分鐘，HTTP 未加密。"
     }
-    private val sharingNotice = widgets.label(11f, 2).apply {
-        text = "僅限本次瀏覽器，快照最多 30 分鐘；HTTP 未加密。"
-    }
-    private val approvalRow = widgets.row()
+    private val approvalRow = widgets.column()
     private val reject = widgets.button("拒絕", click = onDeny)
-    private val approve = widgets.button("核准") {
-        if (approvalId.isNotBlank()) onApprove(approvalId, shareChoice.isChecked)
+    private val approve = widgets.button("核准 · 僅控制") {
+        if (approvalId.isNotBlank()) onApprove(approvalId, false)
+    }
+    private val approveWithLocation = widgets.button("核准並分享真實位置") {
+        if (approvalId.isNotBlank()) onApprove(approvalId, true)
     }
 
     private fun updateApprovalButton() {
-        approve.updateText(if (shareChoice.isChecked) "核准並分享" else if (renewal) "核准續期" else "核准")
+        approve.updateText(if (renewal) "續期 · 僅控制" else "核准 · 僅控制")
         approve.contentDescription = approve.text
+        approveWithLocation.updateText(if (renewal) "續期並分享真實位置" else "核准並分享真實位置")
+        approveWithLocation.contentDescription = approveWithLocation.text
     }
     private val disconnect = widgets.button("中斷連線", click = onDisconnect)
     private val details = widgets.button("在 App 查看", click = onSettings)
@@ -283,11 +279,12 @@ internal class FloatingWifiPanel(
         root.addView(pin)
         root.addView(browser)
         root.addView(device)
-        root.addView(shareChoice)
         root.addView(sharingNotice)
-        shareChoice.setOnCheckedChangeListener { _, _ -> updateApprovalButton() }
-        widgets.addWeighted(approvalRow, reject)
-        widgets.addWeighted(approvalRow, approve)
+        listOf(approve, approveWithLocation, reject).forEach { button ->
+            approvalRow.addView(button, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, WRAP).apply {
+                bottomMargin = widgets.dp(3)
+            })
+        }
         root.addView(approvalRow)
         root.addView(disconnect)
         root.addView(details)
@@ -327,12 +324,8 @@ internal class FloatingWifiPanel(
         device.updateText(deviceText)
         device.visible(deviceText.isNotBlank())
         renewal = state.renewal
-        if (approvalId != state.approvalId) {
-            approvalId = state.approvalId
-            shareChoice.isChecked = false
-        }
+        approvalId = state.approvalId
         updateApprovalButton()
-        shareChoice.visible(approval && approvalId.isNotBlank())
         sharingNotice.visible(approval && approvalId.isNotBlank())
         approvalRow.visible(approval && approvalId.isNotBlank())
         disconnect.visible(session)
@@ -346,7 +339,5 @@ internal class FloatingWifiPanel(
 
     fun repaint() {
         widgets.repaint()
-        shareChoice.setTextColor(palette().ink.toArgb())
-        shareChoice.buttonTintList = ColorStateList.valueOf(palette().accent.toArgb())
     }
 }

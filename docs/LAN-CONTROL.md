@@ -9,7 +9,7 @@ This is a **private LAN-only, opt-in** controller. It shares the same Android GP
 3. Open the phone's **Wi-Fi 遠端控制** section and tap **開啟網頁控制**.
 4. The phone shows a private network URL like `http://192.168.1.50:8765/` and a fresh six-digit pairing PIN.
 5. On MSI or another device **on the same Wi-Fi**, open the URL; enter the PIN.
-6. **Return to the phone and tap 核准裝置**; pairing does **not** create a remote control session before this step. The optional last-real-location sharing checkbox starts unchecked in both Android and floating approvals, including every renewal. Sharing requires an affirmative selection for that specific request; previous consent is not carried over.
+6. **Return to the phone and choose 核准 · 僅控制 or 核准並分享真實位置**. Pairing creates no remote control session until that explicit choice. Both Android and floating approvals, including every renewal, use separate buttons bound to the current pending request. Real-location sharing requires the affirmative sharing button; previous consent is not carried over.
 7. From the browser, click OpenFreeMap to choose coordinates, teleport, select ordered stops, start a pedestrian route, pause, resume, stop or restore real GPS. Browser map style supports **Auto/Liberty/Bright/Positron/Dark** without a Google Maps API Key.
 8. Tap **關閉並撤銷配對** on the phone to disable the listener, revoke sessions and rotate pairing on the next start.
 

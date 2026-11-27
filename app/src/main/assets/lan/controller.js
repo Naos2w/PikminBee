@@ -1,9 +1,10 @@
 import {parseCoordinate} from "/coordinate-format.mjs";
-import { BRIGHT_STYLE_URL, samePosition, currentPosition, createCameraFocus, visibleMapPadding, countryFlagPath, destinationTime, routePresentation, appliedSpeedLabel } from "/map-ui-policy.mjs";
+import { BRIGHT_STYLE_URL, samePosition, currentPosition, createCameraFocus, visibleMapPadding, countryFlagPath, destinationTime, routePresentation, appliedSpeedLabel, createRouteArrivalNotice, routeCameraPoint, routeLegGeometry, sessionRenewalPrompt } from "/map-ui-policy.mjs";
 const $ = id => document.getElementById(id);
 let token = null;
 let sessionDeadlineMs = 0;
 let renewingSession = false;
+let renewalPromptDismissed = false;
 let mode = "TELEPORT";
 let settingsOpen = false;
 let savedRecords = null;
@@ -23,10 +24,60 @@ let mapStyleReady = false, mapWatchdog = null, mapResizeObserver = null;
 let mapLastError = "";
 let positionMarker = null, realMarker = null, originMarker = null, selectionMarker = null;
 let routeMarkers = [];
-let lastStopsKey = "", lastLineKey = "", lastDraftKey = "", lastOrderKey = "";
+let lastStopsKey = "", lastLineKey = "", lastLegKey = "", lastDraftKey = "", lastOrderKey = "";
 let focusRealWhenReady = false;
 const cameraFocus = createCameraFocus();
+let routeCameraFollowing = false, lastFollowPoint = null;
+function setRouteCameraFollow(enabled) {
+  if (routeCameraFollowing !== enabled) {
+    routeCameraFollowing = enabled;
+    lastFollowPoint = null;
+    cameraFocus.clear();
+  }
+  const button = $("route-follow");
+  button.setAttribute("aria-pressed", String(routeCameraFollowing));
+  const label = routeCameraFollowing ? "停止跟隨目前位置" : "跟隨目前位置（僅移動地圖）";
+  button.title = label;
+  button.setAttribute("aria-label", label);
+}
+function updateRouteCameraControl() {
+  const point = routeCameraPoint(latest, connected && remoteLinkHealthy && !settingsOpen && mode === "ROUTE");
+  if (!point) setRouteCameraFollow(false);
+  $("route-follow").classList.toggle("hidden", !point);
+  return point;
+}
+function renderRouteCameraFollow() {
+  const point = updateRouteCameraControl();
+  if (!routeCameraFollowing || !point || !map) return;
+  if (!lastFollowPoint) {
+    cameraFocus.request(point, 15);
+    if (flushMapFocus()) lastFollowPoint = {...point};
+  } else if (point.lat !== lastFollowPoint.lat || point.lon !== lastFollowPoint.lon) {
+    // Camera only; keep the user's zoom and the existing safe map padding.
+    map.jumpTo({center:[point.lon,point.lat]});
+    lastFollowPoint = {...point};
+  }
+}
+$("route-follow").addEventListener("click", () => {
+  if (!updateRouteCameraControl()) return;
+  setRouteCameraFollow(!routeCameraFollowing);
+  renderRouteCameraFollow();
+});
 let teleportBusy = false, pendingTeleportConfirmation = null;
+let mapContextSelection = null;
+const routeArrivalNotice = createRouteArrivalNotice();
+function hideRouteArrivalNotice() { $("route-arrival-notice").classList.add("hidden"); }
+function resetRouteArrivalNotice() {
+  routeArrivalNotice.reset();
+  hideRouteArrivalNotice();
+}
+function renderRouteArrivalNotice(state) {
+  const action = routeArrivalNotice.observe(state);
+  if (action === "hide") hideRouteArrivalNotice();
+  if (action === "show") $("route-arrival-notice").classList.remove("hidden");
+  $("route-arrival-detail").textContent = "手機已確認抵達終點";
+}
+$("route-arrival-dismiss").addEventListener("click", hideRouteArrivalNotice);
 let brightDarkPalette = null, originalBrightPaint = new Map();
 const loops = {ROUTE: false};
 const setMessage = value => { $("message").textContent = value; };
@@ -36,7 +87,10 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 function updateSessionExpiry() {
   const visible = !!token;
   $("session-panel").classList.toggle("hidden", !visible);
-  if (!visible) return;
+  if (!visible) {
+    $("renewal-notice").classList.add("hidden");
+    return;
+  }
   const remaining = Math.max(0, Math.ceil((sessionDeadlineMs - Date.now()) / 1000));
   const hours = String(Math.floor(remaining / 3600)).padStart(2, "0");
   const minutes = String(Math.floor(remaining % 3600 / 60)).padStart(2, "0");
@@ -48,11 +102,25 @@ function updateSessionExpiry() {
     ? "控制授權時間已到，請重新配對"
     : remaining <= 600 ? "控制授權即將到期，請在手機核准續期" : "控制授權剩餘時間";
   $("session-panel").classList.toggle("is-urgent", remaining <= 600);
-  $("session-renew").disabled = renewingSession || remaining <= 0;
+  $("session-renew").disabled = renewingSession || !remoteLinkHealthy || remaining <= 0;
   $("session-renew").textContent = renewingSession
     ? "等待核准…" : "續期";
   $("session-renew").title = "從手機核准延長 2 小時";
+  const renewal = sessionRenewalPrompt(remaining, renewalPromptDismissed, renewingSession, remoteLinkHealthy);
+  $("renewal-notice").classList.toggle("hidden", !renewal.visible);
+  $("renewal-confirm").disabled = !renewal.canRequest;
+  $("renewal-decline").disabled = renewingSession;
+  $("renewal-confirm").textContent = renewingSession ? "待手機核准…" : "申請延長";
+  $("renewal-countdown").textContent = renewingSession
+    ? "已送出續期要求，請在手機確認；原授權到期後仍會失效。"
+    : "剩餘 " + minutes + ":" + seconds + "，是否申請延長 2 小時？" +
+      (remoteLinkHealthy ? "" : "（暫時離線，待網路恢復再申請。）");
 }
+$("renewal-confirm").addEventListener("click", () => $("session-renew").click());
+$("renewal-decline").addEventListener("click", () => {
+  renewalPromptDismissed = true;
+  updateSessionExpiry();
+});
 
 async function call(path, method = "GET", body = null, useToken = true) {
   const headers = {};
@@ -73,7 +141,12 @@ async function call(path, method = "GET", body = null, useToken = true) {
     if (requestToken !== token || (renewingSession && path === "/api/state"))
       throw Error("等待續期完成，忽略舊狀態");
     token = null; connected = false;
+    setRouteCameraFollow(false);
+    updateRouteCameraControl();
+    resetRouteArrivalNotice();
+    closeMapContextMenu();
     sessionDeadlineMs = 0;
+    renewalPromptDismissed = false;
     remoteLinkHealthy = false;
     latest = null; // clear any in-memory sensitive physical snapshot on revocation
     current = null;
@@ -87,7 +160,8 @@ async function call(path, method = "GET", body = null, useToken = true) {
     $("controls").classList.remove("is-visible");
     $("pairbox").style.display = "block";
     $("connection").textContent = "配對已失效";
-    setPairMessage("會話已失效，請重新從手機取得配對碼。");
+    setPairMessage("授權已到期或由手機撤銷。若要繼續連線，請重新從手機取得配對碼。");
+    renderMap();
     throw Error("配對已失效");
   }
   if (!response.ok) throw Error(data.error || "手機拒絕這項操作");
@@ -121,6 +195,9 @@ $("connect").addEventListener("click", async () => {
     }
     if (!approved?.token) throw Error("等待手機核准逾時");
     token = approved.token; connected = true; remoteLinkHealthy = true;
+    setRouteCameraFollow(false);
+    resetRouteArrivalNotice();
+    renewalPromptDismissed = false;
     sessionDeadlineMs = Date.now() + Math.max(0, approved.expiresInSeconds || 0) * 1000;
     updateSessionExpiry();
     document.body.classList.add("remote-active");
@@ -140,7 +217,7 @@ $("pin").addEventListener("keydown", event => {
 });
 
 $("session-renew").addEventListener("click", async () => {
-  if (!token || renewingSession || sessionDeadlineMs <= Date.now()) return;
+  if (!token || renewingSession || !remoteLinkHealthy || sessionDeadlineMs <= Date.now()) return;
   renewingSession = true;
   updateSessionExpiry();
   try {
@@ -155,10 +232,14 @@ $("session-renew").addEventListener("click", async () => {
         {pendingId:pending.pendingId});
       if (!result.token) continue;
       token = result.token;
+      setRouteCameraFollow(false);
+      // Same explicitly reapproved browser: keep the arrival event de-duplication state.
+      renewalPromptDismissed = false;
       sessionDeadlineMs = Date.now() + Math.max(0, result.expiresInSeconds || 0) * 1000;
       // A renewed token must not inherit the previous precise GPS sharing grant.
       latest = null;
       current = null;
+      updateRouteCameraControl();
       cameraFocus.clear();
       pendingTeleportConfirmation = null;
       focusRealWhenReady = false;
@@ -208,7 +289,103 @@ function readCoordinate() {
   return point;
 }
 
+function closeMapContextMenu() {
+  mapContextSelection = null;
+  $("map-context-menu").classList.add("hidden");
+}
+function contextActionTarget(selection, action = "primary") {
+  if (!selection || selection.mode !== mode || settingsOpen ||
+      !token || token !== selection.session || !connected || !remoteLinkHealthy ||
+      !latest || Date.now() >= sessionDeadlineMs || routeEditingBusy()) return null;
+  if (mode === "ROUTE") {
+    if (selection.revision !== latest.routeRevision || !Number.isSafeInteger(selection.revision)) return null;
+    if (action === "view") return $("map-context-view");
+    if (action === "origin") return $("set-origin").disabled ? null : $("set-origin");
+    return $("add").disabled ? null : $("add");
+  }
+  if (action === "primary" && mode === "TELEPORT" && latest.mockPermissionReady && !$("teleport").disabled)
+    return $("teleport");
+  return null;
+}
+function availableContextActions(selection) {
+  return ["primary", "view", "origin"].filter(action => contextActionTarget(selection, action));
+}
+function updateMapContextMenu() {
+  if (!mapContextSelection) return;
+  const actions = availableContextActions(mapContextSelection);
+  if (!actions.length) { closeMapContextMenu(); return; }
+  for (const [action,id] of [["primary","map-context-action"],["view","map-context-view"],["origin","map-context-origin"]])
+    $(id).classList.toggle("hidden", !actions.includes(action));
+}
+function openMapContextMenu(event) {
+  const original = event.originalEvent;
+  if (!original || original.button !== 2 || settingsOpen ||
+      original.target?.closest?.(".maplibregl-control-container, .maplibregl-popup")) return;
+  original.preventDefault();
+  closeMapContextMenu();
+  const point = parseCoordinate(event.lngLat.lat + ", " + event.lngLat.wrap().lng);
+  if (!point) return;
+  const selection = {point, mode, session:token, revision:latest?.routeRevision};
+  const actions = availableContextActions(selection);
+  if (!actions.length) return;
+  mapContextSelection = selection;
+  updateMapContextMenu();
+  const menu = $("map-context-menu");
+  $("map-context-label").textContent = mode === "ROUTE" ? "加入路點" : "瞬移至此";
+  $("map-context-icon").setAttribute("d", mode === "ROUTE" ?
+    "M12 5v14M5 12h14" : "M13 2 4 14h7l-1 8 10-12h-7l1-8Z");
+  menu.style.left = "8px";
+  menu.style.top = "8px";
+  menu.classList.remove("hidden");
+  const rect = menu.getBoundingClientRect();
+  menu.style.left = Math.max(8, Math.min(original.clientX, window.innerWidth - rect.width - 8)) + "px";
+  menu.style.top = Math.max(8, Math.min(original.clientY, window.innerHeight - rect.height - 8)) + "px";
+  $(actions.includes("primary") ? "map-context-action" : actions.includes("view") ? "map-context-view" : "map-context-origin").focus({preventScroll:true});
+}
+$("map-context-action").addEventListener("click", () => {
+  const selection = mapContextSelection;
+  const target = contextActionTarget(selection);
+  closeMapContextMenu();
+  if (!target) return;
+  showCoordinate(selection.point);
+  renderMap();
+  // Reuse the existing explicit confirmation/permission or revision-checked
+  // route editor. Opening the menu never changes coordinates or sends a command.
+  target.click();
+});
+$("map-context-view").addEventListener("click", () => {
+  const selection = mapContextSelection;
+  const valid = contextActionTarget(selection, "view");
+  closeMapContextMenu();
+  if (valid) focusMapPosition(selection.point, 16);
+});
+$("map-context-origin").addEventListener("click", async () => {
+  const selection = mapContextSelection;
+  const valid = contextActionTarget(selection, "origin");
+  closeMapContextMenu();
+  if (!valid) return;
+  if (!confirm("將此位置設為路線起點？舊預覽會清除，不會移動 GPS。")) return;
+  if (!contextActionTarget(selection, "origin")) return;
+  showCoordinate(selection.point);
+  const point = readCoordinate();
+  if (await act("/api/origin", {...point,expectedRevision:selection.revision}))
+    focusMapPosition(point, 16);
+});
+document.addEventListener("pointerdown", event => {
+  if (!$("map-context-menu").contains(event.target)) closeMapContextMenu();
+});
+document.addEventListener("keydown", event => {
+  if (event.key === "Escape" && mapContextSelection) {
+    event.preventDefault();
+    closeMapContextMenu();
+    map?.getCanvas().focus({preventScroll:true});
+  }
+});
+window.addEventListener("resize", closeMapContextMenu, {passive:true});
+window.addEventListener("blur", closeMapContextMenu);
+
 function updateModeView() {
+  closeMapContextMenu();
   document.body.dataset.mode = settingsOpen ? "settings" : mode.toLowerCase();
   for (const [id,value] of [
     ["mode-teleport","TELEPORT"],["mode-route","ROUTE"]
@@ -297,6 +474,7 @@ for (const [id,value] of [
 $("mode-settings").addEventListener("click", () => {
   const wasCurrent = settingsOpen;
   settingsOpen = !settingsOpen;
+  updateRouteCameraControl();
   updateModeView();
   if (deviceKind() === "mobile") {
     setSheetState(wasCurrent && sheetState !== "collapsed" ? "collapsed" : "half");
@@ -304,6 +482,7 @@ $("mode-settings").addEventListener("click", () => {
 });
 $("web-settings-close").addEventListener("click", () => {
   settingsOpen = false;
+  updateRouteCameraControl();
   updateModeView();
   if (deviceKind() === "mobile") setSheetState("collapsed");
 });
@@ -356,9 +535,14 @@ swipeArea.addEventListener("touchend", event => {
   const next = index + (dx < 0 ? 1 : -1);
   if (next >= 0 && next < modeOrder.length) selectMode(modeOrder[next]);
 }, {passive:true});
-$("loop").addEventListener("change", () => {
-  if (mode === "ROUTE") loops.ROUTE = $("loop").value === "true";
+$("loop").addEventListener("change", async () => {
+  if (mode !== "ROUTE") return;
+  const loop = $("loop").value === "true";
   $("confirm-snap").checked = false;
+  if (!await act("/api/route/options",{loop,expectedRevision:latest?.routeRevision}))
+    $("loop").value = String(loops.ROUTE);
+  else loops.ROUTE = typeof latest?.routeLoop === "boolean" ? latest.routeLoop : loop;
+  $("loop").value = String(loops.ROUTE);
   updateRouteControls();
   renderMap();
 });
@@ -382,6 +566,7 @@ function flushMapFocus() {
 }
 function focusMapPosition(point, zoom = 15, collapse = true) {
   if (!point || !Number.isFinite(point.lat) || !Number.isFinite(point.lon)) return false;
+  setRouteCameraFollow(false);
   // Keep the full map canvas. Collapse the mobile sheet on explicit focus,
   // and use the unobstructed region of that canvas for camera centring.
   $("map-locations").open = false;
@@ -406,13 +591,13 @@ function reconcileTeleport(state) {
 }
 async function act(path, body, note = "") {
   const editsRoute = path.startsWith("/api/points/") ||
-    ["/api/origin", "/api/saved/load", "/api/route/preview"].includes(path);
+    ["/api/origin", "/api/saved/load", "/api/route/options", "/api/route/preview", "/api/route/cancel-preview"].includes(path);
   if (editsRoute) {
     if (routeMutationPending) return false;
     routeMutationPending = true;
     routeStateVersion++;
     // Clear the stale preview immediately; do not let a pre-edit poll restore it.
-    if (latest) latest = {...latest, previews:{}, planning:true};
+    if (latest) latest = {...latest, previews:path === "/api/route/cancel-preview" ? latest.previews : {}, planning:true};
     $("confirm-snap").checked = false;
     updateRouteControls();
     renderMap();
@@ -488,7 +673,7 @@ $("teleport").addEventListener("click", async () => {
   }
 });
 $("set-origin").addEventListener("click", async () => {
-  try { await act("/api/origin", readCoordinate()); }
+  try { await act("/api/origin", {...readCoordinate(),expectedRevision:latest?.routeRevision}); }
   catch (error) { setMessage(error.message); }
 });
 $("add").addEventListener("click", async () => {
@@ -557,9 +742,10 @@ $("plan").addEventListener("click", async () => {
     await act("/api/route/preview",{mode,loop:$("loop").value === "true"});
   } finally { updateRouteControls(); }
 });
+$("cancel-plan").addEventListener("click", () => act("/api/route/cancel-preview",{}));
 $("start").addEventListener("click", async () => {
   const prepared = routePresentation(latest, mode, $("loop").value === "true").prepared;
-  if (!prepared?.id) { setMessage("請先預覽路線，再按開始"); return; }
+  if (!prepared?.id || prepared.canStart === false) { setMessage("請先預覽路線，再按開始"); return; }
   if (prepared.loop !== ($("loop").value === "true")) {
     setMessage("循環設定已改變，請重新規劃"); return;
   }
@@ -692,7 +878,7 @@ function reloadMap() {
   clearMapWait();
   map = null; mapStyleReady = false; mapLastError = "";
   positionMarker = null; realMarker = null; originMarker = null; selectionMarker = null;
-  routeMarkers = []; lastLineKey = ""; lastDraftKey = ""; lastStopsKey = "";
+  routeMarkers = []; lastLineKey = ""; lastLegKey = ""; lastDraftKey = ""; lastStopsKey = "";
   $("map").replaceChildren();
   initialiseMap();
 }
@@ -734,8 +920,14 @@ async function initialiseMap() {
     });
     // Zoom/location actions share a permanent bottom-right overlay.
     // Native attribution remains visible and is never covered by the tools.
-    map.on("dragstart", () => cameraFocus.clear());
+    map.on("dragstart", () => { setRouteCameraFollow(false); cameraFocus.clear(); });
+    for (const event of ["zoomstart", "rotatestart", "pitchstart"])
+      map.on(event, e => { if (e.originalEvent) setRouteCameraFollow(false); });
+    map.on("movestart", closeMapContextMenu);
+    map.on("contextmenu", openMapContextMenu);
     map.on("click", e => {
+      setRouteCameraFollow(false);
+      closeMapContextMenu();
       showCoordinate({lat:e.lngLat.lat,lon:e.lngLat.lng});
       renderMap();
     });
@@ -743,7 +935,7 @@ async function initialiseMap() {
       mapStyleReady = true;
       originalBrightPaint = new Map();
       applyBrightPalette();
-      lastLineKey = ""; lastDraftKey = "";
+      lastLineKey = ""; lastLegKey = ""; lastDraftKey = "";
       renderMap();
       flushMapFocus();
     });
@@ -884,7 +1076,14 @@ function renderMap() {
             await act("/api/points/replace",{mode:"ROUTE",index,...target,expectedRevision:revision});
         } catch(error){setMessage(error.message);}
       });
-      content.append(button);return content;
+      content.append(button);
+      if(index===0) {
+        const promote=document.createElement("button");promote.type="button";
+        promote.className="waypoint-reselect waypoint-promote-origin";promote.textContent="第一點設為起點";
+        promote.addEventListener("click",()=>promoteFirstOrigin(revision));
+        content.append(promote);
+      }
+      return content;
     }
     routeMarkers.forEach(marker => marker.remove());
     routeMarkers = stops.map((item,i) =>
@@ -913,8 +1112,9 @@ function renderMap() {
     }
     lastDraftKey = draftKey;
   }
+  if (!mapStyleReady) return;
   const lineKey = mode + "|" + JSON.stringify(road);
-  if (lineKey === lastLineKey || !mapStyleReady) return;
+  if (lineKey !== lastLineKey) {
   const coords = road.map(point => [point.lon,point.lat]);
   const data = {type:"FeatureCollection",features:coords.length>=2?[{
     type:"Feature",properties:{},geometry:{type:"LineString",coordinates:coords}
@@ -926,6 +1126,27 @@ function renderMap() {
       paint:{"line-color":"#d39339","line-width":5,"line-opacity":.95}});
   }
   lastLineKey = lineKey;
+  }
+  const legs = routeLegGeometry(latest, mode, connected && remoteLinkHealthy && Date.now() < sessionDeadlineMs);
+  const legKey = JSON.stringify(legs);
+  if (legKey === lastLegKey) return;
+  function renderLeg(id, points, layers) {
+    const data = {type:"FeatureCollection",features:points.length>=2?[{
+      type:"Feature",properties:{},geometry:{type:"LineString",coordinates:points.map(p=>[p.lon,p.lat])}
+    }]:[]};
+    if (map.getSource(id)) map.getSource(id).setData(data);
+    else {
+      map.addSource(id,{type:"geojson",data});
+      for(const layer of layers) map.addLayer({id:layer.id,type:"line",source:id,
+        layout:{"line-cap":"round","line-join":"round"},paint:layer.paint});
+    }
+  }
+  renderLeg("bee-completed-leg",legs.completed,[{id:"bee-completed-leg-line",paint:{"line-color":"#8996a3","line-width":5}}]);
+  renderLeg("bee-active-leg",legs.active,[
+    {id:"bee-active-leg-halo",paint:{"line-color":"#ffffff","line-width":12}},
+    {id:"bee-active-leg-line",paint:{"line-color":"#087be6","line-width":8}}
+  ]);
+  lastLegKey = legKey;
 }
 function formatDistance(metres) {
   return metres >= 1000 ? (metres/1000).toFixed(2) + " 公里" :
@@ -1102,7 +1323,25 @@ function renderRouteOrder() {
   if(!stops.length){const empty=document.createElement("li");empty.className="muted";empty.textContent="選取位置後加入路點";list.append(empty);}
 }
 
+async function promoteFirstOrigin(revision) {
+  if(mode!=="ROUTE" || !connected || !remoteLinkHealthy || !token || Date.now()>=sessionDeadlineMs ||
+      routeEditingBusy() || !Number.isSafeInteger(revision) || revision!==latest?.routeRevision ||
+      !latest?.routeStops?.length) {
+    setMessage("路線已變更或目前無法編輯，請重新確認");return;
+  }
+  const first={...latest.routeStops[0]};
+  if(!confirm("將第一個路點設為起點？其餘路點將重新編號，並清除舊道路預覽。此操作不會移動 GPS。"))return;
+  if(await act("/api/points/promote-origin",{mode:"ROUTE",index:0,expectedRevision:revision})) {
+    if(latest?.origin && latest.origin.lat===first.lat && latest.origin.lon===first.lon) {
+      focusMapPosition(first,16);
+      setMessage(latest.routeStops?.length?"已將第一點設為起點；其餘路點重新編號，請重新規劃":"已設定新起點，請加入下一個路點");
+    }
+  }
+}
+$("promote-first-origin").addEventListener("click",()=>promoteFirstOrigin(latest?.routeRevision));
+
 function updateRouteControls() {
+  updateRouteCameraControl();
   const navigating = mode === "ROUTE";
   const stops = latest?.routeStops || [];
   const prepared = routePresentation(latest, mode, $("loop").value === "true").prepared;
@@ -1111,7 +1350,8 @@ function updateRouteControls() {
   const paused = latest?.phase === "PAUSED";
   const busy = moving || paused || !!latest?.planning;
   const loop = $("loop").value === "true";
-  const ready = !!prepared?.id && prepared.loop === loop;
+  const hasPreview = !!prepared?.id && prepared.loop === loop;
+  const ready = hasPreview && prepared.canStart !== false;
   const needSnap = ready && prepared.maxSnapMetres > 40;
   const max = loop ? 14 : 15;
   $("pointcount").textContent = stops.length + " / " + max + " 個路點";
@@ -1121,26 +1361,35 @@ function updateRouteControls() {
     "尚未指定起點 · 在地圖選擇後按「設為起點」";
   $("add").disabled = !navigating || busy || stops.length >= max;
   $("set-origin").disabled = !navigating || busy;
+  $("promote-first-origin").disabled = !navigating || !connected || !remoteLinkHealthy || routeEditingBusy() ||
+    !stops.length || !Number.isSafeInteger(latest?.routeRevision);
   $("undo").disabled = !navigating || busy || stops.length === 0;
   $("clear").disabled = !navigating || busy || stops.length === 0;
   $("plan").disabled = !navigating || busy || !hasOrigin || stops.length === 0 || stops.length > max;
-  $("plan").textContent = ready ? "重新規劃" : "規劃路徑";
+  $("plan").textContent = hasPreview ? "重新規劃" : "規劃路徑";
+  $("loop").disabled = !navigating || busy;
+  $("save-route").disabled = !navigating || busy || !stops.length || !hasOrigin;
+  $("cancel-plan").classList.toggle("hidden", !navigating || !latest?.planning);
+  $("cancel-plan").disabled = routeMutationPending;
   $("start").closest(".row").classList.toggle("hidden",!ready);
   $("start").disabled = !navigating || busy || !ready ||
     (needSnap && !$("confirm-snap").checked) ||
     !latest?.mockPermissionReady;
   $("snapconfirmrow").classList.toggle("hidden",!needSnap);
-  $("previewinfo").classList.toggle("hidden",!ready);
-  if (ready) {
+  $("previewinfo").classList.toggle("hidden",!hasPreview);
+  if (hasPreview) {
     $("previewinfo").textContent = "路線預覽 · " +
       formatDistance(prepared.distanceMetres) + " · 最大道路吸附 " +
-      Math.round(prepared.maxSnapMetres) + " 公尺。請確認後再開始。";
+      Math.round(prepared.maxSnapMetres) + " 公尺。" +
+      (ready ? "請確認後再開始。" : "起點已變動，預覽保留；請重新規劃。 ");
   }
   $("routehint").textContent = moving || paused
     ? "行走中路點暫時為唯讀；需修改請先確認停止路線。"
     : !hasOrigin ? "先在地圖選取起點，再按「設為起點」。"
     : stops.length === 0 ? "加入目的地，規劃只會預覽不會移動 GPS。"
     : latest?.planning ? "正在查詢步行道路，不會移動手機。"
+    : latest?.planningError ? latest.planningNotice
+    : hasPreview && !ready ? "起點已變動，請重新規劃；原預覽保留。"
     : ready ? "路線已預覽。確認道路和起點後可開始。"
     : "請先按「規劃並預覽道路」。";
   if (navigating && !latest?.mockPermissionReady && ready) {
@@ -1150,8 +1399,10 @@ function updateRouteControls() {
   $("resume").disabled = !paused;
   $("stop").disabled = !moving && !paused;
   $("teleport").disabled = teleportBusy || !connected || !remoteLinkHealthy || moving || paused;
+  updateMapContextMenu();
 }
 function updateCompactWalkControls() {
+  updateMapContextMenu();
   const phase = latest?.phase || "IDLE";
   const active = phase === "MOVING" || phase === "PAUSED";
   // A running walk must remain controllable even with the mobile sheet half-open,
@@ -1179,6 +1430,7 @@ for (const [id,action] of [["compact-pause","pause"],
   });
 }
 function updateStatus() {
+  updateRouteCameraControl();
   const phase = latest?.phase || "IDLE";
   const names = {MOVING:"行走中", PAUSED:"已暫停", PARKED:"已停止", IDLE:"待命"};
   const progress = latest?.progress || {};
@@ -1257,7 +1509,12 @@ async function refresh() {
     const nextState = await call("/api/state");
     if (token !== activeToken || requestedRouteVersion !== routeStateVersion) return;
     latest = nextState;
+    if (typeof latest.routeLoop === "boolean") {
+      loops.ROUTE = latest.routeLoop;
+      $("loop").value = String(loops.ROUTE);
+    }
     remoteLinkHealthy = true;
+    renderRouteArrivalNotice(latest);
     sessionDeadlineMs = Date.now() +
       Math.max(0, Number(latest.sessionExpiresInSeconds) || 0) * 1000;
     updateSessionExpiry();
@@ -1289,6 +1546,7 @@ async function refresh() {
     updateStatus();
     updateRouteControls();
     renderMap();
+    renderRouteCameraFollow();
     reconcileTeleport(latest);
     refreshSavedClocks();
     if (focusRealWhenReady && trustedRealPosition()) {
@@ -1304,6 +1562,11 @@ async function refresh() {
       if (renewingSession && error.message === "等待續期完成，忽略舊狀態")
         return;
       remoteLinkHealthy = false;
+      // A previously confirmed completion is still a fact during temporary loss
+      // of network. Keep an undismissed notice, but mark it as last confirmed.
+      if (!$("route-arrival-notice").classList.contains("hidden"))
+        $("route-arrival-detail").textContent = "最後已確認抵達終點 · 網頁暫時離線";
+      updateSessionExpiry();
       cameraFocus.clear();
       focusRealWhenReady = false;
       $("connection").textContent = "暫時離線";
@@ -1387,6 +1650,8 @@ function refreshSavedClocks() {
 let savedTab="places";
 function selectSavedTab(tab) {
   savedTab=tab==="routes"?"routes":"places";
+  $("saved-add-button").title=savedTab==="routes"?"收藏目前路線":"收藏所選位置（自動命名）";
+  $("saved-add-button").setAttribute("aria-label",savedTab==="routes"?"收藏目前路線":"收藏目前選取的位置");
   $("saved-list").scrollTop=0;
   renderSaved();
 }
@@ -1481,21 +1746,30 @@ function renderSaved() {
     if (!places.length) list.append(labelledText("沒有符合條件的收藏地點"));
   } else {
     for(const route of routes){
-      const card=document.createElement("article");card.className="saved-card";
-      card.append(labelledText(route.name||"未命名路線","strong"));
+      const card=document.createElement("article");card.className="saved-card saved-route-card";
+      const name=route.name||"未命名路線";
+      card.append(labelledText(name,"strong"));
       card.append(labelledText((route.stops||[]).length+" 個路點 · "+
-        (route.mode==="FLOWERS"?"舊巡花收藏 · 可轉一般路線":"道路")));
-      const button=document.createElement("button");
-      button.textContent="載入草稿（仍須預覽）";
-      button.addEventListener("click",async()=>{
-        if(await act("/api/saved/load",{id:route.id})){
+        (route.mode==="FLOWERS"?"舊收藏":route.loop?"循環":"道路")+
+        (route.origin?" · 已儲存起點":" · 未儲存起點")));
+      const actions=document.createElement("div");actions.className="row";
+      actions.append(savedAction("載入",async()=>{
+        if (!confirm("載入「"+name+"」並替換目前路線草稿？不會移動定位。")) return;
+        if(await act("/api/saved/load",{id:route.id,expectedRevision:latest?.routeRevision})){
           $("saved-dialog").close();selectMode("ROUTE");
-          setMessage(route.mode==="FLOWERS"
-            ? "舊巡花收藏已轉成一般道路草稿；原收藏保留，請重新預覽"
-            : "收藏路線已載入，請先預覽步行道路");
+          setMessage("收藏路線已載入，請先預覽步行道路");
         }
-      });
-      card.append(button);list.append(card);
+      }),savedAction("改名",async()=>{
+        const proposed=prompt("修改收藏路線名稱",name);
+        if(proposed===null)return;
+        const next=proposed.trim();
+        if(!next||next.length>60){$("saved-enrich-status").textContent="路線名稱需為 1 到 60 字";return;}
+        await changeSavedRoute("rename",{id:route.id,name:next});
+      }));
+      const remove=savedAction("刪除",async()=>{
+        if(confirm("確定刪除「"+name+"」？不會變更目前草稿或定位。")) await changeSavedRoute("delete",{id:route.id});
+      });remove.classList.add("danger");actions.append(remove);
+      card.append(actions);list.append(card);
     }
     if (!routes.length) list.append(labelledText("沒有符合條件的收藏路線"));
   }
@@ -1512,8 +1786,37 @@ async function refreshSaved() {
   } catch(error){$("saved-enrich-status").textContent=error.message||"無法讀取收藏";}
 }
 let pendingSavedPoint=null, savedLookupId=null, savedLookupGeneration=0;
+let savingRoute=false;
+async function changeSavedRoute(action,body) {
+  try {
+    const result=await call("/api/saved/route/"+action,"POST",body);
+    if($("saved-dialog").open) {
+      await refreshSaved();
+      $("saved-enrich-status").textContent=result.message||"已更新收藏路線";
+    }
+    setMessage(result.message||"已更新收藏路線");
+    return true;
+  } catch(error) {
+    const text=error.message||"無法更新收藏路線";
+    if($("saved-dialog").open)$("saved-enrich-status").textContent=text;
+    setMessage(text);return false;
+  }
+}
+async function saveCurrentRoute() {
+  if(savingRoute||routeEditingBusy()||!latest?.routeStops?.length||!latest?.origin){setMessage("請先設定起點及路點，再收藏路線");return;}
+  const expectedRevision=latest.routeRevision;
+  const value=prompt("收藏路線名稱（儲存起點、路點與循環設定）","");
+  if(value===null)return;
+  const name=value.trim();
+  if(!name||name.length>60){setMessage("路線名稱需為 1 到 60 字");return;}
+  savingRoute=true;
+  try {await changeSavedRoute("add",{name,expectedRevision});}
+  finally{savingRoute=false;}
+}
+$("save-route").addEventListener("click",saveCurrentRoute);
 $("saved-add-button").addEventListener("click",async()=>{
   if ($("saved-add-button").disabled) return;
+  if(savedTab==="routes"){await saveCurrentRoute();return;}
   pendingSavedPoint=null;savedLookupId=null;
   $("saved-editor").classList.add("hidden");
   const button = $("saved-add-button");
