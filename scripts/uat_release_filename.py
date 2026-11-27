@@ -22,8 +22,6 @@ def verified_uat_version(metadata: dict) -> str:
     if not isinstance(raw, str):
         raise ValueError("Missing Android versionName")
     version = Version.parse(raw)
-    if version.patch != 1:
-        raise ValueError("UAT package version must have patch .1")
     return str(version)
 
 

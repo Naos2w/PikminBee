@@ -1,4 +1,4 @@
-"""Unit tests for the owner-defined DEV patch and UAT minor version progression."""
+"""Unit tests for DEV patches, UAT patch promotion and explicit UAT milestones."""
 
 import unittest
 
@@ -23,19 +23,20 @@ class VersioningTests(unittest.TestCase):
         self.assertIn("org.gradle.caching=true", bumped)
         self.assertIn("kotlin.code.style=official", bumped)
 
-    def test_next_uat_bumps_second_number_and_resets_patch(self):
-        bumped = update(update(BASE, "dev"), "uat")
-        self.assertEqual((Version(0, 2, 2), Version(0, 2, 1)), versions(bumped))
-        self.assertEqual(
-            (Version(0, 2, 3), Version(0, 2, 1)),
-            versions(update(bumped, "dev")),
-        )
+    def test_uat_promotes_dev_patch_and_advances_dev(self):
+        self.assertEqual((Version(0, 1, 3), Version(0, 1, 2)), versions(update(BASE, "uat")))
+        self.assertEqual((Version(0, 1, 4), Version(0, 1, 3)), versions(update(update(BASE, "dev"), "uat")))
 
-    def test_repeated_uat_bumps_progress_minors(self):
+    def test_repeated_uat_bumps_progress_patches(self):
         self.assertEqual(
-            (Version(0, 3, 2), Version(0, 3, 1)),
+            (Version(0, 1, 4), Version(0, 1, 3)),
             versions(update(update(BASE, "uat"), "uat")),
         )
+
+    def test_explicit_minor_milestone_resets_patches(self):
+        bumped = update(update(BASE, "uat"), "uat-minor")
+        self.assertEqual((Version(0, 2, 2), Version(0, 2, 1)), versions(bumped))
+        self.assertEqual((Version(0, 2, 3), Version(0, 2, 2)), versions(update(bumped, "uat")))
 
     def test_invalid_version_sequences_are_rejected(self):
         for invalid in (
@@ -53,7 +54,9 @@ class VersioningTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             updated_versions(Version(0, 1, 999), Version(0, 1, 1), "dev")
         with self.assertRaises(ValueError):
-            updated_versions(Version(0, 999, 2), Version(0, 999, 1), "uat")
+            updated_versions(Version(0, 1, 999), Version(0, 1, 998), "uat")
+        with self.assertRaises(ValueError):
+            updated_versions(Version(0, 999, 2), Version(0, 999, 1), "uat-minor")
 
 
 if __name__ == "__main__":

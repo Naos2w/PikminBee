@@ -11,7 +11,7 @@ if (secretsFile.exists()) {
 def mapsKey = secrets.getProperty('GOOGLE_MAPS_API_KEY', '')
 
 // Visible semantic versions are separate from Android installation versionCodes.
-// Use scripts/bump_version.py dev|uat to advance each channel.
+// Use scripts/bump_version.py dev|uat|uat-minor to advance each channel.
 def devVersion = providers.gradleProperty('pikminbeeDevVersion').orNull
 def uatVersion = providers.gradleProperty('pikminbeeUatVersion').orNull
 def semanticVersion = ~/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/

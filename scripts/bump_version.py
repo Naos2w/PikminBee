@@ -40,8 +40,6 @@ def property_value(contents: str, key: str) -> str:
 def versions(contents: str) -> tuple[Version, Version]:
     dev = Version.parse(property_value(contents, "pikminbeeDevVersion"))
     uat = Version.parse(property_value(contents, "pikminbeeUatVersion"))
-    if uat.patch != 1:
-        raise ValueError("UAT patch must be 1; a new UAT increments minor")
     if (dev.major, dev.minor) != (uat.major, uat.minor) or dev.patch <= uat.patch:
         raise ValueError("DEV must be a later patch in the same major.minor as UAT")
     return dev, uat
@@ -51,6 +49,10 @@ def updated_versions(dev: Version, uat: Version, channel: str) -> tuple[Version,
     if channel == "dev":
         next_dev, next_uat = Version(dev.major, dev.minor, dev.patch + 1), uat
     elif channel == "uat":
+        # Promote the current DEV version, never go backwards or reuse a patch.
+        next_uat = dev
+        next_dev = Version(dev.major, dev.minor, dev.patch + 1)
+    elif channel == "uat-minor":
         next_uat = Version(uat.major, uat.minor + 1, 1)
         next_dev = Version(next_uat.major, next_uat.minor, 2)
     else:
@@ -80,7 +82,7 @@ def update(contents: str, channel: str) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Advance PikminBee semantic versions")
-    parser.add_argument("channel", choices=("check", "dev", "uat"))
+    parser.add_argument("channel", choices=("check", "dev", "uat", "uat-minor"))
     parser.add_argument("--file", type=Path, default=ROOT / "gradle.properties")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
