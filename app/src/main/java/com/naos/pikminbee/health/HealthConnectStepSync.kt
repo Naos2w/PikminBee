@@ -28,7 +28,7 @@ object HealthConnectStepSync {
     suspend fun discardPending(context: Context): Boolean = withContext(Dispatchers.IO) {
         syncMutex.withLock {
             val ledger = EstimatedStepLedger.routeSync(context)
-            if (ledger.optIn()) return@withLock false
+            if (ledger.optIn() && hasWritePermission(context)) return@withLock false
             runCatching { ledger.discardPending() }.isSuccess
         }
     }
