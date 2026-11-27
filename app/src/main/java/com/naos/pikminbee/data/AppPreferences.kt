@@ -474,6 +474,25 @@ class AppPreferences(private val context: Context) {
         prefs.edit().putString(key, json.toString()).apply()
     }
 
+    /**
+     * Capture both persisted libraries under their existing in-process writer
+     * locks, in a fixed order (places then routes). Fail closed on damaged
+     * records or an out-of-sync route cache; this is not a disk durability check.
+     */
+    internal fun savedLibrarySnapshot(): SavedDataBackupCodec.Snapshot =
+        synchronized(SavedPlacesLock) {
+            synchronized(SavedRouteState) {
+                val snapshot = SavedLibrarySnapshotReader.read(
+                    prefs.getString("places", null),
+                    prefs.getString("saved_routes", null),
+                )
+                check(snapshot.routes == SavedRouteState.routes.value) {
+                    "Saved route storage and cache differ"
+                }
+                snapshot
+            }
+        }
+
     fun savedRoutes(): List<SavedRoute> = SavedRouteState.routes.value
 
     fun addSavedRoute(

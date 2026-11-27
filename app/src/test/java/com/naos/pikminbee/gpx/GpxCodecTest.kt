@@ -60,6 +60,38 @@ class GpxCodecTest {
         }
     }
 
+    @Test fun multipleRoutesAreRejectedInsteadOfDiscardingLaterRoutes() {
+        val route = "<rte><rtept lat=\"25\" lon=\"121\"/></rte>"
+        assertMultipleObjectsRejected(route + route)
+    }
+
+    @Test fun multipleTracksAreRejectedInsteadOfDiscardingLaterTracks() {
+        val track = "<trk><trkseg><trkpt lat=\"25\" lon=\"121\"/></trkseg></trk>"
+        assertMultipleObjectsRejected(track + track)
+    }
+
+    @Test fun mixedRouteAndTrackAreRejected() {
+        assertMultipleObjectsRejected("<rte><rtept lat=\"25\" lon=\"121\"/></rte>" +
+            "<trk><trkseg><trkpt lat=\"25\" lon=\"121\"/></trkseg></trk>")
+    }
+
+    @Test fun standaloneWaypointsAlongsideRouteAreNotSilentlyDropped() {
+        assertMultipleObjectsRejected("<wpt lat=\"26\" lon=\"122\"/>" +
+            "<rte><rtept lat=\"25\" lon=\"121\"/></rte>")
+    }
+
+    @Test fun standaloneWaypointsAlongsideTrackAreNotSilentlyDropped() {
+        assertMultipleObjectsRejected("<wpt lat=\"26\" lon=\"122\"/>" +
+            "<trk><trkseg><trkpt lat=\"25\" lon=\"121\"/></trkseg></trk>")
+    }
+
+    private fun assertMultipleObjectsRejected(content: String) {
+        val error = assertThrows(GpxCodec.GpxException::class.java) {
+            GpxCodec.decode(gpx(content).toByteArray())
+        }
+        assertTrue(error.message.orEmpty().contains("請先分成"))
+    }
+
     @Test fun unknownAndOversizedInputIsRejected() {
         val invalid = "<!DOCTYPE gpx [<!ENTITY x SYSTEM \"file:///etc/passwd\">]>" +
             gpx("<rte><name>&x;</name><rtept lat=\"25\" lon=\"121\"/></rte>")

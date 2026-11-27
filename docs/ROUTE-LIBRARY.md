@@ -11,7 +11,7 @@
 
 ## GPX compatibility and safety
 
-- GPX **1.1** with ordered `<rtept>` route points is supported; `<trk><trkseg><trkpt>` from one continuous segment is also supported. Standalone `<wpt>` points work when there is no route/track.
+- GPX **1.1** with ordered `<rtept>` route points is supported; `<trk><trkseg><trkpt>` from one continuous segment is also supported. Standalone `<wpt>` points work when there is no route/track. Import creates one saved route only. Multiple routes/tracks or a mixture of routes, tracks and standalone waypoints are rejected before saving, rather than silently selecting the first object. Split such files in a GPX editor before import. GPX is a route interchange format, not a complete backup of favourites, metadata or app settings.
 - Exports are standards-based GPX 1.1 `<rte>` documents. PikminBee's own `<type>` marker distinguishes ROUTE from FLOWERS; for other people's GPX the current editor mode is used.
 - **A GPX track is not identical to a freshly calculated pedestrian route.** Track imports with more than 15 points are simplified to up to 15 significant bends, preserving the start and end. The app shows the original and reduced counts and requires confirmation **before** saving. This never silently switches to straight-line GPS movement: future walking requires a new Valhalla pedestrian road query.
 - Up to **2 MB / 5,000 GPX track points** can be read; routes with more than 15 explicit `<rtept>` points are rejected rather than silently truncated. GPX with disconnected track segments, invalid WGS84 coordinates, malformed XML or external/DOCTYPE entities is rejected with an error.

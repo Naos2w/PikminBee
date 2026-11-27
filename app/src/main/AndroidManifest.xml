@@ -11,8 +11,12 @@
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-    <!-- Health Connect: optional foreground step reads only. No activity/health write permission. -->
+    <!-- Optional, independently authorised real activity and Health Connect access. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_HEALTH" />
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+    <uses-feature android:name="android.hardware.sensor.stepcounter" android:required="false" />
     <uses-permission android:name="android.permission.health.READ_STEPS" />
+    <uses-permission android:name="android.permission.health.WRITE_STEPS" />
     <queries><package android:name="com.google.android.apps.healthdata" /></queries>
 
     <application
@@ -53,6 +57,11 @@
             android:exported="false"
             android:stopWithTask="false"
             android:foregroundServiceType="connectedDevice" />
+        <service
+            android:name=".health.PhysicalStepTrackingService"
+            android:exported="false"
+            android:stopWithTask="false"
+            android:foregroundServiceType="health" />
         <service
             android:name=".location.MockLocationService"
             android:exported="false"

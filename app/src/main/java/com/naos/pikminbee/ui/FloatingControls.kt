@@ -30,6 +30,11 @@ import android.view.WindowManager
 import android.view.ViewGroup
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
+import com.naos.pikminbee.health.HealthConnectRealSteps
+import com.naos.pikminbee.health.HealthDisplayPreferences
+import com.naos.pikminbee.health.PhysicalStepLedger
+import com.naos.pikminbee.health.PhysicalStepsStatus
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.widget.LinearLayout
 import android.widget.FrameLayout
@@ -105,9 +110,39 @@ class FloatingControls(
     private val windows = context.getSystemService(WindowManager::class.java)
     private val stepsHandler = Handler(Looper.getMainLooper())
     private val dailyReadScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val healthDisplayPrefs = HealthDisplayPreferences(context)
+    private val dailyStepsCache = FloatingDailyStepsCache()
+    private var dailyReadJob: Job? = null
+
+    private fun clearDailyRead() {
+        dailyReadJob?.cancel()
+        dailyReadJob = null
+        dailyStepsCache.invalidate()
+    }
+
+    private fun requestDailySteps(force: Boolean = false) {
+        if (root == null || !expanded || !healthDisplayPrefs.showOverlaySteps()) {
+            clearDailyRead(); return
+        }
+        val period = FloatingDayKey.now()
+        if (dailyStepsCache.ensurePeriod(period)) {
+            dailyReadJob?.cancel(); dailyReadJob = null
+        }
+        if (dailyReadJob?.isActive == true) return
+        val request = dailyStepsCache.begin(period, SystemClock.elapsedRealtime(), force) ?: return
+        dailyReadJob = dailyReadScope.launch {
+            val read = HealthConnectRealSteps.todayAggregate(context)
+            val value = (read as? HealthConnectRealSteps.Result.Available)?.count
+            if (expanded && healthDisplayPrefs.showOverlaySteps()) {
+                dailyStepsCache.complete(request, period, FloatingDayKey.now(), SystemClock.elapsedRealtime(), value)
+                updateStepSummary()
+            }
+        }
+    }
 
     private val stepRefresh = object : Runnable {
         override fun run() {
+            requestDailySteps()
             updateStepSummary()
             refreshQuick()
             if (root != null) stepsHandler.postDelayed(this, 5_000L)
@@ -118,7 +153,15 @@ class FloatingControls(
         val hasWalk = lastMode != null && lastPhase in
             listOf(WalkPhase.MOVING, WalkPhase.PAUSED, WalkPhase.PARKED)
         val currentWalk = com.naos.pikminbee.location.LocationStatus.walkEstimatedSteps.value
-        val display = FloatingDailyStepsPolicy.render(currentWalk.takeIf { hasWalk })
+        val healthVisible = expanded && healthDisplayPrefs.showOverlaySteps()
+        val day = FloatingDayKey.now()
+        val aggregate = if (healthVisible) dailyStepsCache.currentValue(day, SystemClock.elapsedRealtime()) else null
+        val sensor = if (healthVisible) {
+            val observed = PhysicalStepsStatus.state.value
+            if (observed.date == day.date && observed.tracking) observed.todaySteps
+            else PhysicalStepLedger(context).todaysCount().takeIf { it > 0L }
+        } else null
+        val display = FloatingDailyStepsPolicy.render(currentWalk.takeIf { hasWalk }, healthVisible, aggregate, sensor)
         quickSteps?.text = display
         quickSteps?.contentDescription = display
     }
@@ -983,12 +1026,17 @@ class FloatingControls(
         panel?.visibility = if (expanded) View.VISIBLE else View.GONE
         beeButton?.visibility = if (expanded) View.GONE else View.VISIBLE
         if (expanded) {
+            clearDailyRead()
+            requestDailySteps(force = true)
             updateStepSummary()
             panel?.alpha = 0f
             panel?.translationY = dp(10).toFloat()
             panel?.animate()?.alpha(1f)?.translationY(0f)
                 ?.setDuration(NaosDesignSystem.FAST_MS.toLong())?.start()
             refreshQuick()
+        } else {
+            clearDailyRead()
+            updateStepSummary()
         }
         params?.let { placement ->
             placement.width = if (expanded)
@@ -1043,6 +1091,7 @@ class FloatingControls(
         overflowAction = null
         detail = OverlayDetail.NONE
         stepsHandler.removeCallbacks(stepRefresh)
+        clearDailyRead()
         dailyReadScope.cancel()
         logoAnimator?.cancel()
         logoAnimator = null
