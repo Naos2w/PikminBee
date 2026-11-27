@@ -1,6 +1,6 @@
-# Mogulei (development repository: PikminBee)
+# PikminBee
 
-**Project name:** Mogulei (selected on 2026-11-26). Existing DEV/UAT package identities and repository URLs remain unchanged.
+**Project name:** PikminBee (restored by owner decision on 2026-11-27). Existing DEV/UAT package identities and repository URLs remain unchanged.
 
 PikminBee is a free, ad-free Android location and route testing app built with Kotlin and Jetpack Compose.
 
