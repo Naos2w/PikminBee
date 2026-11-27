@@ -106,7 +106,7 @@ fun BeeSettingsScreen(
     val installed = InstalledAppVersion.read(LocalContext.current)
     val titles = mapOf("route" to "進階路徑設定",
         "gps" to "GPS 測試", "overlay" to "懸浮控制教學", "wifi" to "Wi-Fi 控制",
-        "permission" to "權限")
+        "permission" to "權限", "health" to "Health Connect")
     BackHandler(enabled = section != null) { section = null }
     Column(
         Modifier.fillMaxSize().background(palette.bg)
@@ -210,6 +210,7 @@ fun BeeSettingsScreen(
                 Triple("overlay", NaosActionGlyph.MORE, "教學"),
                 Triple("wifi", NaosActionGlyph.WIFI, lan.connection.label),
                 Triple("permission", NaosActionGlyph.STEPS, ""),
+                Triple("health", NaosActionGlyph.STEPS, "今日步數 · 唯讀"),
             )
             rows.forEach { (id, glyph, value) ->
                 Surface(modifier = Modifier.fillMaxWidth().clickable { section = id },
@@ -301,6 +302,7 @@ fun BeeSettingsScreen(
                 )
 
                     }
+                    "health" -> HealthConnectReadSettings(foreground = foreground, muted = muted)
                     "about" -> SelectionContainer {
                         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                             Text(installed.displayName, color = foreground, fontSize = 16.sp)
@@ -322,6 +324,7 @@ fun BeeSettingsScreen(
             "overlay" -> "懸浮只提供快捷控制；關閉視窗不停止路徑或 Wi-Fi。"
             "wifi" -> "只在可信私人 Wi-Fi 開啟，電腦輸入配對碼後須由手機核准。HTTP 未加密，勿公開連接埠。"
             "permission" -> "Android 定位與背景權限需由你明確授權，可隨時撤銷。"
+            "health" -> "獨立授權後才能手動讀取今日 Health Connect 步數；不寫入、不同步模擬資料，也不傳送至 Web。"
             else -> "點分類查看及修改相關設定；返回可回到設定首頁。"
         }) },
         confirmButton = { TextButton(onClick = { helpOpen = false }) { Text("關閉") } },

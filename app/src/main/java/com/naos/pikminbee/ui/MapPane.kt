@@ -33,6 +33,7 @@ import com.naos.pikminbee.data.FreeMapStyle
 import com.naos.pikminbee.data.MapBasemapPolicy
 import com.naos.pikminbee.domain.Coordinate
 import com.naos.pikminbee.domain.WalkingGeometry
+import com.naos.pikminbee.domain.RouteMapSegments
 import com.naos.pikminbee.flower.FlowerSpot
 import com.naos.pikminbee.flower.FlowerEvidence
 import org.maplibre.android.MapLibre
@@ -72,6 +73,7 @@ fun LocationMap(
     start: Coordinate?,
     stops: List<Coordinate>,
     road: List<Coordinate>,
+    routeSegments: RouteMapSegments = RouteMapSegments(),
     previewRoad: Boolean,
     flowerSpots: List<FlowerSpot>,
     cameraRequest: MapCameraRequest? = null,
@@ -88,14 +90,14 @@ fun LocationMap(
     interactive: Boolean = true,
 ) {
     when (provider) {
-        MapProvider.OPEN_FREE_MAP -> OpenFreeMapPane(dark, selected, selectionActive, current, currentIsMock, start, stops, road, previewRoad, flowerSpots,
+        MapProvider.OPEN_FREE_MAP -> OpenFreeMapPane(dark, selected, selectionActive, current, currentIsMock, start, stops, road, routeSegments, previewRoad, flowerSpots,
             cameraRequest, viewport, onViewport, onCameraApplied, mapExplore, onCameraFailure, onCameraGesture,
             onPick, onFlowerPick, onStopPick, modifier, interactive)
         MapProvider.GOOGLE_MAPS -> if (BuildConfig.HAS_GOOGLE_MAPS_KEY) {
-            GoogleMapsPane(dark, selected, selectionActive, current, currentIsMock, start, stops, road, previewRoad, flowerSpots,
+            GoogleMapsPane(dark, selected, selectionActive, current, currentIsMock, start, stops, road, routeSegments, previewRoad, flowerSpots,
                 cameraRequest, viewport, onViewport, onCameraApplied, mapExplore, onCameraFailure, onCameraGesture, onPick, onFlowerPick, onStopPick, modifier, interactive)
         } else {
-            OpenFreeMapPane(dark, selected, selectionActive, current, currentIsMock, start, stops, road, previewRoad, flowerSpots,
+            OpenFreeMapPane(dark, selected, selectionActive, current, currentIsMock, start, stops, road, routeSegments, previewRoad, flowerSpots,
                 cameraRequest, viewport, onViewport, onCameraApplied, mapExplore, onCameraFailure, onCameraGesture,
                 onPick, onFlowerPick, onStopPick, modifier, interactive)
         }
@@ -107,7 +109,7 @@ private fun OpenFreeMapPane(
     dark: Boolean, selected: Coordinate, selectionActive: Boolean,
     current: Coordinate?, currentIsMock: Boolean,
     start: Coordinate?, stops: List<Coordinate>,
-    road: List<Coordinate>, previewRoad: Boolean, flowerSpots: List<FlowerSpot>,
+    road: List<Coordinate>, routeSegments: RouteMapSegments, previewRoad: Boolean, flowerSpots: List<FlowerSpot>,
     cameraRequest: MapCameraRequest?, viewport: MapViewport?,
     onViewport: (MapViewport) -> Unit, onCameraApplied: (Int) -> Unit, mapExplore: Boolean,
     onCameraFailure: (String) -> Unit,
@@ -150,6 +152,7 @@ private fun OpenFreeMapPane(
     var flowerMarkers by remember { mutableStateOf(emptyList<org.maplibre.android.annotations.Marker>()) }
     var shownFlowers by remember { mutableStateOf(emptyList<FlowerSpot>()) }
     var line by remember { mutableStateOf<org.maplibre.android.annotations.Polyline?>(null) }
+    var legLines by remember { mutableStateOf(emptyList<org.maplibre.android.annotations.Polyline>()) }
     DisposableEffect(view, lifecycleOwner) {
         var disposed = false
         val observer = LifecycleEventObserver { _, event ->
@@ -297,10 +300,12 @@ private fun OpenFreeMapPane(
             } else startMarker?.position = position
         }
     }
-    LaunchedEffect(map, styleVersion, stops, road, previewRoad, obscuredStops) {
+    LaunchedEffect(map, styleVersion, stops, road, routeSegments, previewRoad, obscuredStops) {
         val m = map ?: return@LaunchedEffect
         if (styleVersion == 0) return@LaunchedEffect
         stopMarkers.forEach { m.removeMarker(it.second) }
+        legLines.forEach { m.removePolyline(it) }
+        legLines = emptyList()
         line?.let { m.removePolyline(it) }
         stopMarkers = stops.mapIndexedNotNull { index, coordinate ->
             if (index in obscuredStops) return@mapIndexedNotNull null
@@ -315,6 +320,16 @@ private fun OpenFreeMapPane(
             .addAll(road.map { LibreLatLng(it.latitude, it.longitude) })
             .color(if (previewRoad) android.graphics.Color.rgb(42, 175, 211)
                 else android.graphics.Color.rgb(232, 151, 39)).width(5f)) else null
+        fun addSegment(points: List<Coordinate>, color: Int, width: Float) =
+            m.addPolyline(LibrePolylineOptions().addAll(points.map { LibreLatLng(it.latitude, it.longitude) })
+                .color(color).width(width))
+        legLines = buildList {
+            if (routeSegments.completed.size >= 2) add(addSegment(routeSegments.completed, android.graphics.Color.rgb(137, 150, 163), 5f))
+            if (routeSegments.active.size >= 2) {
+                add(addSegment(routeSegments.active, android.graphics.Color.WHITE, 12f))
+                add(addSegment(routeSegments.active, android.graphics.Color.rgb(8, 123, 230), 8f))
+            }
+        }
     }
     LaunchedEffect(map, styleVersion, flowerSpots) {
         val m = map ?: return@LaunchedEffect
@@ -374,7 +389,7 @@ private fun GoogleMapsPane(
     dark: Boolean, selected: Coordinate, selectionActive: Boolean,
     current: Coordinate?, currentIsMock: Boolean,
     start: Coordinate?, stops: List<Coordinate>,
-    road: List<Coordinate>, previewRoad: Boolean, flowerSpots: List<FlowerSpot>,
+    road: List<Coordinate>, routeSegments: RouteMapSegments, previewRoad: Boolean, flowerSpots: List<FlowerSpot>,
     cameraRequest: MapCameraRequest?, viewport: MapViewport?,
     onViewport: (MapViewport) -> Unit, onCameraApplied: (Int) -> Unit, mapExplore: Boolean,
     onCameraFailure: (String) -> Unit,
@@ -410,6 +425,7 @@ private fun GoogleMapsPane(
     var flowerMarkers by remember { mutableStateOf(emptyList<com.google.android.gms.maps.model.Marker>()) }
     var shownFlowers by remember { mutableStateOf(emptyList<FlowerSpot>()) }
     var line by remember { mutableStateOf<com.google.android.gms.maps.model.Polyline?>(null) }
+    var legLines by remember { mutableStateOf(emptyList<com.google.android.gms.maps.model.Polyline>()) }
     DisposableEffect(view, lifecycleOwner) {
         var disposed = false
         val observer = LifecycleEventObserver { _, event ->
@@ -542,9 +558,11 @@ private fun GoogleMapsPane(
             } else startMarker?.position = position
         }
     }
-    LaunchedEffect(map, stops, road, previewRoad, obscuredStops) {
+    LaunchedEffect(map, stops, road, routeSegments, previewRoad, obscuredStops) {
         val m = map ?: return@LaunchedEffect
         stopMarkers.forEach { it.second.remove() }
+        legLines.forEach { it.remove() }
+        legLines = emptyList()
         line?.remove()
         stopMarkers = stops.mapIndexedNotNull { index, coordinate ->
             if (index in obscuredStops) return@mapIndexedNotNull null
@@ -560,6 +578,16 @@ private fun GoogleMapsPane(
             .addAll(road.map { GoogleLatLng(it.latitude, it.longitude) })
             .color(if (previewRoad) android.graphics.Color.rgb(42, 175, 211)
                 else android.graphics.Color.rgb(232, 151, 39)).width(6f)) else null
+        fun addSegment(points: List<Coordinate>, color: Int, width: Float, z: Float) =
+            m.addPolyline(GooglePolylineOptions().addAll(points.map { GoogleLatLng(it.latitude, it.longitude) })
+                .color(color).width(width).zIndex(z))
+        legLines = buildList {
+            if (routeSegments.completed.size >= 2) add(addSegment(routeSegments.completed, android.graphics.Color.rgb(137, 150, 163), 6f, 1f))
+            if (routeSegments.active.size >= 2) {
+                add(addSegment(routeSegments.active, android.graphics.Color.WHITE, 13f, 2f))
+                add(addSegment(routeSegments.active, android.graphics.Color.rgb(8, 123, 230), 9f, 3f))
+            }
+        }
     }
     LaunchedEffect(map, flowerSpots) {
         val m = map ?: return@LaunchedEffect

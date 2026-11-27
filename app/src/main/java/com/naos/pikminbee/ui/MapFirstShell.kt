@@ -91,6 +91,7 @@ fun MapFirstShell(
     walkingProgress: WalkingProgressSnapshot = WalkingProgressSnapshot(),
     walkEstimatedSteps: Long = 0L,
     walkStopped: Boolean = false,
+    routeArrivalConfirmed: Boolean = false,
     routeSpeedKmh: Double = 0.0,
     routeActive: Boolean = false,
     routePaused: Boolean = false,
@@ -200,6 +201,7 @@ fun MapFirstShell(
                             when {
                                 activeWalking && routePaused -> "已暫停 · 本次估算"
                                 activeWalking -> "行走中 · 本次估算"
+                                walkStopped && routeArrivalConfirmed -> "已抵達終點 · 本次估算"
                                 walkStopped -> "已結束 · 本次估算"
                                 else -> "下一個路點"
                             },
@@ -284,6 +286,10 @@ fun MapFirstShell(
                                 fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                         }
                     }
+                }
+                if (!activeWalking && walkStopped && routeArrivalConfirmed) {
+                    Text("路徑已完成 · 手機已確認抵達終點", color = Color(BeeActionColors.START_GREEN),
+                        fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
                 }
                 if (!activeWalking && routePreviewReady && routeSnapMetres > 40.0) {
                     Text("路點最大吸附 ${routeSnapMetres.toInt()} 公尺 · 開始前會再次確認",

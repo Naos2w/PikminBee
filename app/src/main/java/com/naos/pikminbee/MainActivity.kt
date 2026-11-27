@@ -271,6 +271,7 @@ private fun PikminBeeScreen() {
     val walkMode by LocationStatus.mode.collectAsState()
     val roadLine by LocationStatus.geometry.collectAsState()
     val walkingProgress by LocationStatus.progress.collectAsState()
+    val routeArrivalId by LocationStatus.routeArrivalId.collectAsState()
     val walkEstimatedSteps by LocationStatus.walkEstimatedSteps.collectAsState()
     val overlayVisible by LocationStatus.overlayVisible.collectAsState()
     LaunchedEffect(walkPhase) {
@@ -487,6 +488,12 @@ private fun PikminBeeScreen() {
         if (activeRouteWalk) roadLine
         else if (routePreviewShown) routeRoadPreview else emptyList()
     } else emptyList()
+    val displayedSegments = remember(roadLine, activeRouteWalk, tab,
+        walkingProgress.activeLegStartMetres, walkingProgress.activeLegEndMetres) {
+        if (tab == ToolTab.ROUTE && activeRouteWalk)
+            com.naos.pikminbee.domain.RouteMapSegments.from(roadLine, walkingProgress)
+        else com.naos.pikminbee.domain.RouteMapSegments()
+    }
     fun chooseSpeedProfile(next: WalkSpeedProfile) {
         prefs.setWalkSpeedProfile(next)
         val moving = mockPosition != null &&
@@ -1030,6 +1037,8 @@ private fun PikminBeeScreen() {
                 walkEstimatedSteps = walkEstimatedSteps,
                 walkStopped = walkPhase == WalkPhase.PARKED &&
                     tab == ToolTab.ROUTE && walkMode == WalkMode.ROUTE,
+                routeArrivalConfirmed = routeArrivalId != null && walkPhase == WalkPhase.PARKED &&
+                    walkMode == WalkMode.ROUTE && !planning,
                 routeSpeedKmh = appliedSpeedKmh,
                 routeActive = walkMode == WalkMode.ROUTE &&
                     walkPhase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED),
@@ -1073,6 +1082,7 @@ private fun PikminBeeScreen() {
                 start = if (tab == ToolTab.ROUTE) preparedRoute?.takeIf { routePreviewShown }?.origin ?: routePlanOrigin else null,
                 stops = if (tab == ToolTab.ROUTE) roadStops else emptyList(),
                 road = displayedRoad,
+                routeSegments = displayedSegments,
                 previewRoad = tab == ToolTab.ROUTE && !activeRouteWalk && routePreviewShown,
                 cameraRequest = cameraRequest,
                 viewport = mapViewport,

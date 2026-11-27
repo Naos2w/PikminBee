@@ -595,6 +595,8 @@ button.maplibregl-popup-close-button:focus-visible{outline:2px solid var(--accen
 .route-arrival-notice .arrival-copy{flex:1;min-width:0}
 .route-arrival-notice svg{width:24px;height:24px;flex:none;fill:none;stroke:var(--accent);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .route-arrival-notice button{min-height:44px;width:44px;flex:none;padding:0;font-size:20px}
+.renewal-notice{position:fixed;z-index:47;top:calc(156px + env(safe-area-inset-top));left:50%;transform:translateX(-50%);width:min(360px,calc(100vw - 24px));padding:14px;border:1px solid var(--line);border-radius:14px;background:var(--surface);color:var(--text);box-shadow:var(--shadow)}
+.renewal-notice strong{font-size:15px}.renewal-notice p{margin:8px 0;color:var(--sub);font-size:13px;line-height:1.45}.renewal-notice .row{margin:0}
 
 </style>
 </head>
@@ -812,9 +814,14 @@ button.maplibregl-popup-close-button:focus-visible{outline:2px solid var(--accen
   </div>
 <div id="route-arrival-notice" class="route-arrival-notice hidden" role="status" aria-live="polite">
  <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg>
- <div class="arrival-copy"><strong>路徑已完成</strong><small>已抵達終點</small></div>
+ <div class="arrival-copy"><strong>路徑已完成</strong><small id="route-arrival-detail">手機已確認抵達終點</small></div>
  <button id="route-arrival-dismiss" type="button" aria-label="關閉路徑完成通知">×</button>
 </div>
+<section id="renewal-notice" class="renewal-notice hidden" role="alertdialog" aria-modal="false" aria-labelledby="renewal-title" aria-describedby="renewal-countdown">
+ <strong id="renewal-title">連線授權即將到期</strong>
+ <p id="renewal-countdown" role="status" aria-live="polite"></p>
+ <div class="row"><button id="renewal-decline" type="button">不延長</button><button id="renewal-confirm" type="button" class="primary">申請延長</button></div>
+</section>
 <script type="module" src="/controller.js"></script>
 </body>
 </html>

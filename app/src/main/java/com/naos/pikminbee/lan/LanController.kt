@@ -923,6 +923,13 @@ class LanController(private val context: Context) {
         }
         val progress = LocationStatus.progress.value
         val phase = LocationStatus.phase.value
+        val routeSegments = if (LocationStatus.mode.value == WalkMode.ROUTE &&
+            phase in listOf(WalkPhase.MOVING, WalkPhase.PAUSED))
+            com.naos.pikminbee.domain.RouteMapSegments.from(geometry, progress)
+            else com.naos.pikminbee.domain.RouteMapSegments()
+        fun displayPath(points: List<Coordinate>): List<Coordinate> = if (points.size > 250)
+            points.filterIndexed { index, _ -> index % (points.size / 250 + 1) == 0 } + points.last()
+            else points
         val appliedKmh = com.naos.pikminbee.domain.RouteSurfaceStatusPolicy.visibleRouteSpeedKmh(
             phase, LocationStatus.appliedSpeedKmh.value)
         // A newly enabled mock provider invalidates any earlier real-location request.
@@ -985,6 +992,8 @@ class LanController(private val context: Context) {
                 ?.takeIf { phase == com.naos.pikminbee.domain.WalkPhase.PARKED }
                 ?: JSONObject.NULL)
             .put("mode", LocationStatus.mode.value?.name)
+            .put("activeLegGeometry", coordinates(displayPath(routeSegments.active)))
+            .put("completedGeometry", coordinates(displayPath(routeSegments.completed)))
             .put("planning", RouteDraftState.planning.value)
             .put("planningNotice", RouteDraftState.planningNotice.value.text)
             .put("planningError", RouteDraftState.planningNotice.value.error)

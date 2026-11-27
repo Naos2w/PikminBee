@@ -49,6 +49,7 @@ let state = {
     travelledMetres:0,totalMetres:0,waypointCount:0},
   speedPreset:'WALK',defaultSpeedPreset:'WALK'
 };
+let syntheticOffline=false, syntheticRenewRequested=false, syntheticRenewApproved=false;
 let previewRoutes=[];
 let previewPlaces=[{
   id:1,name:"東京車站（合成資料）",position:{lat:35.681236,lon:139.767125},
@@ -88,11 +89,34 @@ createServer(async (req,res)=>{
     send(res,{token:'preview-only-token',expiresInSeconds:7200},200);return;
   }
   if(req.method==='GET'&&url==='/api/state'){
+    if(syntheticOffline){send(res,{error:'合成網路中斷'},503);return;}
+    if(state.sessionExpiresInSeconds<=0){send(res,{error:'合成授權到期'},401);return;}
     if(state.realPosition?.expiresAtMillis < Date.now()){
       state.realPosition=null;
       state.realGpsState=state.realLocationSharingApproved?'unavailable':'locked';
     }
     send(res,state);return;
+  }
+  // Loopback-only session fixtures. No actual phone session or credentials.
+  if(req.method==='POST'&&url==='/api/preview/session'){
+    const data=await readBody(req);
+    if(typeof data.seconds==='number')state.sessionExpiresInSeconds=data.seconds;
+    if(typeof data.offline==='boolean')syntheticOffline=data.offline;
+    if(data.approve===true)syntheticRenewApproved=true;
+    send(res,{renewRequested:syntheticRenewRequested,renewApproved:syntheticRenewApproved},200);return;
+  }
+  if(req.method==='POST'&&url==='/api/session/renew'){
+    if(state.sessionExpiresInSeconds<=0){send(res,{error:'合成授權到期'},401);return;}
+    syntheticRenewRequested=true;syntheticRenewApproved=false;
+    send(res,{pendingId:'synthetic-renewal'},202);return;
+  }
+  if(req.method==='POST'&&url==='/api/session/renew/status'){
+    const data=await readBody(req);
+    if(state.sessionExpiresInSeconds<=0){send(res,{error:'合成授權到期'},401);return;}
+    if(!syntheticRenewRequested||data.pendingId!=='synthetic-renewal'){send(res,{error:'無效要求'},403);return;}
+    if(!syntheticRenewApproved){send(res,{status:'pending'},202);return;}
+    state.sessionExpiresInSeconds=7200;state.realLocationSharingApproved=false;state.realPosition=null;state.realGpsState='locked';
+    send(res,{token:'preview-only-renewed-token',expiresInSeconds:7200},200);return;
   }
   if(req.method==='POST'&&url==='/api/preview/grant-real'){
     state.realLocationSharingApproved=true;
@@ -130,6 +154,8 @@ createServer(async (req,res)=>{
     state={...state,origin,geometry:[origin,a],mode:'ROUTE',
       position:scenario==='active-next'?{lat:25.036,lon:121.5654}:state.position,
       phase:moving?'MOVING':'PARKED',
+      activeLegGeometry:moving?(scenario==='active-next'?[{lat:25.036,lon:121.5654},a]:[origin,a]):[],
+      completedGeometry:scenario==='active-next'?[origin,{lat:25.036,lon:121.5654}]:[],
       routeArrivalId:scenario==='arrived'?'synthetic-arrival-'+(state.routeRevision+1):null,
       routeRevision:state.routeRevision+1,
       routeStops:scenario==='cleared'?[]:[moving?a:b],
