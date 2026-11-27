@@ -19,34 +19,34 @@ class VirtualStepSyncRegressionTest {
         val exported = mutableSetOf<String>()
         val outcome = VirtualStepSyncIntegrity.drainAll(
             sessions = queue.toList(),
-            optedIn = { true },
+            hasWritePermission = { true },
             stillPending = { id -> queue.any { it.id == id } },
             insert = { exported.add(VirtualStepSyncIntegrity.clientRecordId(it.id)) },
             acknowledge = { id -> queue.removeAll { it.id == id } },
         )
         assertNull(outcome.failure)
-        assertFalse(outcome.optedOut)
+        assertFalse(outcome.permissionDenied)
         assertEquals(120, outcome.acknowledged)
         assertEquals(120, exported.size)
         assertTrue(queue.isEmpty())
     }
 
-    @Test fun optOutDuringBatchStopsEverySubsequentRecord() = runBlocking {
+    @Test fun permissionRevocationDuringBatchStopsEverySubsequentRecord() = runBlocking {
         val queue = (1..5).map(::session).toMutableList()
-        var userAgrees = true
+        var permissionGranted = true
         val written = mutableListOf<String>()
         val outcome = VirtualStepSyncIntegrity.drain(
             sessions = queue.toList(),
-            optedIn = { userAgrees },
+            hasWritePermission = { permissionGranted },
             stillPending = { id -> queue.any { it.id == id } },
             insert = { written.add(it.id) },
             acknowledge = { id ->
                 queue.removeAll { it.id == id }
-                userAgrees = false
+                permissionGranted = false
             },
         )
         assertEquals(listOf("test-1"), written)
-        assertTrue(outcome.optedOut)
+        assertTrue(outcome.permissionDenied)
         assertEquals(1, outcome.acknowledged)
         assertEquals(4, queue.size)
     }
@@ -57,7 +57,7 @@ class VirtualStepSyncRegressionTest {
         val inserted = mutableListOf<String>()
         val outcome = VirtualStepSyncIntegrity.drain(
             sessions = sessions,
-            optedIn = { true },
+            hasWritePermission = { true },
             stillPending = { id -> queue.any { it.id == id } },
             insert = { item ->
                 inserted.add(item.id)
@@ -78,7 +78,7 @@ class VirtualStepSyncRegressionTest {
         suspend fun attempt(): VirtualStepSyncIntegrity.BatchResult =
             VirtualStepSyncIntegrity.drain(
                 sessions = queue.toList(),
-                optedIn = { true },
+                hasWritePermission = { true },
                 stillPending = { id -> queue.any { it.id == id } },
                 insert = { remote.add(VirtualStepSyncIntegrity.clientRecordId(it.id)) },
                 acknowledge = { id ->
@@ -103,7 +103,7 @@ class VirtualStepSyncRegressionTest {
         val queue = (1..3).map(::session).toMutableList()
         val outcome = VirtualStepSyncIntegrity.drain(
             sessions = queue.toList(),
-            optedIn = { true },
+            hasWritePermission = { true },
             stillPending = { id -> queue.any { it.id == id } },
             insert = { if (it.id == "test-2") error("permission revoked") },
             acknowledge = { id -> queue.removeAll { it.id == id } },
@@ -119,7 +119,7 @@ class VirtualStepSyncRegressionTest {
             runBlocking {
                 VirtualStepSyncIntegrity.drain(
                     sessions = queue,
-                    optedIn = { true },
+                    hasWritePermission = { true },
                     stillPending = { true },
                     insert = { throw CancellationException("worker stopped") },
                     acknowledge = { },

@@ -20,27 +20,27 @@ internal object VirtualStepSyncIntegrity {
 
     data class BatchResult(
         val acknowledged: Int,
-        val optedOut: Boolean = false,
+        val permissionDenied: Boolean = false,
         val failure: String? = null,
     )
 
     /**
-     * Re-check explicit opt-in and pending membership for EACH record, not just
-     * at the start: the user can disable or discard a queue during a sync.
+     * Re-check the system write permission and pending membership for EACH record,
+     * not just at the start: the user can revoke permission or discard a queue.
      * When a remote write succeeds but the local ack fails, retry uses the
      * same client ID so Health Connect updates that record rather than
      * identifying a new, duplicate virtual session.
      */
     suspend fun drain(
         sessions: List<EstimatedStepSession>,
-        optedIn: () -> Boolean,
+        hasWritePermission: suspend () -> Boolean,
         stillPending: (String) -> Boolean,
         insert: suspend (EstimatedStepSession) -> Unit,
         acknowledge: (String) -> Unit,
     ): BatchResult {
         var acknowledged = 0
         for (session in sessions.take(MAX_BATCH_SIZE)) {
-            if (!optedIn()) return BatchResult(acknowledged, optedOut = true)
+            if (!hasWritePermission()) return BatchResult(acknowledged, permissionDenied = true)
             if (!stillPending(session.id)) continue
             try {
                 insert(session)
@@ -59,20 +59,20 @@ internal object VirtualStepSyncIntegrity {
      * The background worker has a bounded retry count. Writing only the first
      * 50 records per invocation could strand a 251–500-record queue forever.
      * Process all ledger records in bounded 50-record chunks within this one
-     * authorised pass; stop immediately on opt-out or a remote/local failure.
+     * authorised pass; stop immediately on permission denial or a remote/local failure.
      */
     suspend fun drainAll(
         sessions: List<EstimatedStepSession>,
-        optedIn: () -> Boolean,
+        hasWritePermission: suspend () -> Boolean,
         stillPending: (String) -> Boolean,
         insert: suspend (EstimatedStepSession) -> Unit,
         acknowledge: (String) -> Unit,
     ): BatchResult {
         var total = 0
         for (batch in sessions.take(MAX_DRAIN_SESSIONS).chunked(MAX_BATCH_SIZE)) {
-            val outcome = drain(batch, optedIn, stillPending, insert, acknowledge)
+            val outcome = drain(batch, hasWritePermission, stillPending, insert, acknowledge)
             total += outcome.acknowledged
-            if (outcome.optedOut || outcome.failure != null)
+            if (outcome.permissionDenied || outcome.failure != null)
                 return outcome.copy(acknowledged = total)
         }
         return BatchResult(total)

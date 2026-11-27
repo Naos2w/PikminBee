@@ -7,7 +7,7 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkerParameters
 import androidx.work.WorkManager
 
-/** Durable, opt-in export of locally queued *virtual* step estimates only.
+/** Durable export of locally queued, source-labelled route estimates.
  * WorkManager survives foreground-service shutdown; retries retain stable client IDs.
  */
 class EstimatedStepsSyncWorker(context: Context, params: WorkerParameters) :
@@ -17,7 +17,6 @@ class EstimatedStepsSyncWorker(context: Context, params: WorkerParameters) :
         private const val UNIQUE_NAME = "pikminbee_virtual_estimates_health_connect_v2"
 
         fun enqueue(context: Context) {
-            if (!EstimatedStepLedger.routeSync(context).optIn()) return
             val request = OneTimeWorkRequestBuilder<EstimatedStepsSyncWorker>().build()
             WorkManager.getInstance(context.applicationContext)
                 // KEEP can silently strand a newly saved chunk if an older worker
@@ -32,12 +31,10 @@ class EstimatedStepsSyncWorker(context: Context, params: WorkerParameters) :
 
     override suspend fun doWork(): Result {
         val context = applicationContext
-        val ledger = EstimatedStepLedger.routeSync(context)
-        if (!ledger.optIn()) return Result.success()
         val sync = HealthConnectStepSync.syncPending(context)
         if (sync.remaining == 0) return Result.success()
-        // Missing or revoked consent isn't a transient error; ask the user again in settings.
-        if (!ledger.optIn() || !HealthConnectStepSync.hasWritePermission(context)) return Result.success()
+        // Missing or revoked system permission is not a transient error.
+        if (!HealthConnectStepSync.hasWritePermission(context)) return Result.success()
         return if (runAttemptCount < 4) Result.retry() else Result.failure()
     }
 }
