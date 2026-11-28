@@ -59,6 +59,13 @@ jobs:
           python3 -m unittest discover -s scripts -p 'test_version*.py'
           python3 -m unittest discover -s scripts -p 'test_apk_size*.py'
           python3 scripts/bump_version.py check
+      - name: Verify offline performance analysis
+        run: |
+          python3 -m unittest discover -s scripts -p 'test_cold_start_baseline.py'
+          python3 -m unittest discover -s scripts -p 'test_compare_cold_start_baselines.py'
+          python3 -m unittest discover -s scripts -p 'test_frame_timing_baseline.py'
+          python3 -m unittest discover -s scripts -p 'test_process_resource_baseline.py'
+          python3 -m unittest discover -s scripts -p 'test_lan_network_baseline.py'
       - name: Verify map and shared coordinate formats
         run: node --test scripts/test_map_ui_policy.mjs scripts/test_coordinate_formats.mjs
       - name: Verify source (no APK packaging)
