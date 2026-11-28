@@ -4,6 +4,7 @@ import {spawn} from "node:child_process";
 import {mkdtemp, readFile, rm} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
+import {installPollCapture} from "./web_poll_capture.mjs";
 
 const chrome = process.env.PIKMINBEE_CHROME || "C:/Program Files/Google/Chrome/Application/chrome.exe";
 const port=18766, url="http://127.0.0.1:"+port;
@@ -78,28 +79,47 @@ try{
     assert(Number.isInteger(seconds) && seconds>=10 && seconds<=300,
       "Poll capture duration must be an integer from 10 to 300 seconds");
     await delay(1000); // Allow initial map and pairing requests to settle.
-    const start=await evaluate("(()=>{performance.setResourceTimingBufferSize(1000);performance.clearResourceTimings();return performance.now()})()");
+    const start=await evaluate(`(()=>{performance.setResourceTimingBufferSize(1000);performance.clearResourceTimings();
+      window.__pollCapture=(${installPollCapture.toString()})();return window.__pollCapture.start})()`);
     await delay(seconds*1000);
-    const capture=await evaluate(`(()=>{const end=performance.now();return {
-      durationMs:end-${start},visible:!document.hidden,
+    const capture=await evaluate(`(()=>{const sample=window.__pollCapture.snapshot();window.__pollCapture.restore();delete window.__pollCapture;
+      const end=${start}+sample.durationMs;return {
+      ...sample,visible:!document.hidden,
       entries:performance.getEntriesByType('resource')
         .filter(e=>new URL(e.name).origin===location.origin && new URL(e.name).pathname==='/api/state' && e.startTime>=${start} && e.responseEnd<=end)
         .map(e=>({startMs:e.startTime-${start},durationMs:e.duration,status:e.responseStatus,bodyBytes:e.decodedBodySize,transferBytes:e.transferSize}))
     }})()`);
-    assert(capture.visible,"Capture must end in a visible page");
-    assert(capture.entries.length>0,"No completed state polls captured");
-    assert(capture.entries.every(e=>e.status===200 && e.bodyBytes>0),
-      "Idle synthetic poll must return a nonempty successful response");
     const sorted=capture.entries.map(e=>e.durationMs).sort((a,b)=>a-b);
-    const percentile=p=>sorted[Math.ceil(p*sorted.length)-1];
+    const percentile=p=>sorted.length?sorted[Math.ceil(p*sorted.length)-1]:null;
+    const attempts=capture.attempts;
+    const jsonTimes=attempts.filter(a=>a.jsonOutcome==="ok").map(a=>a.jsonEndMs-a.jsonStartMs).sort((a,b)=>a-b);
+    const count=predicate=>attempts.filter(predicate).length;
+    const attemptSummary={
+      started:attempts.length,http:count(a=>a.fetchOutcome==="http"),
+      httpNon2xx:count(a=>a.fetchOutcome==="http" && (a.status<200 || a.status>=300)),
+      transportErrors:count(a=>a.fetchOutcome==="transport_error"),cancelled:count(a=>a.fetchOutcome==="cancelled"),
+      fetchPending:count(a=>a.fetchOutcome==="pending"),jsonOk:jsonTimes.length,
+      jsonErrors:count(a=>a.jsonOutcome==="error"),jsonPending:count(a=>a.jsonOutcome==="pending"),
+      jsonNotStarted:count(a=>a.jsonOutcome==="not_started"),
+      jsonReadAndParseP50Ms:jsonTimes.length?jsonTimes[Math.ceil(jsonTimes.length*0.5)-1]:null,
+      jsonReadAndParseP95Ms:jsonTimes.length?jsonTimes[Math.ceil(jsonTimes.length*0.95)-1]:null
+    };
     console.log("POLL_BASELINE "+JSON.stringify({
       scenario:"loopback synthetic idle Web, headless Chromium, no phone",
       durationMs:capture.durationMs,polls:capture.entries.length,
       bodyBytes:capture.entries.reduce((n,e)=>n+e.bodyBytes,0),
       transferBytes:capture.entries.reduce((n,e)=>n+e.transferBytes,0),
-      sampleScope:"completed resource timing entries only; not all attempted requests",
+      sampleScope:"resource timing for completed transfers; separate controller fetch attempts and Response.json read+parse timing",
+      attemptSummary,attempts,
       p50Ms:percentile(0.5),p95Ms:percentile(0.95),entries:capture.entries
     }));
+    assert(capture.visible,"Capture must end in a visible page");
+    assert(capture.entries.length>0,"No completed state polls captured");
+    assert(capture.entries.every(e=>e.status===200 && e.bodyBytes>0),
+      "Idle synthetic poll must return a nonempty successful response");
+    assert(attempts.length>=capture.entries.length,"Fetch instrumentation must cover state resource entries");
+    assert.equal(attemptSummary.httpNon2xx+attemptSummary.transportErrors+attemptSummary.cancelled+attemptSummary.jsonErrors,0,
+      "Idle synthetic poll must not encounter HTTP, transport or JSON failures");
   } else {
   await evaluate("document.querySelector('#mode-route').click();true");
   try {
