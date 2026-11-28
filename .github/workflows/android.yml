@@ -59,6 +59,13 @@ jobs:
           python3 -m unittest discover -s scripts -p 'test_version*.py'
           python3 -m unittest discover -s scripts -p 'test_apk_size*.py'
           python3 scripts/bump_version.py check
+      - name: Verify offline performance analysis
+        run: |
+          python3 -m unittest discover -s scripts -p 'test_cold_start_baseline.py'
+          python3 -m unittest discover -s scripts -p 'test_compare_cold_start_baselines.py'
+          python3 -m unittest discover -s scripts -p 'test_frame_timing_baseline.py'
+          python3 -m unittest discover -s scripts -p 'test_process_resource_baseline.py'
+          python3 -m unittest discover -s scripts -p 'test_lan_network_baseline.py'
       - name: Verify map and shared coordinate formats
         run: node --test scripts/test_map_ui_policy.mjs scripts/test_coordinate_formats.mjs
       - name: Verify source (no APK packaging)
@@ -132,6 +139,9 @@ jobs:
           python3 scripts/apk_size_audit.py app/build/outputs/apk/debug/app-debug.apk \
             --expected-abi "$APK_ABI" --source-sha "$GITHUB_SHA" \
             --output app/build/outputs/apk/debug/apk-size-report.json
+      - name: Require R8 mapping for optimized ARM64 UAT
+        if: github.event_name == 'workflow_dispatch' && inputs.package_apk == true && inputs.apk_abi == 'arm64-v8a'
+        run: test -s app/build/outputs/mapping/debug/mapping.txt
       - name: Give verified UAT APK its semantic-version filename
         if: github.event_name == 'workflow_dispatch' && inputs.package_apk == true
         env:
@@ -160,5 +170,13 @@ jobs:
           path: |
             ${{ env.UAT_APK_PATH }}
             app/build/outputs/apk/debug/apk-size-report.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Retain private R8 mapping for ARM64 UAT
+        if: github.event_name == 'workflow_dispatch' && inputs.package_apk == true && inputs.apk_abi == 'arm64-v8a'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.UAT_ARTIFACT_NAME }}-mapping
+          path: app/build/outputs/mapping/debug/mapping.txt
           if-no-files-found: error
           retention-days: 7
