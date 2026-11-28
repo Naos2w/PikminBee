@@ -39,6 +39,14 @@ def apkAbi = providers.gradleProperty('pikminbeeApkAbi')
 if (!(apkAbi in ['universal', 'arm64-v8a', 'armeabi-v7a', 'x86', 'x86_64'])) {
     throw new GradleException('Unsupported pikminbeeApkAbi: ' + apkAbi)
 }
+// Use the measured debuggable R8/resource-shrinking configuration for ARM64 UAT.
+// Ordinary DEV and alternative ABIs retain their existing build configuration.
+def shrinkApk = providers.gradleProperty('pikminbeeShrinkApk')
+    .orElse(isUat && apkAbi == 'arm64-v8a' ? 'true' : 'false').get()
+if (!(shrinkApk in ['true', 'false']) || (shrinkApk == 'true' && apkAbi != 'arm64-v8a')) {
+    throw new GradleException('pikminbeeShrinkApk requires true/false and ARM64 when enabled')
+}
+def optimizeApk = shrinkApk == 'true'
 def uatStoreFile = System.getenv('PIKMINBEE_UAT_KEYSTORE_FILE')
 def uatStorePassword = System.getenv('PIKMINBEE_UAT_SIGN_PASSWORD')
 if (isUat && (!uatStoreFile || !uatStorePassword)) {
@@ -102,6 +110,8 @@ android {
 
     buildTypes {
         debug {
+            minifyEnabled optimizeApk
+            shrinkResources optimizeApk
             if (isUat) {
                 applicationIdSuffix '.uat'
                 signingConfig signingConfigs.uat
