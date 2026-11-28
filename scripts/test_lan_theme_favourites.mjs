@@ -70,8 +70,45 @@ try{
     console.error("Pair UI:",await evaluate("({ready:document.readyState,message:document.querySelector('#pairmessage')?.textContent,buttonDisabled:document.querySelector('#connect')?.disabled})"));
     throw error;
   }
+  // Optional idle-poll baseline. This measures only the paired Web network path,
+  // not map readiness; the default visual smoke checks remain unchanged.
+  // PIKMINBEE_POLL_SAMPLE_SECONDS=300 for a five-minute capture.
+  if (process.env.PIKMINBEE_POLL_SAMPLE_SECONDS !== undefined) {
+    const seconds=Number(process.env.PIKMINBEE_POLL_SAMPLE_SECONDS);
+    assert(Number.isInteger(seconds) && seconds>=10 && seconds<=300,
+      "Poll capture duration must be an integer from 10 to 300 seconds");
+    await delay(1000); // Allow initial map and pairing requests to settle.
+    const start=await evaluate("(()=>{performance.setResourceTimingBufferSize(1000);performance.clearResourceTimings();return performance.now()})()");
+    await delay(seconds*1000);
+    const capture=await evaluate(`(()=>{const end=performance.now();return {
+      durationMs:end-${start},visible:!document.hidden,
+      entries:performance.getEntriesByType('resource')
+        .filter(e=>new URL(e.name).origin===location.origin && new URL(e.name).pathname==='/api/state' && e.startTime>=${start} && e.responseEnd<=end)
+        .map(e=>({startMs:e.startTime-${start},durationMs:e.duration,status:e.responseStatus,bodyBytes:e.decodedBodySize,transferBytes:e.transferSize}))
+    }})()`);
+    assert(capture.visible,"Capture must end in a visible page");
+    assert(capture.entries.length>0,"No completed state polls captured");
+    assert(capture.entries.every(e=>e.status===200 && e.bodyBytes>0),
+      "Idle synthetic poll must return a nonempty successful response");
+    const sorted=capture.entries.map(e=>e.durationMs).sort((a,b)=>a-b);
+    const percentile=p=>sorted[Math.ceil(p*sorted.length)-1];
+    console.log("POLL_BASELINE "+JSON.stringify({
+      scenario:"loopback synthetic idle Web, headless Chromium, no phone",
+      durationMs:capture.durationMs,polls:capture.entries.length,
+      bodyBytes:capture.entries.reduce((n,e)=>n+e.bodyBytes,0),
+      transferBytes:capture.entries.reduce((n,e)=>n+e.transferBytes,0),
+      sampleScope:"completed resource timing entries only; not all attempted requests",
+      p50Ms:percentile(0.5),p95Ms:percentile(0.95),entries:capture.entries
+    }));
+  } else {
   await evaluate("document.querySelector('#mode-route').click();true");
-  await until(()=>evaluate("!!document.querySelector('.ordinal-pin[aria-label=\"路點 2\"]')"),"real MapLibre route marker",20000);
+  try {
+    await until(()=>evaluate("!!document.querySelector('.ordinal-pin[aria-label=\"路點 2\"]')"),"real MapLibre route marker",20000);
+  } catch (error) {
+    // Keep the original visual gate and expose enough synthetic UI state to diagnose it.
+    console.error("Map UI:",await evaluate("({status:document.querySelector('#map-status')?.dataset.state,message:document.querySelector('#map-warning-text')?.textContent,markerCount:document.querySelectorAll('.ordinal-pin').length,canvasCount:document.querySelectorAll('#map canvas').length,paired:document.body.classList.contains('remote-active')})"));
+    throw error;
+  }
   // Actual coordinate input in the packaged UI. Selection is explicit, and no
   // phone or external geocoding endpoint is involved.
   const paste=async text=>{
@@ -429,6 +466,7 @@ try{
   await until(()=>evaluate("!document.body.classList.contains('remote-active') && document.querySelector('#connection').textContent==='配對已失效'"),"expired session fails closed");
   assert.equal(await renewalVisible(),false);
   console.log(JSON.stringify({dark,light,saved,routeLayers,verified:"synthetic browser; no phone or external map tiles"},null,2));
+  }
 }finally{
   socket?.close();
   browser?.kill();preview?.kill();
