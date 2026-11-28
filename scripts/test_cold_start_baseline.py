@@ -1,6 +1,7 @@
 import contextlib
 import io
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -59,6 +60,77 @@ class ColdStartBaselineTest(unittest.TestCase):
             self.assertEqual(report["samples_ms"], [100])
             with contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(main(argv + [str(file), str(file)]), 1)
+
+    def run_captures(self, paths):
+        argv = ["--package", PACKAGE, "--source-sha", "a" * 40,
+                "--variant", "baseline", "--environment", "synthetic",
+                "--abi", "arm64-v8a"]
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = main(argv + [str(path) for path in paths])
+        return code, out.getvalue(), err.getvalue()
+
+    def test_declared_apk_hash_normalised(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "sample.txt"
+            path.write_text(capture(), encoding="utf-8")
+            args = ["--package", PACKAGE, "--source-sha", "a" * 40,
+                    "--variant", "baseline", "--environment", "synthetic",
+                    "--abi", "arm64-v8a", "--apk-sha256", "B" * 64, str(path)]
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(main(args), 0)
+            self.assertEqual(json.loads(out.getvalue())["apk_sha256"], "b" * 64)
+
+    def test_bad_apk_hash_rejected(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as ctx:
+            main(["--package", PACKAGE, "--source-sha", "a" * 40,
+                  "--variant", "baseline", "--environment", "synthetic",
+                  "--abi", "arm64-v8a", "--apk-sha256", "z" * 64, "sample.txt"])
+        self.assertEqual(ctx.exception.code, 2)
+
+    def test_hardlink_cannot_turn_19_launches_into_20(self):
+        with tempfile.TemporaryDirectory() as directory:
+            paths = [Path(directory) / f"sample{i}.txt" for i in range(19)]
+            for path in paths:
+                path.write_text(capture(), encoding="utf-8")
+            alias = Path(directory) / "alias.txt"
+            try:
+                os.link(paths[0], alias)
+            except (OSError, NotImplementedError) as exc:
+                self.skipTest(f"hardlinks unavailable: {exc}")
+            code, out, err = self.run_captures(paths + [alias])
+            self.assertEqual(code, 1)
+            self.assertEqual(out, "")
+            self.assertIn("duplicate capture file", err)
+
+    def test_independent_identical_captures_count_separately(self):
+        with tempfile.TemporaryDirectory() as directory:
+            paths = [Path(directory) / f"sample{i}.txt" for i in range(20)]
+            for path in paths:
+                path.write_text(capture(), encoding="utf-8")
+            code, out, _ = self.run_captures(paths)
+            self.assertEqual(code, 0)
+            report = json.loads(out)
+            self.assertEqual(report["count"], 20)
+            self.assertTrue(report["minimum_20_samples_met"])
+
+    def test_reject_non_regular_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            code, out, err = self.run_captures([Path(directory)])
+            self.assertEqual(code, 1)
+            self.assertEqual(out, "")
+            self.assertIn("not a regular capture file", err)
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "FIFO unavailable")
+    def test_fifo_rejected_without_reading(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fifo = Path(directory) / "capture.pipe"
+            os.mkfifo(fifo)
+            code, out, err = self.run_captures([fifo])
+            self.assertEqual(code, 1)
+            self.assertEqual(out, "")
+            self.assertIn("not a regular capture file", err)
 
 
 if __name__ == "__main__":
