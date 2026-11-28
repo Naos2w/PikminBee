@@ -139,6 +139,9 @@ jobs:
           python3 scripts/apk_size_audit.py app/build/outputs/apk/debug/app-debug.apk \
             --expected-abi "$APK_ABI" --source-sha "$GITHUB_SHA" \
             --output app/build/outputs/apk/debug/apk-size-report.json
+      - name: Require R8 mapping for optimized ARM64 UAT
+        if: github.event_name == 'workflow_dispatch' && inputs.package_apk == true && inputs.apk_abi == 'arm64-v8a'
+        run: test -s app/build/outputs/mapping/debug/mapping.txt
       - name: Give verified UAT APK its semantic-version filename
         if: github.event_name == 'workflow_dispatch' && inputs.package_apk == true
         env:
@@ -167,5 +170,13 @@ jobs:
           path: |
             ${{ env.UAT_APK_PATH }}
             app/build/outputs/apk/debug/apk-size-report.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Retain private R8 mapping for ARM64 UAT
+        if: github.event_name == 'workflow_dispatch' && inputs.package_apk == true && inputs.apk_abi == 'arm64-v8a'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.UAT_ARTIFACT_NAME }}-mapping
+          path: app/build/outputs/mapping/debug/mapping.txt
           if-no-files-found: error
           retention-days: 7
