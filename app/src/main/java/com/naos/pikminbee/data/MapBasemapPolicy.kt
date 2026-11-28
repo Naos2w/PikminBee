@@ -1,5 +1,7 @@
 package com.naos.pikminbee.data
 
+enum class MapProvider { OPEN_FREE_MAP, GOOGLE_MAPS }
+
 /** Keyless, publicly documented OpenFreeMap styles; never use undocumented Google tile URLs. */
 enum class FreeMapStyle(val label: String) {
     BRIGHT("Bright"),

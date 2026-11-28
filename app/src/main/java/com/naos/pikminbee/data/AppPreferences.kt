@@ -16,21 +16,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import kotlinx.coroutines.flow.MutableStateFlow
 
-enum class MapProvider { OPEN_FREE_MAP, GOOGLE_MAPS }
-enum class MapAppearance { SYSTEM, LIGHT, DARK }
-
-/** The OS choice is the default; users can still lock light or dark manually. */
-object MapAppearancePolicy {
-    fun fromStored(value: String?): MapAppearance =
-        MapAppearance.entries.firstOrNull { it.name == value } ?: MapAppearance.SYSTEM
-
-    fun isDark(mode: MapAppearance, systemDark: Boolean): Boolean = when (mode) {
-        MapAppearance.SYSTEM -> systemDark
-        MapAppearance.LIGHT -> false
-        MapAppearance.DARK -> true
-    }
-}
-
 data class RouteDraftSnapshot(
     val stops: List<Coordinate>, val revision: Long,
     val origin: Coordinate? = null, val loop: Boolean = false,
