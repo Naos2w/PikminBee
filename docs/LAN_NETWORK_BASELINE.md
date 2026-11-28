@@ -11,3 +11,15 @@ python scripts/lan_network_baseline.py capture.csv --duration-ms 300000 \
 ```
 
 Hold device/OS, browser, network, workload, foreground state, capture instrumentation, cache, permissions, APK source and ABI constant. Use separate idle and foreground windows of at least five minutes; repeat and record collection conditions. Request rate uses the entire declared window, not the span between requests. Gap quantiles concern observed request start times, not timer configuration; overlapping requests are valid. Latency quantiles are restricted to completed HTTP 2xx responses; failures are reported separately. Byte sums cover known observed body bytes only and are not network bandwidth. An empty capture reports zero observed requests, not proof that networking was idle. Duration and APK metadata are declared, not independently verified; incomplete capture or omitted requests can bias results. JSON contains only aggregate statistics and declared build metadata. No raw rows, request IDs or secrets are emitted. This tool cannot establish physical-device acceptance or runtime performance improvement without actual controlled samples.
+
+## Local Web idle-poll pilot (synthetic)
+
+From the repository root on Windows, using Node 22+ and the existing Chrome installation:
+
+```powershell
+$env:PIKMINBEE_POLL_SAMPLE_SECONDS='300'
+node scripts/test_lan_theme_favourites.mjs
+Remove-Item Env:PIKMINBEE_POLL_SAMPLE_SECONDS
+```
+
+The optional 10–300 second capture runs the packaged Web UI against the loopback-only synthetic preview in a fresh temporary headless browser profile. It does not use an Android device. It reports `POLL_BASELINE` JSON containing completed same-origin `/api/state` Resource Timing entries, relative timing, HTTP status and decoded body/transfer sizes only. P50 and P95 are nearest rank; `transferSize` is the browser's reported transfer size, not physical wire bytes. Requests outside the window, failed attempts without a resource entry and in-flight requests at the end are not counted: this pilot cannot establish the total attempted request count or true success rate. Use the full capture specification above to assess failures, incomplete requests or physical LAN traffic. Record source SHA, browser version and host/test conditions alongside the report. This optional network-only run does not establish map rendering or UI acceptance; run the default visual smoke separately with the environment variable unset.
